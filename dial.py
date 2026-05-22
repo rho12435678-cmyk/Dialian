@@ -8,7 +8,7 @@ from datetime import datetime
 TOKEN = os.getenv("TOKEN")
 
 # 채널 이름 및 관리자 고유 ID 설정
-REVIEW_CHANNEL_NAME = "😄후기"
+REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"  # 손님들도 보는 로그 채널 (텍스트 파일 제외하고 알림만 전송됨)
 ADMIN_USER_ID = 123456789012345678  # 여기에 본인의 디스코드 유저 ID(숫자)를 입력하세요.
 
