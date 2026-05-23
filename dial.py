@@ -10,7 +10,12 @@ TOKEN = os.getenv("TOKEN")
 # 채널 이름 및 관리자 고유 ID 설정
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"  # 손님들도 보는 로그 채널 (텍스트 파일 제외하고 알림만 전송됨)
-ADMIN_USER_ID = 123456789012345678  # 여기에 본인의 디스코드 유저 ID(숫자)를 입력하세요.
+
+# ⭐ [수정] 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트 (쉼표로 구분하여 여러 명 추가 가능)
+DEVELOPER_IDS = [1292859064065458189, 1468584582113919129, 1465051418162626763] 
+
+# (기존 상세 대화록 백업용 대표 관리자 ID - 리스트의 첫 번째 사람으로 자동 지정)
+ADMIN_USER_ID = DEVELOPER_IDS[0] 
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -138,7 +143,7 @@ class TicketCloseView(discord.ui.View):
                         color=discord.Color.blue(),
                         timestamp=datetime.now()
                     )
-                    await log_channel.send(embed=public_embed)  # 파일(file=...)을 넣지 않아 안전합니다.
+                    await log_channel.send(embed=public_embed)
 
                 # 2. [관리자 전용 비밀 로그] 계좌번호 등 민감한 내용이 담긴 텍스트 파일은 오직 관리자 DM으로만 전송
                 try:
@@ -215,6 +220,41 @@ class TicketOpenView(discord.ui.View):
                 color=0x00ff00
             )
             await ticket_channel.send(embed=embed, view=TicketCloseView())
+
+            # 🔔 [새로 추가된 로직] 개발자들에게 티켓 오픈 알림 DM 발송
+            try:
+                # DM에 담을 깔끔한 안내장(임베드) 구성
+                dev_embed = discord.Embed(
+                    title="🔔 [티켓 오픈] 새로운 문의가 접수되었습니다!",
+                    description=f"**서버 이름:** {guild.name}\n**생성된 채널:** {ticket_channel.mention}",
+                    color=0x5865F2,
+                    timestamp=datetime.now()
+                )
+                dev_embed.add_field(name="👤 신청자(손님)", value=f"{user.mention} ({user.name})", inline=True)
+                dev_embed.set_footer(text="빠른 확인 부탁드립니다! 🚀")
+
+                # 서버 초대 링크 자동 생성 (개발자가 DM을 보고 바로 서버/채널로 이동할 수 있도록 버튼 배치)
+                dev_view = discord.ui.View()
+                try:
+                    invite = await ticket_channel.create_invite(max_age=3600, max_uses=1)
+                    dev_view.add_item(discord.ui.Button(label="🔗 생성된 티켓으로 이동", url=invite.url, style=discord.ButtonStyle.link))
+                except:
+                    pass
+
+                # 설정한 개발자 ID 리스트를 돌면서 순차적으로 DM 전송
+                for dev_id in DEVELOPER_IDS:
+                    try:
+                        dev_user = await bot.fetch_user(dev_id)
+                        await dev_user.send(embed=dev_embed, view=dev_view)
+                        print(f"[알림 DM 발송 성공] 개발자 ID: {dev_id}")
+                    except discord.Forbidden:
+                        print(f"[알림 DM 발송 실패] 개발자 ID {dev_id} 님이 DM을 비활성화해두었습니다.")
+                    except Exception as dev_err:
+                        print(f"[알림 DM 에러] 개발자 ID {dev_id} 처리 중 문제 발생: {dev_err}")
+
+            except Exception as total_dm_err:
+                print(f"[개발자 알림 총괄 에러] {total_dm_err}")
+
         except Exception as e:
             print(f"[티켓 열기 에러] {e} - 봇 유지")
 
