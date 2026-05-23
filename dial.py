@@ -7,7 +7,6 @@ from datetime import datetime
 
 TOKEN = os.getenv("TOKEN")
 
-# 채널 이름 및 관리자 고유 ID 설정
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"        # 손님들도 보는 공개 로그 채널
 
@@ -135,6 +134,7 @@ class TicketCloseView(discord.ui.View):
             guild = interaction.guild
             
             if "티켓-" in channel_name:
+                # 상호작용 지연 처리 (3초 제한 연장)
                 await interaction.response.defer()
                 
                 ticket_owner = None
@@ -144,7 +144,8 @@ class TicketCloseView(discord.ui.View):
                 except Exception:
                     ticket_owner = interaction.user
 
-                await channel.send("💾 대화 내용을 안전하게 백업하는 중입니다...")
+                # 🛠️ 수정: channel.send 대신 interaction.followup.send를 사용하여 상호작용 성공을 먼저 보장합니다.
+                await interaction.followup.send("💾 대화 내용을 안전하게 백업하는 중입니다...")
                 
                 # ----- [상세 대화록 텍스트 데이터 생성] -----
                 transcript_text = f"=== {channel_name} 티켓 대화록 ===\n"
@@ -176,3 +177,6 @@ class TicketCloseView(discord.ui.View):
                         timestamp=datetime.now()
                     )
                     await log_channel.send(content=f"🔒 {ticket_owner.mention} 님의 티켓이 닫혔습니다.", embed=public_embed)
+                    
+        except Exception as e:
+            print(f"[티켓 닫기 에러] {e}")
