@@ -157,7 +157,7 @@ class TicketCloseView(discord.ui.View):
                     public_embed = discord.Embed(
                         title="🔒 티켓 종료 알림",
                         description=f"**채널명:** `{channel_name}`\n**티켓 오너:** {ticket_owner.mention}\n**종료자:** {interaction.user.mention}\n\n*이용해 주셔서 감사합니다!*",
-                        color=discord.Color.blue(),
+                        color=discord.Color.red(),
                         timestamp=datetime.now()
                     )
                     await log_channel.send(content=f"🔒 {ticket_owner.mention} 님의 티켓이 닫혔습니다.", embed=public_embed)
@@ -184,7 +184,7 @@ class TicketCloseView(discord.ui.View):
             print(f"[티켓 닫기 에러] {e}")
 
 
-# ==================== [티켓 오픈 버튼 뷰 시스템 추가] ====================
+# ==================== [티켓 오픈 버튼 뷰 시스템] ====================
 
 class TicketOpenView(discord.ui.View):
     def __init__(self):
@@ -225,8 +225,42 @@ class TicketOpenView(discord.ui.View):
         await ticket_channel.send(embed=welcome_embed, view=TicketCloseView())
         await interaction.followup.send(f"✅ 티켓이 성공적으로 생성되었습니다: {ticket_channel.mention}", ephemeral=True)
 
+        # ------------------------------------------------------------------
+        # 🆕 [추가 기능 1] 구매로그 채널 알림
+        # ------------------------------------------------------------------
+        log_channel = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
+        if log_channel:
+            open_log_embed = discord.Embed(
+                title="📩 새로운 티켓 생성",
+                description=f"**채널:** {ticket_channel.mention} (`{ticket_channel_name}`)\n**생성자:** {user.mention} ({user.name})",
+                color=discord.Color.green(),
+                timestamp=datetime.now()
+            )
+            await log_channel.send(embed=open_log_embed)
 
-# 🛠️ [오타 수정 완료] !티켓생성 패널 명령어
+        # ------------------------------------------------------------------
+        # 🆕 [추가 기능 2] 개발자 리스트 자동 DM 전송
+        # ------------------------------------------------------------------
+        dev_dm_embed = discord.Embed(
+            title="🔔 [관리자 알림] 신규 티켓 생성",
+            description=f"**서버명:** `{guild.name}`\n**생성자:** {user.mention} ({user.name})\n**바로가기:** {ticket_channel.mention}",
+            color=0x5865F2,
+            timestamp=datetime.now()
+        )
+        dev_dm_embed.set_footer(text="빠른 확인 및 원활한 상담 부탁드립니다 🙇‍♂️")
+
+        for dev_id in DEVELOPER_IDS:
+            try:
+                # 봇이 캐싱하고 있는 유저 정보나 서버 멤버를 대조하여 오브젝트 획득
+                developer = guild.get_member(dev_id) or await bot.fetch_user(dev_id)
+                if developer and not developer.bot:
+                    await developer.send(embed=dev_dm_embed)
+            except Exception as dm_err:
+                # 개발자가 봇을 차단했거나 DM 불가 상태일 때 오류가 전체 로직을 끊지 않도록 예외 처리
+                print(f"[개발자 DM 알림 실패 - ID: {dev_id}] {dm_err}")
+
+
+# !티켓생성 패널 명령어
 @bot.command(name="티켓생성")
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
@@ -247,7 +281,6 @@ async def on_ready():
 
 @bot.event
 async def setup_hook():
-    # TicketOpenView()도 영속성에 추가해주어야 봇 재부팅 후에도 패널 버튼이 먹통 안 됩니다.
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
@@ -256,4 +289,4 @@ async def setup_hook():
 if TOKEN:
     bot.run(TOKEN)
 else:
-    print("❌ 에러: 환경 변수에서 'TOKEN'을 찾을 수 없습니다. Railway의 Variables 설정을 확인하세요.")
+    print("❌ 에러: 환경 변수에서 'TOKEN'을 찾을 수 없습니다. Railway의 Variables 설정을 확인하세요.")                  
