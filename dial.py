@@ -10,13 +10,9 @@ TOKEN = os.getenv("TOKEN")
 # 채널 이름 및 관리자 고유 ID 설정
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"        # 손님들도 보는 공개 로그 채널
-ADMIN_LOG_CHANNEL_NAME = "어드민로그"  # 관리자용 상세 대화록 이중 백업 채널
 
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 DEVELOPER_IDS = [1292859064065458189, 1468584582113919129, 1465051418162626763, 859756809865789451] 
-
-# 기존 상세 대화록 백업용 대표 관리자 ID
-ADMIN_USER_ID = DEVELOPER_IDS[0] 
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
