@@ -21,6 +21,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 class StarRatingView(discord.ui.View):
     def __init__(self):
+        # timeout=None이 선언되어 있어야 봇이 재부팅되어도 과거의 버튼이 작동합니다.
         super().__init__(timeout=None)
 
     @discord.ui.button(label="⭐ 1점", style=discord.ButtonStyle.secondary, custom_id="star_1")
@@ -112,6 +113,7 @@ class StarRatingView(discord.ui.View):
 
 class TicketCloseView(discord.ui.View):
     def __init__(self):
+        # 과거에 생성된 모든 티켓 창의 닫기 버튼도 수용하도록 고정 선언
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🔒 티켓 닫기", style=discord.ButtonStyle.danger, custom_id="close_ticket")
@@ -121,14 +123,18 @@ class TicketCloseView(discord.ui.View):
             channel_name = channel.name
             guild = interaction.guild
             
-            if "티켓-" in channel_name:
+            # [보완] 과거 채널이든 새 채널이든 '티켓-'이 포함된 이름이면 무조건 추적하도록 예외 범위 확장
+            if "티켓" in channel_name:
+                # 디스코드에 봇이 생각 중임을 먼저 알림 (인터랙션 실패 방지 핵심)
                 await interaction.response.defer()
                 
                 ticket_owner = None
                 try:
+                    # 채널 이름 뒤편(유저ID)을 추출하여 티켓 오너 확인
                     owner_id = int(channel_name.split("-")[-1])
                     ticket_owner = guild.get_member(owner_id) or await guild.fetch_member(owner_id)
                 except Exception:
+                    # 만약 채널 이름 형식이 바뀌었더라도 버튼을 누른 대상을 오너로 임시 지정하여 튕김 방지
                     ticket_owner = interaction.user
 
                 await interaction.followup.send("💾 대화 내용을 안전하게 백업하는 중입니다...")
@@ -161,19 +167,41 @@ class TicketCloseView(discord.ui.View):
                         timestamp=datetime.now()
                     )
                     await log_channel.send(content=f"🔒 {ticket_owner.mention} 님의 티켓이 닫혔습니다.", embed=public_embed)
+                    # 대화 록 텍스트 파일을 구매로그 채널에 업로드
+                    await log_channel.send(file=transcript_file_ch)
+
+                # [보완] 대화록 백업 후 유저에게 DM으로 별점 평가 링크와 함께 대화 백업본 전송
+                try:
+                    dm_embed = discord.Embed(
+                        title="💌 서비스를 이용해 주셔서 감사합니다!",
+                        description="진행하시던 커미션 상담이 완료되어 티켓이 종료되었습니다.\n아래 버튼을 통해 **만족도 별점**을 남겨주시면 큰 힘이 됩니다!",
+                        color=0x5865F2
+                    )
+                    await ticket_owner.send(embed=dm_embed, view=StarRatingView())
+                    await ticket_owner.send(file=transcript_file_dm)
+                except Exception as dm_e:
+                    print(f"[DM 전송 실패 - 유저가 DM을 차단함] {dm_e}")
+
+                # [완성] 인터랙션 에러를 막기 위한 최종 채널 폭파 안내 및 채널 삭제
+                await interaction.followup.send("⚠️ 백업 완료! 이 채널은 5초 후에 완전히 사라집니다.")
+                await asyncio.sleep(5)
+                await channel.delete()
+            else:
+                # 티켓 채널이 아닌 곳에서 눌렸을 때의 튕김 방지 예외 처리
+                await interaction.response.send_message("❌ 이 채널은 올바른 티켓 채널 형식이 아닙니다.", ephemeral=True)
                     
         except Exception as e:
             print(f"[티켓 닫기 에러] {e}")
 
-# ==================== [봇 초기화 및 구동 시스템 추가] ====================
+
+# ==================== [봇 초기화 및 구동 시스템] ====================
 
 @bot.event
 async def on_ready():
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
     print("--------------------------------------------------")
 
-# 봇이 최초 시작될 때 버튼 컴포넌트(View)를 디스코드에 상시 대기 상태로 등록합니다.
-# 이 처리를 해두어야 봇이 재부팅되어도 기존에 떠 있던 버튼들이 정상 작동합니다.
+# [핵심 보완] 봇이 언제 켜지든, 과거에 생성되었던 모든 버튼들의 custom_id를 추적하도록 매핑합니다.
 @bot.event
 async def setup_hook():
     bot.add_view(StarRatingView())
