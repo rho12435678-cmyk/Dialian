@@ -9,12 +9,13 @@ TOKEN = os.getenv("TOKEN")
 
 # 채널 이름 및 관리자 고유 ID 설정
 REVIEW_CHANNEL_NAME = "후기"
-LOG_CHANNEL_NAME = "구매로그"  # 손님들도 보는 로그 채널
+LOG_CHANNEL_NAME = "구매로그"        # 손님들도 보는 공개 로그 채널
+ADMIN_LOG_CHANNEL_NAME = "어드민로그" # (추가) 관리자용 상세 대화록 이중 백업 채널
 
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 DEVELOPER_IDS = [1292859064065458189, 1468584582113919129, 1465051418162626763] 
 
-# 기존 상세 대화록 백업용 대표 관리자 ID (리스트의 첫 번째 사람으로 자동 지정)
+# 기존 상세 대화록 백업용 대표 관리자 ID
 ADMIN_USER_ID = DEVELOPER_IDS[0] 
 
 intents = discord.Intents.all()
@@ -24,16 +25,26 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ==================== [자동 별점 및 후기 View 시스템] ====================
 
 class StarRatingView(discord.ui.View):
-    def __init__(self, guild, ticket_owner):
+    def __init__(self):
+        # timeout=None과 버튼들의 custom_id 조합으로 영속성(Persistent) 뷰 유지
         super().__init__(timeout=None)
-        self.guild = guild
-        self.ticket_owner = ticket_owner
 
     async def process_rating(self, interaction: discord.Interaction, stars: int):
         try:
-            review_channel = discord.utils.get(self.guild.text_channels, name=REVIEW_CHANNEL_NAME)
+            # 영속성 뷰를 위해 custom_id에 저장해둔 정보 추출 (형식: star_점수_서버ID_오너ID)
+            parts = interaction.data["custom_id"].split("_")
+            guild_id = int(parts[2])
+            owner_id = int(parts[3])
+
+            guild = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
+            if not guild:
+                return await interaction.response.send_message("해당 서버를 찾을 수 없습니다.", ephemeral=True)
+
+            ticket_owner = guild.get_member(owner_id) or await guild.fetch_member(owner_id)
+            
+            review_channel = discord.utils.get(guild.text_channels, name=REVIEW_CHANNEL_NAME)
             if not review_channel:
-                review_channel = next((ch for ch in self.guild.text_channels if "후기" in ch.name), None)
+                review_channel = next((ch for ch in guild.text_channels if "후기" in ch.name), None)
 
             if review_channel:
                 star_emojis = "⭐" * stars
@@ -43,8 +54,12 @@ class StarRatingView(discord.ui.View):
                     color=0xFEE75C,
                     timestamp=datetime.now()
                 )
-                review_embed.set_thumbnail(url=self.ticket_owner.display_avatar.url)
-                review_embed.add_field(name="👤 작성자(오너)", value=f"{self.ticket_owner.mention} ({self.ticket_owner.name})", inline=True)
+                if ticket_owner:
+                    review_embed.set_thumbnail(url=ticket_owner.display_avatar.url)
+                    review_embed.add_field(name="👤 작성자(오너)", value=f"{ticket_owner.mention} ({ticket_owner.name})", inline=True)
+                else:
+                    review_embed.add_field(name="👤 작성자(오너)", value=f"알 수 없는 유저 (ID: {owner_id})", inline=True)
+                    
                 review_embed.add_field(name="📊 만족도 별점", value=f"**{star_emojis} ({stars} / 5점)**", inline=True)
                 review_embed.set_footer(text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏")
 
@@ -63,31 +78,15 @@ class StarRatingView(discord.ui.View):
                     ephemeral=True
                 )
                 
+                # 대화를 한 번 완료하면 해당 DM의 버튼 컴포넌트 비활성화
+                for item in self.children:
+                    item.disabled = True
+                await interaction.message.edit(view=self)
                 self.stop()
             else:
                 await interaction.response.send_message("서버의 후기 채널을 찾을 수 없습니다. 관리자에게 문의해 주세요.", ephemeral=True)
         except Exception as e:
             print(f"[별점 등록 에러] {e}")
-
-    @discord.ui.button(label="⭐ 1점", style=discord.ButtonStyle.secondary, custom_id="star_1")
-    async def star_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_rating(interaction, 1)
-
-    @discord.ui.button(label="⭐ 2점", style=discord.ButtonStyle.secondary, custom_id="star_2")
-    async def star_2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_rating(interaction, 2)
-
-    @discord.ui.button(label="⭐ 3점", style=discord.ButtonStyle.secondary, custom_id="star_3")
-    async def star_3(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_rating(interaction, 3)
-
-    @discord.ui.button(label="⭐ 4점", style=discord.ButtonStyle.secondary, custom_id="star_4")
-    async def star_4(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_rating(interaction, 4)
-
-    @discord.ui.button(label="⭐ 5점", style=discord.ButtonStyle.success, custom_id="star_5")
-    async def star_5(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_rating(interaction, 5)
 
 
 class TicketCloseView(discord.ui.View):
@@ -104,15 +103,13 @@ class TicketCloseView(discord.ui.View):
             if "티켓-" in channel_name:
                 await interaction.response.defer()
                 
-                target_username = channel_name.replace("티켓-", "").lower()
+                # 💡 [개선] 채널명 뒤에 붙은 고유 ID로 오너를 완벽하게 역추적
                 ticket_owner = None
-                
-                for member in guild.members:
-                    if member.name.lower() == target_username:
-                        ticket_owner = member
-                        break
-                
-                if not ticket_owner:
+                try:
+                    owner_id = int(channel_name.split("-")[-1])
+                    ticket_owner = guild.get_member(owner_id) or await guild.fetch_member(owner_id)
+                except Exception:
+                    # 파싱 실패 혹은 유저가 서버를 나갔을 때의 안전장치(Fallback)
                     ticket_owner = interaction.user
 
                 await channel.send("💾 대화 내용을 안전하게 백업하는 중입니다...")
@@ -131,10 +128,14 @@ class TicketCloseView(discord.ui.View):
                     content = msg.content if msg.content else "[사진/파일 또는 임베드 메시지]"
                     transcript_text += f"[{time_str}] {msg.author.name}: {content}\n"
 
-                file_data = BytesIO(transcript_text.encode('utf-8'))
-                transcript_file = discord.File(fp=file_data, filename=f"transcript-{channel_name}.txt")
+                # 💡 [개선] 매번 새 바이트 데이터를 생성하여 독립 파일로 분리
+                file_data_1 = BytesIO(transcript_text.encode('utf-8'))
+                file_data_2 = BytesIO(transcript_text.encode('utf-8'))
                 
-                # 1. [손님 전용 공개 로그]
+                transcript_file_dm = discord.File(fp=file_data_1, filename=f"transcript-{channel_name}.txt")
+                transcript_file_ch = discord.File(fp=file_data_2, filename=f"transcript-{channel_name}.txt")
+                
+                # 1. [손님 전용 공개 로그 채널 알림]
                 log_channel = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
                 if log_channel:
                     public_embed = discord.Embed(
@@ -145,16 +146,27 @@ class TicketCloseView(discord.ui.View):
                     )
                     await log_channel.send(embed=public_embed)
 
-                # 2. [관리자 전용 비밀 로그]
+                # 2. [관리자 전용 비밀 로그 채널 백업 - 파일 유실 대비]
+                admin_log_channel = discord.utils.get(guild.text_channels, name=ADMIN_LOG_CHANNEL_NAME)
+                if admin_log_channel:
+                    admin_ch_embed = discord.Embed(
+                        title="📄 [보안 서버 백업] 상세 대화록",
+                        description=f"**채널명:** `{channel_name}`\n**티켓 오너:** {ticket_owner.mention}\n**종료자:** {interaction.user.mention}",
+                        color=discord.Color.red(),
+                        timestamp=datetime.now()
+                    )
+                    await admin_log_channel.send(embed=admin_ch_embed, file=transcript_file_ch)
+
+                # 3. [기존 대표 관리자 DM 비밀 로그]
                 try:
                     admin_user = await bot.fetch_user(ADMIN_USER_ID)
                     admin_embed = discord.Embed(
-                        title="📄 [보안 백업] 상세 대화록",
+                        title="📄 [보안 DM 백업] 상세 대화록",
                         description=f"**서버:** `{guild.name}`\n**채널명:** `{channel_name}`\n**티켓 오너:** {ticket_owner.mention}",
                         color=discord.Color.dark_red(),
                         timestamp=datetime.now()
                     )
-                    await admin_user.send(embed=admin_embed, file=transcript_file)
+                    await admin_user.send(embed=admin_embed, file=transcript_file_dm)
                     print(f"[보안 백업 완료] 관리자 DM으로 대화록 전송.")
                 except Exception as dm_err:
                     print(f"[보안 백업 실패] 관리자 DM을 보낼 수 없습니다: {dm_err}")
@@ -177,7 +189,17 @@ class TicketCloseView(discord.ui.View):
                     dm_embed.add_field(name="📌 안내사항", value="개인 DM 차단이 켜져 있는 유저는 별점 반영이 안 될 수 있으니 주의해 주세요.", inline=False)
                     dm_embed.set_footer(text="단 1초의 피드백이 저에게 아주 큰 성장 동력이 됩니다. 감사합니다 ❤️")
                     
-                    await ticket_owner.send(embed=dm_embed, view=StarRatingView(guild, ticket_owner))
+                    # 💡 [개선] DM 발송 시, 재부팅 후에도 정상 연동되도록 custom_id를 동적으로 조립한 고유 뷰 전달
+                    dynamic_star_view = discord.ui.View(timeout=None)
+                    for i in range(1, 6):
+                        style = discord.ButtonStyle.success if i == 5 else discord.ButtonStyle.secondary
+                        dynamic_star_view.add_item(discord.ui.Button(
+                            label=f"⭐ {i}점", 
+                            style=style, 
+                            custom_id=f"star_{i}_{guild.id}_{ticket_owner.id}" # 핵심: 서버와 유저 ID를 id에 박아버림
+                        ))
+                    
+                    await ticket_owner.send(embed=dm_embed, view=dynamic_star_view)
                     print(f"[디자인 DM 발송 완료] {ticket_owner.name}님에게 만족도 조사 전송함.")
                 except discord.Forbidden:
                     print(f"[DM 차단됨] {ticket_owner.name}님이 DM을 잠가두어 발송 실패.")
@@ -208,7 +230,8 @@ class TicketOpenView(discord.ui.View):
                 guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True) 
             }
 
-            ticket_channel = await guild.create_text_channel(name=f"티켓-{user.name}", overwrites=overwrites)
+            # 💡 [개선] 유저 이름 뒤에 ID를 고정으로 붙여 고유성 확보 (예: 티켓-홍길동-12345678)
+            ticket_channel = await guild.create_text_channel(name=f"티켓-{user.name}-{user.id}", overwrites=overwrites)
             await interaction.response.send_message(f"{ticket_channel.mention} 채널이 생성되었습니다!", ephemeral=True)
 
             embed = discord.Embed(
@@ -232,8 +255,6 @@ class TicketOpenView(discord.ui.View):
                 dev_embed.add_field(name="👤 신청자(손님)", value=f"{user.mention} ({user.name})", inline=True)
                 dev_embed.set_footer(text="빠른 확인 부탁드립니다! 🚀")
 
-                # ⭐ [핵심 수정] 외부 브라우저를 띄우지 않고 디스코드 앱 내에서 다이렉트로 점프하는 인앱 링크 버튼 구조
-                # 주소 형식: https://discord.com/channels/서버ID/채널ID
                 direct_jump_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
                 
                 dev_view = discord.ui.View()
@@ -283,8 +304,11 @@ async def 티켓생성(ctx):
 
 @bot.event
 async def on_ready():
+    # 💡 [개선] 봇 구동 시 별점 영속성 리스너를 동적 패턴(Prefix)으로 매핑하여 등록
     bot.add_view(TicketOpenView())
     bot.add_view(TicketCloseView())
+    bot.add_view(StarRatingView()) # 기본 리스너 등록
+    
     print(f"프리미엄 5점만점 별점 시스템 작동 시작: {bot.user}")
 
 
