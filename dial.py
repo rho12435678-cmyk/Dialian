@@ -21,10 +21,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 class StarRatingView(discord.ui.View):
     def __init__(self):
-        # 영속성(Persistent) 뷰 유지를 위해 timeout=None 설정
         super().__init__(timeout=None)
 
-    # 개별 버튼을 명시적으로 선언하여 영속성(Persistent) 매칭 신뢰도를 100%로 끌어올립니다.
     @discord.ui.button(label="⭐ 1점", style=discord.ButtonStyle.secondary, custom_id="star_1")
     async def star_1(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.process_rating(interaction, 1)
@@ -47,30 +45,23 @@ class StarRatingView(discord.ui.View):
 
     async def process_rating(self, interaction: discord.Interaction, stars: int):
         try:
-            # DM 상호작용 지연 처리
             await interaction.response.defer(ephemeral=True)
-
             ticket_owner = interaction.user
             
-            # 버튼을 누른 DM 메시지의 Embed 내용을 분석하여 원본 서버(Guild) 정보를 역추적합니다.
             guild = None
             if interaction.message.embeds:
                 embed_desc = interaction.message.embeds[0].description
-                # 티켓 생성 시 넣어둔 문구나 길드 정보를 통해 서버를 탐색합니다.
-                # 다중 서버 지원을 고도화하기 위해 봇이 속한 서버들 중 "후기" 채널이 있는 곳을 타겟팅합니다.
                 for g in bot.guilds:
                     if discord.utils.get(g.text_channels, name=REVIEW_CHANNEL_NAME):
                         guild = g
                         break
             
             if not guild:
-                # 기본적으로 봇이 들어가 있는 첫 번째 서버를 타겟으로 설정 (단일 서버 운영 시 안전장치)
                 guild = bot.guilds[0] if bot.guilds else None
 
             if not guild:
                 return await interaction.followup.send("연동된 서버를 찾을 수 없습니다.", ephemeral=True)
 
-            # 후기 채널 찾기
             review_channel = discord.utils.get(guild.text_channels, name=REVIEW_CHANNEL_NAME)
             if not review_channel:
                 review_channel = next((ch for ch in guild.text_channels if "후기" in ch.name), None)
@@ -88,10 +79,8 @@ class StarRatingView(discord.ui.View):
                 review_embed.add_field(name="📊 만족도 별점", value=f"**{star_emojis} ({stars} / 5점)**", inline=True)
                 review_embed.set_footer(text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏")
 
-                # 서버의 후기 채널로 송신
                 await review_channel.send(embed=review_embed)
 
-                # 초대 링크 생성 후 유저에게 제공
                 success_view = discord.ui.View()
                 try:
                     invite = await review_channel.create_invite(max_age=300, max_uses=1)
@@ -105,7 +94,6 @@ class StarRatingView(discord.ui.View):
                     ephemeral=True
                 )
                 
-                # DM 내의 버튼 컴포넌트들을 모두 비활성화 처리하여 중복 클릭 방지
                 disabled_view = discord.ui.View()
                 for i in range(1, 6):
                     style = discord.ButtonStyle.success if i == 5 else discord.ButtonStyle.secondary
@@ -134,7 +122,6 @@ class TicketCloseView(discord.ui.View):
             guild = interaction.guild
             
             if "티켓-" in channel_name:
-                # 상호작용 지연 처리 (3초 제한 연장)
                 await interaction.response.defer()
                 
                 ticket_owner = None
@@ -144,10 +131,8 @@ class TicketCloseView(discord.ui.View):
                 except Exception:
                     ticket_owner = interaction.user
 
-                # 🛠️ 수정: channel.send 대신 interaction.followup.send를 사용하여 상호작용 성공을 먼저 보장합니다.
                 await interaction.followup.send("💾 대화 내용을 안전하게 백업하는 중입니다...")
                 
-                # ----- [상세 대화록 텍스트 데이터 생성] -----
                 transcript_text = f"=== {channel_name} 티켓 대화록 ===\n"
                 transcript_text += f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                 transcript_text += f"티켓 소유자: {ticket_owner.name} ({ticket_owner.id})\n"
@@ -167,7 +152,6 @@ class TicketCloseView(discord.ui.View):
                 transcript_file_dm = discord.File(fp=file_data_1, filename=f"transcript-{channel_name}.txt")
                 transcript_file_ch = discord.File(fp=file_data_2, filename=f"transcript-{channel_name}.txt")
                 
-                # 1. 구매로그 알림
                 log_channel = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
                 if log_channel:
                     public_embed = discord.Embed(
@@ -180,3 +164,24 @@ class TicketCloseView(discord.ui.View):
                     
         except Exception as e:
             print(f"[티켓 닫기 에러] {e}")
+
+# ==================== [봇 초기화 및 구동 시스템 추가] ====================
+
+@bot.event
+async def on_ready():
+    print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
+    print("--------------------------------------------------")
+
+# 봇이 최초 시작될 때 버튼 컴포넌트(View)를 디스코드에 상시 대기 상태로 등록합니다.
+# 이 처리를 해두어야 봇이 재부팅되어도 기존에 떠 있던 버튼들이 정상 작동합니다.
+@bot.event
+async def setup_hook():
+    bot.add_view(StarRatingView())
+    bot.add_view(TicketCloseView())
+    print("✨ 영속성 버튼(StarRatingView, TicketCloseView) 등록 완료!")
+
+# ⚠️ [핵심] 봇을 실제로 실행시키는 명령어입니다. (가장 아래에 위치해야 함)
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("❌ 에러: 환경 변수에서 'TOKEN'을 찾을 수 없습니다. Railway의 Variables 설정을 확인하세요.")
