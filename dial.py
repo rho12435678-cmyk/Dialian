@@ -119,15 +119,16 @@ class TicketCloseView(discord.ui.View):
     @discord.ui.button(label="🔒 티켓 닫기", style=discord.ButtonStyle.danger, custom_id="close_ticket")
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            # ⚠️ [핵심 수정] 버튼을 누르자마자 그 즉시 디스코드 서버에 대기 신호를 보냅니다.
+            # 어떤 조건문이나 변수 할당보다 먼저 실행되어야 3초 제한 시간에 걸리지 않고 Failed가 뜨지 않습니다.
+            await interaction.response.defer()
+
             channel = interaction.channel
             channel_name = channel.name
             guild = interaction.guild
             
-            # [보완] 과거 채널이든 새 채널이든 '티켓-'이 포함된 이름이면 무조건 추적하도록 예외 범위 확장
+            # 과거 채널이든 새 채널이든 '티켓-'이 포함된 이름이면 무조건 추적하도록 예외 범위 확장
             if "티켓" in channel_name:
-                # 디스코드에 봇이 생각 중임을 먼저 알림 (인터랙션 실패 방지 핵심)
-                await interaction.response.defer()
-                
                 ticket_owner = None
                 try:
                     # 채널 이름 뒤편(유저ID)을 추출하여 티켓 오너 확인
@@ -170,7 +171,7 @@ class TicketCloseView(discord.ui.View):
                     # 대화 록 텍스트 파일을 구매로그 채널에 업로드
                     await log_channel.send(file=transcript_file_ch)
 
-                # [보완] 대화록 백업 후 유저에게 DM으로 별점 평가 링크와 함께 대화 백업본 전송
+                # 대화록 백업 후 유저에게 DM으로 별점 평가 링크와 함께 대화 백업본 전송
                 try:
                     dm_embed = discord.Embed(
                         title="💌 서비스를 이용해 주셔서 감사합니다!",
@@ -182,13 +183,13 @@ class TicketCloseView(discord.ui.View):
                 except Exception as dm_e:
                     print(f"[DM 전송 실패 - 유저가 DM을 차단함] {dm_e}")
 
-                # [완성] 인터랙션 에러를 막기 위한 최종 채널 폭파 안내 및 채널 삭제
+                # 인터랙션 에러를 막기 위한 최종 채널 폭파 안내 및 채널 삭제
                 await interaction.followup.send("⚠️ 백업 완료! 이 채널은 5초 후에 완전히 사라집니다.")
                 await asyncio.sleep(5)
                 await channel.delete()
             else:
-                # 티켓 채널이 아닌 곳에서 눌렸을 때의 튕김 방지 예외 처리
-                await interaction.response.send_message("❌ 이 채널은 올바른 티켓 채널 형식이 아닙니다.", ephemeral=True)
+                # 티켓 채널이 아닌 곳에서 눌렸을 때의 튕김 방지 예외 처리 (이미 defer 되었으므로 followup으로 전송)
+                await interaction.followup.send("❌ 이 채널은 올바른 티켓 채널 형식이 아닙니다.", ephemeral=True)
                     
         except Exception as e:
             print(f"[티켓 닫기 에러] {e}")
@@ -201,7 +202,7 @@ async def on_ready():
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
     print("--------------------------------------------------")
 
-# [핵심 보완] 봇이 언제 켜지든, 과거에 생성되었던 모든 버튼들의 custom_id를 추적하도록 매핑합니다.
+# 봇이 언제 켜지든, 과거에 생성되었던 모든 버튼들의 custom_id를 추적하도록 매핑합니다.
 @bot.event
 async def setup_hook():
     bot.add_view(StarRatingView())
