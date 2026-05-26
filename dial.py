@@ -11,6 +11,9 @@ TOKEN = os.getenv("TOKEN")
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
 
+# 자동 지급할 구매자 역할 ID
+BUYER_ROLE_ID = 1505076370332586155
+
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 DEVELOPER_IDS = [
     1292859064065458189,
