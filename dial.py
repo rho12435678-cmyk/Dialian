@@ -198,50 +198,50 @@ class TicketCloseView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
- @discord.ui.button(
-    label="🔒 티켓 닫기",
-    style=discord.ButtonStyle.danger,
-    custom_id="close_ticket"
-)
-async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(
+        label="🔒 티켓 닫기",
+        style=discord.ButtonStyle.danger,
+        custom_id="close_ticket"
+    )
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-    try:
+        try:
 
-        # 봇 차단
-        if interaction.user.bot:
-            return
+            # 봇 차단
+            if interaction.user.bot:
+                return
 
-        # 개발자만 종료 가능
-        if interaction.user.id not in DEVELOPER_IDS:
-            return await interaction.response.send_message(
-                "❌ 관리자만 티켓을 종료할 수 있습니다.",
-                ephemeral=True
-            )
-
-        await interaction.response.defer()
-
-        channel = interaction.channel
-        channel_name = channel.name
-        guild = interaction.guild
-
-        if "티켓" in channel_name:
-
-            ticket_owner = None
-
-            try:
-                owner_id = int(channel_name.split("-")[-1])
-
-                ticket_owner = (
-                    guild.get_member(owner_id)
-                    or await guild.fetch_member(owner_id)
+            # 개발자만 티켓 종료 가능
+            if interaction.user.id not in DEVELOPER_IDS:
+                return await interaction.response.send_message(
+                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True
                 )
 
-            except Exception:
-                ticket_owner = interaction.user
+            await interaction.response.defer()
 
-            await interaction.followup.send(
-                "💾 안전하게 구매로그를 정리하는 중입니다..."
-            )
+            channel = interaction.channel
+            channel_name = channel.name
+            guild = interaction.guild
+
+            if "티켓" in channel_name:
+
+                ticket_owner = None
+
+                try:
+                    owner_id = int(channel_name.split("-")[-1])
+
+                    ticket_owner = (
+                        guild.get_member(owner_id)
+                        or await guild.fetch_member(owner_id)
+                    )
+
+                except Exception:
+                    ticket_owner = interaction.user
+
+                await interaction.followup.send(
+                    "💾 안전하게 구매로그를 정리하는 중입니다..."
+                )
 
                 # ==============================
                 # 🔒 공개용 안전 구매로그 생성
@@ -257,6 +257,7 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                     limit=100,
                     oldest_first=False
                 ):
+
                     if msg.author.bot:
                         continue
 
@@ -267,6 +268,7 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                         attachment_count += len(msg.attachments)
 
                     if len(recent_messages) < 3:
+
                         clean_content = sanitize_text(msg.content)
 
                         if not clean_content.strip():
@@ -338,6 +340,7 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                     )
 
                     if recent_messages:
+
                         safe_log_embed.add_field(
                             name="📝 최근 대화 미리보기",
                             value="\n".join(recent_messages),
@@ -358,6 +361,7 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                 # ==============================
 
                 try:
+
                     buyer_role = guild.get_role(BUYER_ROLE_ID)
 
                     if buyer_role and ticket_owner:
@@ -370,6 +374,7 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                             )
 
                             try:
+
                                 success_role_embed = discord.Embed(
                                     title="🎉 구매자 역할 지급 완료",
                                     description=(
@@ -389,12 +394,12 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                 except Exception as role_err:
                     print(f"[구매자 역할 지급 실패] {role_err}")
 
-                
                 # ==============================
                 # 유저 DM
                 # ==============================
 
                 try:
+
                     dm_embed = discord.Embed(
                         title="💌 서비스를 이용해 주셔서 감사합니다!",
                         description=(
@@ -420,6 +425,7 @@ async def close_button(self, interaction: discord.Interaction, button: discord.u
                 await channel.delete()
 
             else:
+
                 await interaction.followup.send(
                     "❌ 올바른 티켓 채널이 아닙니다.",
                     ephemeral=True
