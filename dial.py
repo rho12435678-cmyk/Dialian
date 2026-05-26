@@ -198,44 +198,50 @@ class TicketCloseView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="🔒 티켓 닫기",
-        style=discord.ButtonStyle.danger,
-        custom_id="close_ticket"
-    )
-    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+ @discord.ui.button(
+    label="🔒 티켓 닫기",
+    style=discord.ButtonStyle.danger,
+    custom_id="close_ticket"
+)
+async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
     try:
 
-        # 개발자만 티켓 종료 가능
+        # 봇 차단
+        if interaction.user.bot:
+            return
+
+        # 개발자만 종료 가능
         if interaction.user.id not in DEVELOPER_IDS:
             return await interaction.response.send_message(
                 "❌ 관리자만 티켓을 종료할 수 있습니다.",
                 ephemeral=True
             )
+
         await interaction.response.defer()
 
         channel = interaction.channel
-        interaction.channel
-            channel_name = channel.name
-            guild = interaction.guild
+        channel_name = channel.name
+        guild = interaction.guild
 
-            if "티켓" in channel_name:
+        if "티켓" in channel_name:
 
-                ticket_owner = None
+            ticket_owner = None
 
-                try:
-                    owner_id = int(channel_name.split("-")[-1])
-                    ticket_owner = (
-                        guild.get_member(owner_id)
-                        or await guild.fetch_member(owner_id)
-                    )
-                except Exception:
-                    ticket_owner = interaction.user
+            try:
+                owner_id = int(channel_name.split("-")[-1])
 
-                await interaction.followup.send(
-                    "💾 안전하게 구매로그를 정리하는 중입니다..."
+                ticket_owner = (
+                    guild.get_member(owner_id)
+                    or await guild.fetch_member(owner_id)
                 )
+
+            except Exception:
+                ticket_owner = interaction.user
+
+            await interaction.followup.send(
+                "💾 안전하게 구매로그를 정리하는 중입니다..."
+            )
 
                 # ==============================
                 # 🔒 공개용 안전 구매로그 생성
