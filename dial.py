@@ -11,41 +11,6 @@ TOKEN = os.getenv("TOKEN")
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
 
-# ==============================
-# 구매자 역할 자동 지급
-# ==============================
-
-try:
-    buyer_role = guild.get_role(BUYER_ROLE_ID)
-
-    if buyer_role and ticket_owner:
-
-        if buyer_role not in ticket_owner.roles:
-
-            await ticket_owner.add_roles(
-                buyer_role,
-                reason="커미션 완료 자동 구매자 역할 지급"
-            )
-
-            try:
-                success_role_embed = discord.Embed(
-                    title="🎉 구매자 역할 지급 완료",
-                    description=(
-                        f"`{guild.name}` 서버에서\n"
-                        f"구매자 역할이 지급되었습니다!"
-                    ),
-                    color=discord.Color.green()
-                )
-
-                await ticket_owner.send(
-                    embed=success_role_embed
-                )
-
-            except:
-                pass
-
-except Exception as role_err:
-    print(f"[구매자 역할 지급 실패] {role_err}")
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
