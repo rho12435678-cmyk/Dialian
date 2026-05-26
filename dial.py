@@ -204,10 +204,19 @@ class TicketCloseView(discord.ui.View):
         custom_id="close_ticket"
     )
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            await interaction.response.defer()
 
-            channel = interaction.channel
+    try:
+
+        # 개발자만 티켓 종료 가능
+        if interaction.user.id not in DEVELOPER_IDS:
+            return await interaction.response.send_message(
+                "❌ 관리자만 티켓을 종료할 수 있습니다.",
+                ephemeral=True
+            )
+        await interaction.response.defer()
+
+        channel = interaction.channel
+        interaction.channel
             channel_name = channel.name
             guild = interaction.guild
 
