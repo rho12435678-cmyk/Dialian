@@ -338,11 +338,6 @@ class TicketCloseView(discord.ui.View):
                         embed=safe_log_embed
                     )
 
-                await log_channel.send(
-                    content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
-                    embed=safe_log_embed
-                )
-
                 # ==============================
                 # 구매자 역할 자동 지급
                 # ==============================
