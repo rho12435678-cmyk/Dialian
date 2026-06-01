@@ -339,13 +339,6 @@ class TicketCloseView(discord.ui.View):
                         inline=False
                     )
 
-                    if recent_messages:
-
-                        safe_log_embed.add_field(
-                            name="📝 최근 대화 미리보기",
-                            value="\n".join(recent_messages),
-                            inline=False
-                        )
 
                     safe_log_embed.set_footer(
                         text="전체 대화내용 및 개인정보는 저장되지 않았습니다."
@@ -403,7 +396,7 @@ class TicketCloseView(discord.ui.View):
                     dm_embed = discord.Embed(
                         title="💌 서비스를 이용해 주셔서 감사합니다!",
                         description=(
-                            "진행하시던 상담이 완료되어 티켓이 종료되었습니다.\n"
+                            "진행하시던 커미션 완료되어 티켓이 종료되었습니다.\n"
                             "아래 버튼을 통해 만족도 별점을 남겨주세요!"
                         ),
                         color=0x5865F2
@@ -507,7 +500,7 @@ class TicketOpenView(discord.ui.View):
             description=(
                 f"안녕하세요 {user.mention}님!\n"
                 "문의 내용을 작성해 주세요.\n"
-                "상담 종료 시 아래 🔒 버튼을 눌러주세요."
+                "커미션 종료 시 아래 🔒 버튼을 눌러주세요."
             ),
             color=0x5865F2,
             timestamp=datetime.now()
