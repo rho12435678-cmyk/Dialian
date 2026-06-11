@@ -470,43 +470,7 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             name=ticket_channel_name
         )
 
-        if existing_channel:
-            return await interaction.response.send_message(
-                f"❌ 이미 생성된 티켓이 존재합니다.\n{existing_channel.mention}",
-                ephemeral=True
-            )
-
-        await interaction.response.defer(ephemeral=True)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                read_messages=False
-            ),
-
-            user: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            ),
-
-            guild.me: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            )
-        }
-
-        for dev_id in DEVELOPER_IDS:
-            dev_member = guild.get_member(dev_id)
-
-            if dev_member:
-                overwrites[dev_member] = discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    embed_links=True
-                )
-
+        
         ticket_channel = await guild.create_text_channel(
             name=ticket_channel_name,
             overwrites=overwrites
@@ -569,6 +533,30 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             view=TicketCloseView()
         )
 
+        dev_dm_embed = discord.Embed(
+            title="🔔 신규 티켓 생성",
+            description=(
+                f"**서버명:** `{guild.name}`\n"
+                f"**생성자:** {user.mention}\n"
+                f"**바로가기:** {ticket_channel.mention}"
+            ),
+            color=0x5865F2,
+            timestamp=datetime.now()
+        )
+
+        for dev_id in DEVELOPER_IDS:
+            try:
+                developer = (
+                    guild.get_member(dev_id)
+                    or await bot.fetch_user(dev_id)
+                )
+
+                if developer and not developer.bot:
+                    await developer.send(embed=dev_dm_embed)
+
+            except Exception as dm_err:
+                print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
+                
         await interaction.followup.send(
             f"✅ 신청서 제출 완료!\n{ticket_channel.mention}",
             ephemeral=True
@@ -680,33 +668,7 @@ if log_channel:
 
             await log_channel.send(embed=open_log_embed)
 
-        # ==============================
-        # 관리자 DM 알림
-        # ==============================
-
-        dev_dm_embed = discord.Embed(
-            title="🔔 신규 티켓 생성",
-            description=(
-                f"**서버명:** `{guild.name}`\n"
-                f"**생성자:** {user.mention}\n"
-                f"**바로가기:** {ticket_channel.mention}"
-            ),
-            color=0x5865F2,
-            timestamp=datetime.now()
-        )
-
-        for dev_id in DEVELOPER_IDS:
-            try:
-                developer = (
-                    guild.get_member(dev_id)
-                    or await bot.fetch_user(dev_id)
-                )
-
-                if developer and not developer.bot:
-                    await developer.send(embed=dev_dm_embed)
-
-            except Exception as dm_err:
-                print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
+        
 
 last_announce_date = None            
 
