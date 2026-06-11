@@ -597,7 +597,7 @@ async def auto_announce():
 
                     buy_channel = discord.utils.get(
                         guild.text_channels,
-                        name="︱💳ㅣ구매"
+                        name="구매"
                     )
 
                     await channel.send(
