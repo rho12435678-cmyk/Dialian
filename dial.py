@@ -1,18 +1,19 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import os
 import asyncio
 from io import BytesIO
-from datetime import datetime, time
+from datetime import datetime
 import re
-from discord.ext import tasks
-import pytz
+from discord.ext import commands, tasks
+from zoneinfo import ZoneInfo
 
 TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
-NOTICE_CHANNEL_NAME = "판매공지"
+ANNOUNCE_CHANNEL_NAME = "판매공지"
+
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
@@ -518,35 +519,6 @@ class TicketOpenView(discord.ui.View):
             ephemeral=True
         )
 
-    
-        # ====================
-        # 자동 판매공지
-        # ====================
-
-KST = pytz.timezone("Asia/Seoul")
-
-@tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
-async def auto_commission_notice():
-
-    for guild in bot.guilds:
-
-        notice_channel = discord.utils.get(
-            guild.text_channels,
-            name="판매공지"
-        )
-
-        if not notice_channel:
-            continue
-
-        embed = discord.Embed(
-            title="🎨 GFX 커미션 접수중",
-            description="공지내용",
-            color=0x5865F2
-        )
-
-        await notice_channel.send(embed=embed)
-
-
         # ==============================
         # 구매로그 생성 알림
         # ==============================
@@ -599,6 +571,42 @@ async def auto_commission_notice():
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
 
+@tasks.loop(minutes=1)
+async def auto_announce():
+
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    # 매일 오후 6시 정각
+    if now.hour == 18 and now.minute == 0:
+
+        for guild in bot.guilds:
+
+            channel = discord.utils.get(
+                guild.text_channels,
+                name=ANNOUNCE_CHANNEL_NAME
+            )
+
+            if channel:
+
+                try:
+                    await channel.send(
+                        """
+@everyone
+
+🎨 **Roblox GFX 커미션 받습니다!**
+
+📸 예시작은 예시작 채널에서 확인해주세요.
+💳 구매는 구매 채널을 이용해주세요.
+🎫 문의는 티켓을 열어주세요.
+
+감사합니다 🙏
+"""
+                    )
+
+                except Exception as e:
+                    print(f"[자동공지 실패] {e}")
+
+
 # ==================== [티켓 패널 명령어] ====================
 
 @bot.command(name="티켓생성")
@@ -624,10 +632,6 @@ async def t_create_panel(ctx):
 
 @bot.event
 async def on_ready():
-
-    if not auto_commission_notice.is_running():
-        auto_commission_notice.start()
-
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
     print("--------------------------------------------------")
 
@@ -638,8 +642,10 @@ async def setup_hook():
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
 
-    print("✨ 영속성 버튼 등록 완료!")
+    auto_announce.start()
 
+    print("✨ 영속성 버튼 등록 완료!")
+    print("📢 자동 판매공지 시작")
 
 if TOKEN:
     bot.run(TOKEN)
