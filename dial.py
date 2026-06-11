@@ -1,16 +1,19 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import os
 import asyncio
 from io import BytesIO
 from datetime import datetime
 import re
+from discord.ext import tasks
+from datetime import time
+import pytz
 
 TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
-
+NOTICE_CHANNEL_NAME = "판매공지"
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
@@ -516,6 +519,43 @@ class TicketOpenView(discord.ui.View):
             ephemeral=True
         )
 
+    
+        # ====================
+        # 자동 판매공지
+        # ====================
+
+KST = pytz.timezone("Asia/Seoul")
+
+@tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
+async def auto_commission_notice():
+
+    for guild in bot.guilds:
+
+        notice_channel = discord.utils.get(
+            guild.text_channels,
+            name="판매공지"
+        )
+
+        if not notice_channel:
+            continue
+
+        embed = discord.Embed(
+            title="🎨 GFX 커미션 접수중",
+            description="공지내용",
+            color=0x5865F2
+        )
+
+        await notice_channel.send(embed=embed)
+
+
+# ====================
+# 티켓 패널 명령어
+# ====================
+
+@bot.command(name="티켓생성")
+@commands.has_permissions(administrator=True)
+async def t_create_panel(ctx):
+
         # ==============================
         # 구매로그 생성 알림
         # ==============================
@@ -593,6 +633,10 @@ async def t_create_panel(ctx):
 
 @bot.event
 async def on_ready():
+
+    if not auto_commission_notice.is_running():
+        auto_commission_notice.start()
+
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
     print("--------------------------------------------------")
 
