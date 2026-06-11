@@ -596,10 +596,34 @@ async def auto_announce():
                 name=ANNOUNCE_CHANNEL_NAME
             )
 
+            last_announce_date = None
+
+@tasks.loop(minutes=1)
+async def auto_announce():
+    global last_announce_date
+
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    if now.hour == 18 and now.minute == 0:
+
+        today = now.date()
+
+        if last_announce_date == today:
+            return
+
+        last_announce_date = today
+
+        for guild in bot.guilds:
+
+            channel = discord.utils.get(
+                guild.text_channels,
+                name=ANNOUNCE_CHANNEL_NAME
+            )
+
             if channel:
-    try:
-        await channel.send(
-            f"""<@&{CUSTOMER_ROLE_ID}>
+                try:
+                    await channel.send(
+                        f"""<@&{CUSTOMER_ROLE_ID}>
 
 🎨 **Roblox GFX 커미션 받습니다!**
 
@@ -609,10 +633,10 @@ async def auto_announce():
 
 감사합니다 🙏
 """
-        )
+                    )
 
-    except Exception as e:
-        print(f"[자동공지 실패] {e}")
+                except Exception as e:
+                    print(f"[자동공지 실패] {e}")
     
 
 # ==================== [티켓 패널 명령어] ====================
