@@ -431,7 +431,7 @@ class TicketCloseView(discord.ui.View):
 
 
 # ==================== [티켓 오픈 View] ====================
-
+class TicketOpenView(discord.ui.View):
 class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
 
     roblox_name = discord.ui.TextInput(
