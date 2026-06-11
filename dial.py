@@ -580,30 +580,20 @@ class TicketOpenView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-    label="📩 티켓 열기",
-    style=discord.ButtonStyle.primary,
-    custom_id="open_ticket_btn"
-)
-async def open_button(
-    self,
-    interaction: discord.Interaction,
-    button: discord.ui.Button
-):
-
-    await interaction.response.send_modal(
-        PurchaseModal()
+        label="📩 티켓 열기",
+        style=discord.ButtonStyle.primary,
+        custom_id="open_ticket_btn"
     )
-
-        guild = interaction.guild
-        user = interaction.user
-
-        ticket_channel_name = f"티켓-{user.id}"
-
-        existing_channel = discord.utils.get(
-            guild.text_channels,
-            name=ticket_channel_name
+    async def open_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(
+            PurchaseModal()
         )
 
+        
         if existing_channel:
             return await interaction.response.send_message(
                 f"❌ 이미 생성된 티켓이 존재합니다: {existing_channel.mention}",
@@ -676,16 +666,14 @@ async def open_button(
         log_channel = discord.utils.get(
     guild.text_channels,
     name=LOG_CHANNEL_NAME
-        )
+)
 
-        if log_channel:
-
-            open_log_embed = discord.Embed(
-                title="📩 새로운 티켓 생성",
-                description=(
-                    f"**채널:** {ticket_channel.mention}\n"
-                    f"**생성자:** {user.mention}"
-                ),
+if log_channel:
+    await log_channel.send(
+        f"📩 새로운 티켓 생성\n"
+        f"채널: {ticket_channel.mention}\n"
+        f"생성자: {user.mention}"
+    ),
                 color=discord.Color.green(),
                 timestamp=datetime.now()
             )
