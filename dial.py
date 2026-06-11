@@ -436,29 +436,8 @@ class TicketCloseView(discord.ui.View):
 
 class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
 
-    roblox_nickname = discord.ui.TextInput(
-        label="GFX에 나올 로블록스 캐릭터 닉네임",
-        placeholder="예: Builderman",
-        required=True,
-        max_length=30
-    )
-
-    gfx_type = discord.ui.TextInput(
-        label="GFX 장르",
-        placeholder="예: 프로필, 배너, 썸네일",
-        required=True,
-        max_length=50
-    )
-
-    gfx_style = discord.ui.TextInput(
-        label="원하는 GFX 배경 / 스타일",
-        placeholder="예: 네온도시, 전장, 다크테마",
-        required=True,
-        style=discord.TextStyle.paragraph,
-        max_length=300
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
+async def on_submit(self, interaction: 
+discord.Interaction):
 
     guild = interaction.guild
     user = interaction.user
@@ -495,17 +474,6 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             send_messages=True
         )
     }
-
-    for dev_id in DEVELOPER_IDS:
-        dev_member = guild.get_member(dev_id)
-
-        if dev_member:
-            overwrites[dev_member] = discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            )
 
     ticket_channel = await guild.create_text_channel(
         name=ticket_channel_name,
@@ -594,6 +562,8 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         except Exception as e:
             print(f"[개발자 DM 실패] {e}")
 
+
+    
     await interaction.followup.send(
         f"✅ 신청서 제출 완료!\n{ticket_channel.mention}",
         ephemeral=True
@@ -616,67 +586,7 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         await interaction.response.send_modal(
             PurchaseModal()
         )
-    self,
-    interaction: discord.Interaction,
-    button: discord.ui.Button
-):
-    await interaction.response.send_modal(
-        PurchaseModal()
-    )
-
-
-        ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            overwrites=overwrites
-        )
-
-        welcome_embed = discord.Embed(
-            title="🎫 문의 티켓이 생성되었습니다",
-            description=(
-                f"안녕하세요 {user.mention}님!\n"
-                "문의 내용을 작성해 주세요.\n"
-                "커미션 종료 시 아래 🔒 버튼을 눌러주세요."
-            ),
-            color=0x5865F2,
-            timestamp=datetime.now()
-        )
-
-        await ticket_channel.send(
-            embed=welcome_embed,
-            view=TicketCloseView()
-        )
-
-        await interaction.followup.send(
-            f"✅ 티켓 생성 완료: {ticket_channel.mention}",
-            ephemeral=True
-        )
-
-        # ==============================
-        # 구매로그 생성 알림
-        # ==============================
-
-        log_channel = discord.utils.get(
-    guild.text_channels,
-    name=LOG_CHANNEL_NAME
-)
-
-if log_channel = discord.utils.get(
-    guild.text_channels,
-    name=LOG_CHANNEL_NAME
-)
-
-if log_channel:
-    await log_channel.send(
-        f"📩 새로운 티켓 생성\n"
-        f"채널: {ticket_channel.mention}\n"
-        f"생성자: {user.mention}"
-    ),
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            )
-
-            await log_channel.send(embed=open_log_embed)
-
+        
         
 last_announce_date = None            
 
