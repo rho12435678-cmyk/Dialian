@@ -571,29 +571,7 @@ class TicketOpenView(discord.ui.View):
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
 
-last_announce_date = None
 
-@tasks.loop(minutes=1)
-async def auto_announce():
-    global last_announce_date
-
-    now = datetime.now(ZoneInfo("Asia/Seoul"))
-
-    if now.hour == 18 and now.minute == 0:
-
-        today = now.date()
-
-        if last_announce_date == today:
-            return
-
-        last_announce_date = today
-
-        for guild in bot.guilds:
-            
-
-            channel = discord.utils.get(
-                guild.text_channels,
-                name=ANNOUNCE_CHANNEL_NAME
             )
 
             last_announce_date = None
