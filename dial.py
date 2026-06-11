@@ -437,28 +437,28 @@ class TicketCloseView(discord.ui.View):
 class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
 
     roblox_nickname = discord.ui.TextInput(
-    label="GFX에 나올 로블록스 캐릭터 닉네임",
-    placeholder="예: Builderman",
-    required=True,
-    max_length=30
-)
+        label="GFX에 나올 로블록스 캐릭터 닉네임",
+        placeholder="예: Builderman",
+        required=True,
+        max_length=30
+    )
 
-gfx_type = discord.ui.TextInput(
-    label="GFX 장르",
-    placeholder="예: 프로필, 배너, 썸네일",
-    required=True,
-    max_length=50
-)
+    gfx_type = discord.ui.TextInput(
+        label="GFX 장르",
+        placeholder="예: 프로필, 배너, 썸네일",
+        required=True,
+        max_length=50
+    )
 
-gfx_style = discord.ui.TextInput(
-    label="원하는 GFX 배경 / 스타일",
-    placeholder="예: 네온도시, 전장, 다크테마",
-    required=True,
-    style=discord.TextStyle.paragraph,
-    max_length=300
-)
+    gfx_style = discord.ui.TextInput(
+        label="원하는 GFX 배경 / 스타일",
+        placeholder="예: 네온도시, 전장, 다크테마",
+        required=True,
+        style=discord.TextStyle.paragraph,
+        max_length=300
+    )
 
-async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
 
     guild = interaction.guild
     user = interaction.user
@@ -599,16 +599,23 @@ async def on_submit(self, interaction: discord.Interaction):
         ephemeral=True
     )
 
-class TicketOpenView(discord.ui.View):
+    class TicketOpenView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-    label="📩 티켓 열기",
-    style=discord.ButtonStyle.primary,
-    custom_id="open_ticket_btn"
-)
-async def open_button(
+        label="📩 티켓 열기",
+        style=discord.ButtonStyle.primary,
+        custom_id="open_ticket_btn"
+    )
+    async def open_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(
+            PurchaseModal()
+        )
     self,
     interaction: discord.Interaction,
     button: discord.ui.Button
@@ -617,16 +624,6 @@ async def open_button(
         PurchaseModal()
     )
 
-        for dev_id in DEVELOPER_IDS:
-            dev_member = guild.get_member(dev_id)
-
-            if dev_member:
-                overwrites[dev_member] = discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    embed_links=True
-                )
 
         ticket_channel = await guild.create_text_channel(
             name=ticket_channel_name,
@@ -663,6 +660,11 @@ async def open_button(
     name=LOG_CHANNEL_NAME
 )
 
+if log_channel = discord.utils.get(
+    guild.text_channels,
+    name=LOG_CHANNEL_NAME
+)
+
 if log_channel:
     await log_channel.send(
         f"📩 새로운 티켓 생성\n"
@@ -676,7 +678,6 @@ if log_channel:
             await log_channel.send(embed=open_log_embed)
 
         
-
 last_announce_date = None            
 
 @tasks.loop(minutes=1)
