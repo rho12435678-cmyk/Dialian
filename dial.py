@@ -524,7 +524,10 @@ class TicketOpenView(discord.ui.View):
         # 구매로그 생성 알림
         # ==============================
 
-        channel = 
+        channel = discord.utils.get(
+    guild.text_channels,
+    name=ANNOUNCE_CHANNEL_NAME
+        )
         bot.get_channel(ANNOUNCE_CHANNEL_ID)
 
         if log_channel:
