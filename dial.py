@@ -432,91 +432,89 @@ class TicketCloseView(discord.ui.View):
 
 # ==================== [티켓 오픈 View] ====================
 
-class TicketOpenView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
 
-    @discord.ui.button(
-        label="📩 티켓 열기",
-        style=discord.ButtonStyle.primary,
-        custom_id="open_ticket_btn"
+    roblox_name = discord.ui.TextInput(
+        label="1. 로블록스 닉네임",
+        required=True
     )
-    async def open_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+    genre = discord.ui.TextInput(
+        label="2. GFX 장르",
+        required=True
+    )
+
+    background = discord.ui.TextInput(
+        label="3. 원하는 배경",
+        required=True
+    )
+
+    ratio = discord.ui.TextInput(
+        label="4. 이미지 비율",
+        placeholder="예: 1:1, 16:9",
+        required=True
+    )
+
+    reference = discord.ui.TextInput(
+        label="5. 참고 이미지 URL",
+        required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
 
         guild = interaction.guild
         user = interaction.user
 
-        ticket_channel_name = f"티켓-{user.id}"
-
-        existing_channel = discord.utils.get(
-            guild.text_channels,
-            name=ticket_channel_name
-        )
-
-        if existing_channel:
-            return await interaction.response.send_message(
-                f"❌ 이미 생성된 티켓이 존재합니다: {existing_channel.mention}",
-                ephemeral=True
-            )
-
-        await interaction.response.defer(ephemeral=True)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                read_messages=False
-            ),
-
-            user: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            ),
-
-            guild.me: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            )
-        }
-
-        for dev_id in DEVELOPER_IDS:
-            dev_member = guild.get_member(dev_id)
-
-            if dev_member:
-                overwrites[dev_member] = discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    embed_links=True
-                )
-
         ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            overwrites=overwrites
+            name=f"티켓-{user.id}"
         )
 
-        welcome_embed = discord.Embed(
-            title="🎫 문의 티켓이 생성되었습니다",
-            description=(
-                f"안녕하세요 {user.mention}님!\n"
-                "문의 내용을 작성해 주세요.\n"
-                "커미션 종료 시 아래 🔒 버튼을 눌러주세요."
-            ),
-            color=0x5865F2,
-            timestamp=datetime.now()
+        embed = discord.Embed(
+            title="📋 신규 Roblox GFX 신청서",
+            color=0x5865F2
+        )
+
+        embed.add_field(
+            name="👤 로블록스 닉네임",
+            value=self.roblox_name.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="🎨 GFX 장르",
+            value=self.genre.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="🌆 원하는 배경",
+            value=self.background.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="📐 이미지 비율",
+            value=self.ratio.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="🔗 참고 이미지",
+            value=self.reference.value or "없음",
+            inline=False
         )
 
         await ticket_channel.send(
-            embed=welcome_embed,
+            content=user.mention,
+            embed=embed,
             view=TicketCloseView()
         )
 
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"✅ 티켓 생성 완료: {ticket_channel.mention}",
             ephemeral=True
         )
+        
 
         # ==============================
         # 구매로그 생성 알림
