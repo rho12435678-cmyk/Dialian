@@ -11,7 +11,7 @@ TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
-ANNOUNCE_CHANNEL_NAME = "판매공지"
+ANNOUNCE_CHANNEL_ID = 1505178799950532720
 
 
 # 자동 지급할 구매자 역할 ID
@@ -524,10 +524,8 @@ class TicketOpenView(discord.ui.View):
         # 구매로그 생성 알림
         # ==============================
 
-        log_channel = discord.utils.get(
-            guild.text_channels,
-            name=LOG_CHANNEL_NAME
-        )
+        channel = 
+        bot.get_channel(ANNOUNCE_CHANNEL_ID)
 
         if log_channel:
 
@@ -579,7 +577,7 @@ async def auto_announce():
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-    if now.hour == 18 and now.minute == 44:
+    if now.hour == 18 and now.minute == 48:
 
         today = now.date()
 
