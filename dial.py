@@ -597,12 +597,9 @@ async def auto_announce():
             )
 
             if channel:
-
-                try:
-                    await channel.send(
-                        """
-await channel.send(
-    f"""<@&{CUSTOMER_ROLE_ID}>
+    try:
+        await channel.send(
+            f"""<@&{CUSTOMER_ROLE_ID}>
 
 🎨 **Roblox GFX 커미션 받습니다!**
 
@@ -612,7 +609,10 @@ await channel.send(
 
 감사합니다 🙏
 """
-)
+        )
+
+    except Exception as e:
+        print(f"[자동공지 실패] {e}")
     
 
 # ==================== [티켓 패널 명령어] ====================
