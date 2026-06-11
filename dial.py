@@ -431,7 +431,7 @@ class TicketCloseView(discord.ui.View):
 
 
 # ==================== [티켓 오픈 View] ====================
-class TicketOpenView(discord.ui.View):
+
 class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
 
     roblox_name = discord.ui.TextInput(
@@ -568,6 +568,23 @@ class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
 
+class TicketOpenView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="📩 티켓 열기",
+        style=discord.ButtonStyle.primary,
+        custom_id="open_ticket_btn"
+    )
+    async def open_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(
+            CommissionModal()
+        )
 
 @tasks.loop(minutes=1)
 async def auto_announce():
