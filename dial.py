@@ -580,26 +580,29 @@ async def auto_announce():
 
         for guild in bot.guilds:
 
-            channel = discord.utils.get(
-                guild.text_channels,
-                name=ANNOUNCE_CHANNEL_NAME
-            )
+            example_channel = discord.utils.get(
+    guild.text_channels,
+    name="︱📸ㅣ예시작"
+)
 
-            if channel:
+buy_channel = discord.utils.get(
+    guild.text_channels,
+    name="︱💳ㅣ구매"
+)
 
-                try:
-                    await channel.send(
-                        """
+await channel.send(
+    f"""
 @everyone
 
 🎨 **Roblox GFX 커미션 받습니다!**
 
-📸 예시작은 예시작 채널에서 확인해주세요.
-💳 구매는 구매 채널을 이용해주세요.
+📸 예시작은 {example_channel.mention} 채널에서 확인해주세요.
+💳 구매는 {buy_channel.mention} 채널을 이용해주세요.
 🎫 문의는 티켓을 열어주세요.
 
 감사합니다 🙏
 """
+)
                     )
 
                 except Exception as e:
