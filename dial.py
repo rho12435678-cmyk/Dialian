@@ -620,22 +620,41 @@ async def auto_announce():
 
 # ==================== [티켓 패널 명령어] ====================
 
-@bot.command(name="티켓생성")
-@commands.has_permissions(administrator=True)
-async def t_create_panel(ctx):
+class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
 
-    embed = discord.Embed(
-        title="💼 커미션 및 문의 상담 공간",
-        description=(
-            "상담, 구매 진행, 문의사항이 있으시다면\n"
-            "아래 📩 버튼을 눌러주세요!"
-        ),
-        color=0x5865F2
+    roblox_name = discord.ui.TextInput(
+        label="1. 로블록스 닉네임",
+        placeholder="예: Builderman",
+        required=True,
+        max_length=50
     )
 
-    await ctx.send(
-        embed=embed,
-        view=TicketOpenView()
+    genre = discord.ui.TextInput(
+        label="2. GFX 장르",
+        placeholder="예: 유튜브 썸네일, 프로필, 배틀",
+        required=True,
+        max_length=100
+    )
+
+    background = discord.ui.TextInput(
+        label="3. 원하는 배경",
+        placeholder="예: 미래 도시, 전장, 우주",
+        required=True,
+        max_length=200
+    )
+
+    ratio = discord.ui.TextInput(
+        label="4. 이미지 비율",
+        placeholder="예: 1:1, 16:9, 1920x1080",
+        required=True,
+        max_length=50
+    )
+
+    reference = discord.ui.TextInput(
+        label="5. 참고 이미지 URL (선택)",
+        placeholder="Pinterest, Google, Discord 이미지 링크",
+        required=False,
+        max_length=500
     )
 
 
