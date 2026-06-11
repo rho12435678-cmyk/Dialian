@@ -11,7 +11,7 @@ TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
-ANNOUNCE_CHANNEL_NAME = "︱🔊ㅣ판매공지"
+ANNOUNCE_CHANNEL_NAME = "판매공지"
 
 
 # 자동 지급할 구매자 역할 ID
