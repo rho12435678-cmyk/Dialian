@@ -462,12 +462,45 @@ class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
 
     async def on_submit(self, interaction: discord.Interaction):
 
+ticket_channel_name = f"티켓-{user.id}"
+
+existing_channel = discord.utils.get(
+    guild.text_channels,
+    name=ticket_channel_name
+)
+
+if existing_channel:
+    return await interaction.response.send_message(
+        f"❌ 이미 생성된 티켓이 존재합니다: {existing_channel.mention}",
+        ephemeral=True
+    )
+        
         guild = interaction.guild
         user = interaction.user
 
         ticket_channel = await guild.create_text_channel(
             name=f"티켓-{user.id}"
         )
+
+        overwrites = {
+    guild.default_role: discord.PermissionOverwrite(
+        read_messages=False
+    ),
+
+    user: discord.PermissionOverwrite(
+        read_messages=True,
+        send_messages=True,
+        attach_files=True,
+        embed_links=True
+    ),
+
+    guild.me: discord.PermissionOverwrite(
+        read_messages=True,
+        send_messages=True,
+        attach_files=True,
+        embed_links=True
+    )
+        }
 
         embed = discord.Embed(
             title="📋 신규 Roblox GFX 신청서",
