@@ -3,10 +3,9 @@ from discord.ext import commands, tasks
 import os
 import asyncio
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, time
 import re
 from discord.ext import tasks
-from datetime import time
 import pytz
 
 TOKEN = os.getenv("TOKEN")
@@ -547,14 +546,6 @@ async def auto_commission_notice():
 
         await notice_channel.send(embed=embed)
 
-
-# ====================
-# 티켓 패널 명령어
-# ====================
-
-@bot.command(name="티켓생성")
-@commands.has_permissions(administrator=True)
-async def t_create_panel(ctx):
 
         # ==============================
         # 구매로그 생성 알림
