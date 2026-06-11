@@ -600,7 +600,9 @@ async def auto_announce():
                 try:
                     await channel.send(
                         """
-@CUSTOMER/손님
+await channel.send(
+    f"""<@&{1505074732700008531}>
+
 🎨 **Roblox GFX 커미션 받습니다!**
 
 📸 예시작은 예시작 채널에서 확인해주세요.
@@ -609,7 +611,8 @@ async def auto_announce():
 
 감사합니다 🙏
 """
-                    )
+)
+                 
 
                 except Exception as e:
                     print(f"[자동공지 실패] {e}")
