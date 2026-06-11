@@ -434,10 +434,12 @@ class TicketCloseView(discord.ui.View):
 
 # ==================== [티켓 오픈 View] ====================
 
-class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
+class PurchaseModal(discord.ui.Modal, 
+title="🎨 GFX 커미션 신청서"):
 
-async def on_submit(self, interaction: 
-discord.Interaction):
+    async def on_submit(
+        self,
+        interaction: discord.Interaction):
 
     guild = interaction.guild
     user = interaction.user
@@ -564,12 +566,12 @@ discord.Interaction):
 
 
     
-    await interaction.followup.send(
-        f"✅ 신청서 제출 완료!\n{ticket_channel.mention}",
-        ephemeral=True
-    )
+await interaction.followup.send(
+f"✅ 신청서 제출 완료!\n{ticket_channel.mention}",
+ephemeral=True
+)
 
-    class TicketOpenView(discord.ui.View):
+class TicketOpenView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
