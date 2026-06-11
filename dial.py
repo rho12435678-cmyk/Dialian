@@ -16,6 +16,7 @@ ANNOUNCE_CHANNEL_NAME = "판매공지"
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
+CUSTOMER_ROLE_ID = 1505074732700008531
 
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 DEVELOPER_IDS = [
@@ -601,7 +602,7 @@ async def auto_announce():
                     await channel.send(
                         """
 await channel.send(
-    f"""<@&{1505074732700008531}>
+    f"""<@&{CUSTOMER_ROLE_ID}>
 
 🎨 **Roblox GFX 커미션 받습니다!**
 
@@ -612,11 +613,7 @@ await channel.send(
 감사합니다 🙏
 """
 )
-                 
-
-                except Exception as e:
-                    print(f"[자동공지 실패] {e}")
-
+    
 
 # ==================== [티켓 패널 명령어] ====================
 
