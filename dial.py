@@ -5,11 +5,14 @@ import asyncio
 from io import BytesIO
 from datetime import datetime
 import re
+from discord.ext import commands, tasks
+from zoneinfo import ZoneInfo
 
 TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
+ANNOUNCE_CHANNEL_NAME = "판매공지"
 
 
 # 자동 지급할 구매자 역할 ID
@@ -568,6 +571,42 @@ class TicketOpenView(discord.ui.View):
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
 
+@tasks.loop(minutes=1)
+async def auto_announce():
+
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    # 매일 오후 6시 정각
+    if now.hour == 18 and now.minute == 0:
+
+        for guild in bot.guilds:
+
+            channel = discord.utils.get(
+                guild.text_channels,
+                name=ANNOUNCE_CHANNEL_NAME
+            )
+
+            if channel:
+
+                try:
+                    await channel.send(
+                        """
+@everyone
+
+🎨 **Roblox GFX 커미션 받습니다!**
+
+📸 예시작은 예시작 채널에서 확인해주세요.
+💳 구매는 구매 채널을 이용해주세요.
+🎫 문의는 티켓을 열어주세요.
+
+감사합니다 🙏
+"""
+                    )
+
+                except Exception as e:
+                    print(f"[자동공지 실패] {e}")
+
+
 # ==================== [티켓 패널 명령어] ====================
 
 @bot.command(name="티켓생성")
@@ -603,8 +642,10 @@ async def setup_hook():
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
 
-    print("✨ 영속성 버튼 등록 완료!")
+    auto_announce.start()
 
+    print("✨ 영속성 버튼 등록 완료!")
+    print("📢 자동 판매공지 시작")
 
 if TOKEN:
     bot.run(TOKEN)
