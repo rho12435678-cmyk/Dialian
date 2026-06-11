@@ -460,6 +460,44 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
 
     async def on_submit(self, interaction: discord.Interaction):
 
+        if existing_channel:
+    return await interaction.response.send_message(
+        f"❌ 이미 생성된 티켓이 존재합니다.\n{existing_channel.mention}",
+        ephemeral=True
+    )
+
+await interaction.response.defer(ephemeral=True)
+
+overwrites = {
+    guild.default_role: discord.PermissionOverwrite(
+        read_messages=False
+    ),
+
+    user: discord.PermissionOverwrite(
+        read_messages=True,
+        send_messages=True,
+        attach_files=True,
+        embed_links=True
+    ),
+
+    guild.me: discord.PermissionOverwrite(
+        read_messages=True,
+        send_messages=True
+    )
+}
+
+for dev_id in DEVELOPER_IDS:
+    dev_member = guild.get_member(dev_id)
+
+    if dev_member:
+        overwrites[dev_member] = discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=True,
+            attach_files=True,
+            embed_links=True
+        )
+
+        
         guild = interaction.guild
         user = interaction.user
 
@@ -581,34 +619,6 @@ class TicketOpenView(discord.ui.View):
             PurchaseModal()
         )
 
-        
-        if existing_channel:
-            return await interaction.response.send_message(
-                f"❌ 이미 생성된 티켓이 존재합니다: {existing_channel.mention}",
-                ephemeral=True
-            )
-
-        await interaction.response.defer(ephemeral=True)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                read_messages=False
-            ),
-
-            user: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            ),
-
-            guild.me: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True
-            )
-        }
 
         for dev_id in DEVELOPER_IDS:
             dev_member = guild.get_member(dev_id)
