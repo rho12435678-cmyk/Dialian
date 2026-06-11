@@ -11,7 +11,7 @@ TOKEN = os.getenv("TOKEN")
 
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
-ANNOUNCE_CHANNEL_ID = 1505178799950532720
+ANNOUNCE_CHANNEL_ID = 1505562851824369714
 
 
 # 자동 지급할 구매자 역할 ID
@@ -577,7 +577,7 @@ async def auto_announce():
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-    if now.hour == 18 and now.minute == 48:
+    if now.hour == 18 and now.minute == 49:
 
         today = now.date()
 
