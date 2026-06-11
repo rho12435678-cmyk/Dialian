@@ -524,11 +524,7 @@ class TicketOpenView(discord.ui.View):
         # 구매로그 생성 알림
         # ==============================
 
-        channel = discord.utils.get(
-    guild.text_channels,
-    name=ANNOUNCE_CHANNEL_NAME
-        )
-        bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        
 
         if log_channel:
 
@@ -580,7 +576,7 @@ async def auto_announce():
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-    if now.hour == 19 and now.minute == 10:
+    if now.hour == 19 and now.minute == 13:
 
         today = now.date()
 
@@ -591,10 +587,10 @@ async def auto_announce():
 
         channel = bot.get_channel(ANNOUNCE_CHANNEL_ID)
 
-if channel:
-                try:
-                    await channel.send(
-                        f"""<@&{CUSTOMER_ROLE_ID}>
+        if channel:
+            try:
+                await channel.send(
+                    f"""<@&{CUSTOMER_ROLE_ID}>
 
 🎨 **Roblox GFX 커미션 받습니다!**
 
@@ -603,10 +599,10 @@ if channel:
 
 감사합니다 🙏
 """
-                    )
+                )
 
-                except Exception as e:
-                    print(f"[자동공지 실패] {e}")
+            except Exception as e:
+                print(f"[자동공지 실패] {e}")
     
 
 # ==================== [티켓 패널 명령어] ====================
