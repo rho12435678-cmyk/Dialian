@@ -196,7 +196,7 @@ class StarRatingView(discord.ui.View):
 
 # ==================== [티켓 닫기 View] ====================
 
-class TicketCloseView(discord.ui.View):
+class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
     def __init__(self):
         super().__init__(timeout=None)
 
