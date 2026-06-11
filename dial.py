@@ -589,14 +589,9 @@ async def auto_announce():
 
         last_announce_date = today
 
-        for guild in bot.guilds:
+        channel = bot.get_channel(ANNOUNCE_CHANNEL_ID)
 
-            channel = discord.utils.get(
-                guild.text_channels,
-                name=ANNOUNCE_CHANNEL_NAME
-            )
-
-            if channel:
+if channel:
                 try:
                     await channel.send(
                         f"""<@&{CUSTOMER_ROLE_ID}>
