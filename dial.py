@@ -570,11 +570,7 @@ class TicketOpenView(discord.ui.View):
             except Exception as dm_err:
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
-
-
-            )
-
-            last_announce_date = None
+last_announce_date = None            
 
 @tasks.loop(minutes=1)
 async def auto_announce():
