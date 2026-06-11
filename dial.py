@@ -433,10 +433,7 @@ class TicketCloseView(discord.ui.View):
 # ==================== [티켓 오픈 View] ====================
 
 
-class CommissionModal(discord.ui.Modal, title="Roblox GFX 커미션 신청"):
-...
 class TicketOpenView(discord.ui.View):
-...   
 
         # ==============================
         # 구매로그 생성 알림
