@@ -1,5 +1,4 @@
 import discord
-from discord.ext import commands
 import os
 import asyncio
 from io import BytesIO
@@ -571,15 +570,25 @@ class TicketOpenView(discord.ui.View):
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
 
+last_announce_date = None
+
 @tasks.loop(minutes=1)
 async def auto_announce():
+    global last_announce_date
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-    # 매일 오후 6시 정각
     if now.hour == 18 and now.minute == 0:
 
+        today = now.date()
+
+        if last_announce_date == today:
+            return
+
+        last_announce_date = today
+
         for guild in bot.guilds:
+            
 
             channel = discord.utils.get(
                 guild.text_channels,
@@ -591,8 +600,7 @@ async def auto_announce():
                 try:
                     await channel.send(
                         """
-@everyone
-
+@CUSTOMER/손님
 🎨 **Roblox GFX 커미션 받습니다!**
 
 📸 예시작은 예시작 채널에서 확인해주세요.
