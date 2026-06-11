@@ -570,6 +570,7 @@ class TicketOpenView(discord.ui.View):
                 print(f"[개발자 DM 실패 - {dev_id}] {dm_err}")
 
 
+
 @tasks.loop(minutes=1)
 async def auto_announce():
 
@@ -580,18 +581,27 @@ async def auto_announce():
 
         for guild in bot.guilds:
 
-            example_channel = discord.utils.get(
-    guild.text_channels,
-    name="︱📸ㅣ예시작"
-)
+            channel = discord.utils.get(
+                guild.text_channels,
+                name=ANNOUNCE_CHANNEL_NAME
+            )
 
-buy_channel = discord.utils.get(
-    guild.text_channels,
-    name="︱💳ㅣ구매"
-)
+            if channel:
 
-await channel.send(
-    f"""
+                try:
+
+                    example_channel = discord.utils.get(
+                        guild.text_channels,
+                        name="︱📸ㅣ예시작"
+                    )
+
+                    buy_channel = discord.utils.get(
+                        guild.text_channels,
+                        name="︱💳ㅣ구매"
+                    )
+
+                    await channel.send(
+                        f"""
 @everyone
 
 🎨 **Roblox GFX 커미션 받습니다!**
@@ -602,7 +612,6 @@ await channel.send(
 
 감사합니다 🙏
 """
-)
                     )
 
                 except Exception as e:
