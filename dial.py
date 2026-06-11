@@ -580,7 +580,7 @@ async def auto_announce():
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-    if now.hour == 18 and now.minute == 49:
+    if now.hour == 19 and now.minute == 3:
 
         today = now.date()
 
