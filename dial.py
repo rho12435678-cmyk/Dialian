@@ -682,6 +682,8 @@ async def send_price(ctx):
 
     channel = bot.get_channel(PRICE_CHANNEL_ID)
 
+await ctx.send(f"채널ID 확인: {channel.id}")
+
     if not channel:
         return await ctx.send("❌ 가격표 채널을 찾을 수 없습니다.")
 
@@ -694,7 +696,7 @@ async def send_price(ctx):
         url="https://cdn.discordapp.com/attachments/1396537248018731020/1514940074045735034/file_0000000047c47206840f4e48fc0c0f9d_.png"
     )
 
-    await channel.send(
+    await ctx.send(
         content=f"<@&{CUSTOMER_ROLE_ID}>",
         embed=embed,
         allowed_mentions=discord.AllowedMentions(roles=True)
