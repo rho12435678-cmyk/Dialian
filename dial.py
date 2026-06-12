@@ -682,10 +682,10 @@ async def send_price(ctx):
 
     channel = bot.get_channel(PRICE_CHANNEL_ID)
 
-await ctx.send(f"채널ID 확인: {channel.id}")
-
     if not channel:
         return await ctx.send("❌ 가격표 채널을 찾을 수 없습니다.")
+
+    await ctx.send(f"채널ID 확인: {channel.id}")
 
     embed = discord.Embed(
         title="🎨 Dial GFX Hub 가격표",
