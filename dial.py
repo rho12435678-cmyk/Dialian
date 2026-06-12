@@ -658,6 +658,24 @@ async def auto_announce():
 
 # ==================== [티켓 패널 명령어] ====================
 
+@bot.command(name="티켓생성")
+@commands.has_permissions(administrator=True)
+async def t_create_panel(ctx):
+
+    embed = discord.Embed(
+        title="💼 커미션 및 문의 상담 공간",
+        description=(
+            "상담, 구매 진행, 문의사항이 있으시다면\n"
+            "아래 📩 버튼을 눌러주세요!"
+        ),
+        color=0x5865F2
+    )
+
+    await ctx.send(
+        embed=embed,
+        view=TicketOpenView()
+    )
+
 @bot.command(name="가격표")
 @commands.has_permissions(administrator=True)
 async def send_price(ctx):
