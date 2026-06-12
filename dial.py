@@ -658,37 +658,31 @@ async def auto_announce():
 
 # ==================== [티켓 패널 명령어] ====================
 
-@bot.command(name="티켓생성")
+@bot.command(name="가격표")
 @commands.has_permissions(administrator=True)
-async def t_create_panel(ctx):
+async def send_price(ctx):
+
+    channel = bot.get_channel(PRICE_CHANNEL_ID)
+
+    if not channel:
+        return await ctx.send("❌ 가격표 채널을 찾을 수 없습니다.")
 
     embed = discord.Embed(
-        title="💼 커미션 및 문의 상담 공간",
-        description=(
-            "상담, 구매 진행, 문의사항이 있으시다면\n"
-            "아래 📩 버튼을 눌러주세요!"
-        ),
+        title="🎨 Dial GFX Hub 가격표",
         color=0x5865F2
     )
 
-    await ctx.send(
-        embed=embed,
-        view=TicketOpenView()
+    embed.set_image(
+        url="https://cdn.discordapp.com/attachments/1396537248018731020/1514940074045735034/file_0000000047c47206840f4e48fc0c0f9d_.png"
     )
 
-embed = discord.Embed(
-    title="🎨 Dial GFX Hub 가격표",
-    color=0x5865F2
-)
+    await channel.send(
+        content=f"<@&{CUSTOMER_ROLE_ID}>",
+        embed=embed,
+        allowed_mentions=discord.AllowedMentions(roles=True)
+    )
 
-embed.set_image(
-    url="https://cdn.discordapp.com/attachments/1396537248018731020/1514940074045735034/file_0000000047c47206840f4e48fc0c0f9d_.png?ex=6a2d3163&is=6a2bdfe3&hm=0411d5ccebb9841e962668107a191a5267693f185488382831d31887ee1b56ee&"
-)
-
-await channel.send(
-    content=f"<@&{CUSTOMER_ROLE_ID}>",
-    embed=embed
-)
+    await ctx.send("✅ 가격표 업로드 완료")
 
 # ==================== [봇 시작 시스템] ====================
 
