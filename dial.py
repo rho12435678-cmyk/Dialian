@@ -12,7 +12,7 @@ TOKEN = os.getenv("TOKEN")
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
 ANNOUNCE_CHANNEL_ID = 1505562851824369714
-
+PRICE_CHANNEL_ID = 1505102694917079132
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
@@ -676,6 +676,19 @@ async def t_create_panel(ctx):
         view=TicketOpenView()
     )
 
+embed = discord.Embed(
+    title="🎨 Dial GFX Hub 가격표",
+    color=0x5865F2
+)
+
+embed.set_image(
+    url="https://cdn.discordapp.com/attachments/1396537248018731020/1514940074045735034/file_0000000047c47206840f4e48fc0c0f9d_.png?ex=6a2d3163&is=6a2bdfe3&hm=0411d5ccebb9841e962668107a191a5267693f185488382831d31887ee1b56ee&"
+)
+
+await channel.send(
+    content=f"<@&{CUSTOMER_ROLE_ID}>",
+    embed=embed
+)
 
 # ==================== [봇 시작 시스템] ====================
 
