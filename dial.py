@@ -685,14 +685,16 @@ async def on_ready():
 
 
 @bot.event
-class MyBot(commands.Bot):
-    async def setup_hook(self):
-        
+async def on_ready():
+    print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
+    print("--------------------------------------------------")
+
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
 
-    auto_announce.start()
+    if not auto_announce.is_running():
+        auto_announce.start()
 
     print("✨ 영속성 버튼 등록 완료!")
     print("📢 자동 판매공지 시작")
