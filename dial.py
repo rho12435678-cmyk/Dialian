@@ -675,14 +675,7 @@ async def t_create_panel(ctx):
         view=TicketOpenView()
     )
 
-
 # ==================== [봇 시작 시스템] ====================
-
-@bot.event
-async def on_ready():
-    print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
-    print("--------------------------------------------------")
-
 
 @bot.event
 async def on_ready():
