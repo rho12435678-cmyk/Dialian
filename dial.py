@@ -12,7 +12,6 @@ TOKEN = os.getenv("TOKEN")
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
 ANNOUNCE_CHANNEL_ID = 1505562851824369714
-PRICE_CHANNEL_ID = 1505103409307582564
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
@@ -676,33 +675,6 @@ async def t_create_panel(ctx):
         view=TicketOpenView()
     )
 
-@bot.command(name="가격표")
-@commands.has_permissions(administrator=True)
-async def send_price(ctx):
-
-    channel = bot.get_channel(PRICE_CHANNEL_ID)
-
-    if not channel:
-        return await ctx.send("❌ 가격표 채널을 찾을 수 없습니다.")
-
-    await ctx.send(f"채널ID 확인: {channel.id}")
-
-    embed = discord.Embed(
-        title="🎨 Dial GFX Hub 가격표",
-        color=0x5865F2
-    )
-
-    embed.set_image(
-        url="https://cdn.discordapp.com/attachments/1396537248018731020/1514940074045735034/file_0000000047c47206840f4e48fc0c0f9d_.png"
-    )
-
-    await ctx.send(
-        content=f"<@&{CUSTOMER_ROLE_ID}>",
-        embed=embed,
-        allowed_mentions=discord.AllowedMentions(roles=True)
-    )
-
-    await ctx.send("✅ 가격표 업로드 완료")
 
 # ==================== [봇 시작 시스템] ====================
 
@@ -713,7 +685,9 @@ async def on_ready():
 
 
 @bot.event
-async def setup_hook():
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
