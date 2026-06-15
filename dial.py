@@ -661,8 +661,6 @@ async def auto_announce():
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
 
-    file = discord.File("price.png", filename="price.png")
-
     embed = discord.Embed(
         title="💼 커미션 및 문의 상담 공간",
         description=(
