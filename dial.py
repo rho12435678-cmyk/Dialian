@@ -12,7 +12,6 @@ TOKEN = os.getenv("TOKEN")
 REVIEW_CHANNEL_NAME = "후기"
 LOG_CHANNEL_NAME = "구매로그"
 ANNOUNCE_CHANNEL_ID = 1505562851824369714
-PRICE_CHANNEL_ID = 1505103409307582564
 
 # 자동 지급할 구매자 역할 ID
 BUYER_ROLE_ID = 1505076370332586155
@@ -676,21 +675,29 @@ async def t_create_panel(ctx):
         view=TicketOpenView()
     )
 
+@bot.command(name="티켓생성")
+@commands.has_permissions(administrator=True)
+async def t_create_panel(ctx):
 
-@bot.command(name="가격표")
-async def price(ctx):
-    channel = bot.get_channel(PRICE_CHANNEL_ID)
+    file = discord.File("price.png", filename="price.png")
 
     embed = discord.Embed(
-        title="🎨 Dial GFX Hub 가격표",
+        title="💼 커미션 및 문의 상담 공간",
+        description=(
+            "상담, 구매 진행, 문의사항이 있으시다면\n"
+            "아래 📩 버튼을 눌러주세요!\n\n"
+            "📌 구매 전 가격표를 확인해주세요."
+        ),
         color=0x5865F2
     )
 
-    embed.set_image(
-        url="https://cdn.discordapp.com/attachments/1396537248018731020/1516085715740393612/file_0000000047c47206840f4e48fc0c0f9d_.png"
-    )
+    embed.set_image(url="https://cdn.discordapp.com/attachments/1396537248018731020/1516085715740393612/file_0000000047c47206840f4e48fc0c0f9d_.png")
 
-    await channel.send(embed=embed)
+    await ctx.send(
+        file=file,
+        embed=embed,
+        view=TicketOpenView()
+    )
 
 # ==================== [봇 시작 시스템] ====================
 
