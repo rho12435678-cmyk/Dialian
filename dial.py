@@ -673,7 +673,7 @@ async def t_create_panel(ctx):
         color=0x5865F2
     )
 
-    embed.set_image(url="https://cdn.discordapp.com/attachments/1396537248018731020/1516085715740393612/file_0000000047c47206840f4e48fc0c0f9d_.png")
+    embed.set_image(url="file_0000000047c47206840f4e48fc0c0f9d_.png")
 
     await ctx.send(
         file=file,
