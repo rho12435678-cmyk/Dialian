@@ -1,0 +1,14 @@
+@bot.command(name="가격표")
+async def price(ctx):
+    channel = bot.get_channel(PRICE_CHANNEL_ID)
+
+    file = discord.File("price.png", filename="price.png")
+
+    embed = discord.Embed(
+        title="🎨 Dial GFX Hub 가격표",
+        color=0x5865F2
+    )
+
+    embed.set_image(url="attachment://price.png")
+
+    await channel.send(file=file, embed=embed)
