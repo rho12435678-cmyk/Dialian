@@ -661,8 +661,6 @@ async def auto_announce():
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
 
-    file = discord.File("price.png", filename="price.png")
-
     embed = discord.Embed(
         title="💼 커미션 및 문의 상담 공간",
         description=(
@@ -674,13 +672,13 @@ async def t_create_panel(ctx):
     )
 
     embed.set_image(
-    url="https://cdn.discordapp.com/attachments/1396537248018731020/1516085715740393612/file_0000000047c47206840f4e48fc0c0f9d_.png"
-)
+        url="https://cdn.discordapp.com/attachments/1396537248018731020/1516085715740393612/file_0000000047c47206840f4e48fc0c0f9d_.png"
+    )
 
-await ctx.send(
-    embed=embed,
-    view=TicketOpenView()
-)
+    await ctx.send(
+        embed=embed,
+        view=TicketOpenView()
+    )
 
 # ==================== [봇 시작 시스템] ====================
 
