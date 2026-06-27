@@ -1,9 +1,8 @@
 import discord
+import aiosqlite
 
 from datetime import datetime
 from config import *
-import aiosqlite
-from datetime import datetime
 
 DATABASE = "data/dialian.db"
 
@@ -92,94 +91,44 @@ class StarRatingView(discord.ui.View):
 
                 await review_channel.send(embed=review_embed)
 
-                if hasattr(interaction, "message") and interaction.message.embeds:
+                # SQLite 저장
+                designer_id = None
 
-    designer_id = None
+                if interaction.message.embeds:
+                    try:
+                        for field in interaction.message.embeds[0].fields:
+                            if field.name == "👨‍💻 담당 디자이너":
+                                text = field.value
 
-    try:
-        for field in interaction.message.embeds[0].fields:
-            if field.name == "👨‍💻 담당 디자이너":
-                text = field.value
-                if "<@" in text:
-                    designer_id = int(text.replace("<@", "").replace(">", "").replace("!", ""))
-    except:
-        pass
+                                if "<@" in text:
+                                    designer_id = int(
+                                        text.replace("<@", "")
+                                            .replace("!", "")
+                                            .replace(">", "")
+                                    )
+                    except Exception:
+                        pass
 
-    if designer_id:
-
-        async with aiosqlite.connect(DATABASE) as db:
-
-            await db.execute(
-                """
-                INSERT INTO reviews(
-                    developer_id,
-                    customer_id,
-                    stars,
-                    review,
-                    created_at
-                )
-                VALUES(?,?,?,?,?)
-                """,
-                (
-                    designer_id,
-                    interaction.user.id,
-                    stars,
-                    "",
-                    datetime.now().isoformat()
-                )
-            )
-
-            await db.commit()
-
-                success_view = discord.ui.View()
-
-                try:
-                    invite = await review_channel.create_invite(
-                        max_age=300,
-                        max_uses=1
-                    )
-
-                    success_view.add_item(
-                        discord.ui.Button(
-                            label="😄 내가 쓴 후기 보러가기",
-                            url=invite.url,
-                            style=discord.ButtonStyle.link
+                if designer_id:
+                    async with aiosqlite.connect(DATABASE) as db:
+                        await db.execute(
+                            """
+                            INSERT INTO reviews(
+                                developer_id,
+                                customer_id,
+                                stars,
+                                review,
+                                created_at
+                            )
+                            VALUES(?,?,?,?,?)
+                            """,
+                            (
+                                designer_id,
+                                interaction.user.id,
+                                stars,
+                                "",
+                                datetime.now().isoformat()
+                            )
                         )
-                    )
-                except:
-                    pass
 
-                await interaction.followup.send(
-                    f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!",
-                    view=success_view,
-                    ephemeral=True
-                )
-
-                disabled_view = discord.ui.View()
-
-                for i in range(1, 6):
-                    style = (
-                        discord.ButtonStyle.success
-                        if i == 5
-                        else discord.ButtonStyle.secondary
-                    )
-
-                    disabled_view.add_item(
-                        discord.ui.Button(
-                            label=f"⭐ {i}점",
-                            style=style,
-                            custom_id=f"star_{i}",
-                            disabled=True
-                        )
-                    )
-
-                await interaction.message.edit(view=disabled_view)
-
-            else:
-                await interaction.followup.send(
-                    "후기 채널을 찾을 수 없습니다.",
-                    ephemeral=True
-                )
-
-        except Exception as e:
-            print(f"[별점 등록 에러] {e}")
+                        await db.commit()
