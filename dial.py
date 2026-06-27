@@ -381,7 +381,6 @@ class TicketCloseView(discord.ui.View):
 
 # ==================== [티켓 오픈 View] ====================
         
-        
 last_announce_date = None            
 
 @tasks.loop(minutes=1)
