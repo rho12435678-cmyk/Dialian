@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from views.ticket_view import TicketOpenView
 from config import *
 from views.close_ticket import TicketCloseView
+from views.review_view import StarRatingView
 
 TOKEN = os.getenv("TOKEN")
 
