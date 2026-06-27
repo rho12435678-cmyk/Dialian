@@ -9,6 +9,8 @@ from views.ticket_view import TicketOpenView
 from config import *
 from views.close_ticket import TicketCloseView
 from views.review_view import StarRatingView
+from views.progress_view import ProgressView
+from views.payment_view import PaymentView
 
 TOKEN = os.getenv("TOKEN")
 
@@ -337,6 +339,9 @@ async def on_ready():
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
+    bot.add_view(ProgressView())
+    bot.add_view(PaymentView(0))
+    
 
     
 
