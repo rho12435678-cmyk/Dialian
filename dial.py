@@ -237,8 +237,8 @@ async def progress(ctx, percent: int):
         )
 
         await msg.edit(embed=embed)
-        return await ctx.message.add_reaction("✅")
-
+        await ctx.send("✅ 진행률이 변경되었습니다.", delete_after=3)
+return
     await ctx.send("진행 패널을 찾지 못했습니다.")
 
 @bot.command(name="예상")
@@ -275,8 +275,8 @@ async def estimate(ctx, days: str):
         )
 
         await msg.edit(embed=embed)
-        return await ctx.message.add_reaction("✅")
-
+        await ctx.send("✅ 예상 작업일이 변경되었습니다.", delete_after=3)
+return
     await ctx.send("진행 패널을 찾지 못했습니다.")
 
 @bot.command(name="완료")
@@ -310,7 +310,7 @@ async def complete(ctx):
 
             break
 
-    from views.review_view import StarRatingView
+        from views.review_view import StarRatingView
 
     review_embed = discord.Embed(
         title="⭐ 작업이 완료되었습니다!",
@@ -326,22 +326,22 @@ async def complete(ctx):
     try:
         channel_name = ctx.channel.name
 
- if channel_name.startswith("티켓-"):
-        nickname = channel_name.replace("티켓-", "")
+        if channel_name.startswith("티켓-"):
+            nickname = channel_name.replace("티켓-", "")
 
-        member = discord.utils.find(
-            lambda m: m.display_name.lower().replace(" ", "-") == nickname,
-            ctx.guild.members
-        )
+            member = discord.utils.find(
+                lambda m: m.display_name.lower().replace(" ", "-") == nickname,
+                ctx.guild.members
+            )
 
-        if member:
-            role = ctx.guild.get_role(BUYER_ROLE_ID)
+            if member:
+                role = ctx.guild.get_role(BUYER_ROLE_ID)
 
-            if role and role not in member.roles:
-                await member.add_roles(role)
+                if role and role not in member.roles:
+                    await member.add_roles(role)
 
-except Exception as e:
-    print(e)
+    except Exception as e:
+        print(e)
 
 
 # ==================== [봇 시작 시스템] ====================
