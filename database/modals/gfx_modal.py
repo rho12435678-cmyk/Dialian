@@ -36,15 +36,15 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
     async def on_submit(self, interaction: discord.Interaction):
 
         guild = interaction.guild
-        user = interaction.user
+user = interaction.user
 
-        designer_name = "미지정"
+designer_name = "미지정"
 
 if self.selected_designer:
     designer_name = DESIGNERS["gfx"][self.selected_designer]
 
-        nickname = user.display_name.lower().replace(" ", "-")
-        ticket_channel_name = f"티켓-{nickname}"
+nickname = user.display_name.lower().replace(" ", "-")
+ticket_channel_name = f"티켓-{nickname}"
 
         if discord.utils.get(guild.text_channels, name=ticket_channel_name):
             return await interaction.response.send_message(
@@ -71,6 +71,8 @@ if self.selected_designer:
 
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
+
+designer_name = developer.mention if developer else "미지정"
 
             if developer:
                 overwrites[developer] = discord.PermissionOverwrite(
