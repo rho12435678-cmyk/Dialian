@@ -120,12 +120,17 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             content=user.mention,
             embed=embed
         )
-
+        
                 await ticket_channel.send(
+            content=user.mention,
+            embed=embed
+        )
+
+        await ticket_channel.send(
             embed=discord.Embed(
                 title="📌 커미션 진행",
                 description=(
-                    "👨‍💻 담당 디자이너 : " + designer_name + "\n\n"
+                    f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
                     "📌 상태 : 🟢 상담중\n"
                     "📊 진행률 : 0%\n"
                     "⏰ 예상 완료 : 미설정"
@@ -153,20 +158,11 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             view=TicketCloseView()
         )
 
-        await ticket_channel.send(
-    embed=discord.Embed(
-        title="📌 추가 요구사항",
-        description="참고 이미지와 추가 요구사항을 자유롭게 작성해주세요.",
-        color=discord.Color.blurple()
-    ),
-    view=TicketCloseView()
-)
-
         log_channel = discord.utils.get(
             guild.text_channels,
             name=LOG_CHANNEL_NAME
         )
-
+        
         if log_channel:
             await log_channel.send(
                 f"📩 새로운 GFX 티켓 생성\n"
