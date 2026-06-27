@@ -131,8 +131,9 @@ class StarRatingView(discord.ui.View):
                             )
                         )
 
-                        await db.commit()
-                                        success_view = discord.ui.View()
+                                                await db.commit()
+
+                success_view = discord.ui.View()
 
                 try:
                     invite = await review_channel.create_invite(
