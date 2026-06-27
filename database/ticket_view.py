@@ -1,6 +1,6 @@
 import discord
 
-from modals.gfx_modal import PurchaseModal
+from views.designer_select import DesignerSelectView
 from modals.uniform_modal import UniformModal
 from modals.logo_modal import LogoModal
 
@@ -39,9 +39,11 @@ class CommissionSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
 
         if self.values[0] == "gfx":
-            await interaction.response.send_modal(
-                PurchaseModal()
-            )
+    await interaction.response.send_message(
+        "원하는 GFX 디자이너를 선택해주세요.",
+        view=DesignerSelectView(),
+        ephemeral=True
+    )
 
         elif self.values[0] == "uniform":
             await interaction.response.send_modal(
