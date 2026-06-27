@@ -1,8 +1,8 @@
 import discord
 
-from views.designer_select import DesignerSelectView
-from modals.uniform_modal import UniformModal
+from views.designer_select import DesignerView
 from modals.logo_modal import LogoModal
+from views.designer_select import DesignerView
 
 
 class CommissionSelect(discord.ui.Select):
@@ -33,24 +33,29 @@ class CommissionSelect(discord.ui.Select):
 
         super().__init__(
             placeholder="커미션 종류를 선택해주세요.",
+            min_values=1,
+            max_values=1,
             options=options
         )
 
     async def callback(self, interaction: discord.Interaction):
 
         if self.values[0] == "gfx":
-    await interaction.response.send_message(
-        "원하는 GFX 디자이너를 선택해주세요.",
-        view=DesignerSelectView(),
-        ephemeral=True
-    )
+
+            await interaction.response.send_message(
+                "🎨 담당 디자이너를 선택해주세요.",
+                view=DesignerView(),
+                ephemeral=True
+            )
 
         elif self.values[0] == "uniform":
+
             await interaction.response.send_modal(
                 UniformModal()
             )
 
         elif self.values[0] == "logo":
+
             await interaction.response.send_modal(
                 LogoModal()
             )
