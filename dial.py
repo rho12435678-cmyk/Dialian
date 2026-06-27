@@ -237,9 +237,10 @@ async def progress(ctx, percent: int):
         )
 
         await msg.edit(embed=embed)
-        await ctx.send("✅ 진행률이 변경되었습니다.", delete_after=3)
+await ctx.send("✅ 진행률이 변경되었습니다.", delete_after=3)
 return
-    await ctx.send("진행 패널을 찾지 못했습니다.")
+
+await ctx.send("진행 패널을 찾지 못했습니다.")
 
 @bot.command(name="예상")
 @commands.has_permissions(administrator=True)
@@ -275,9 +276,10 @@ async def estimate(ctx, days: str):
         )
 
         await msg.edit(embed=embed)
-        await ctx.send("✅ 예상 작업일이 변경되었습니다.", delete_after=3)
+await ctx.send("✅ 예상 작업일이 변경되었습니다.", delete_after=3)
 return
-    await ctx.send("진행 패널을 찾지 못했습니다.")
+
+await ctx.send("진행 패널을 찾지 못했습니다.")
 
 @bot.command(name="완료")
 @commands.has_permissions(administrator=True)
