@@ -600,7 +600,7 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         )
 
     
-class TicketOpenView(discord.ui.View):
+from views.ticket_view import TicketOpenView
     def __init__(self):
         super().__init__(timeout=None)
 
