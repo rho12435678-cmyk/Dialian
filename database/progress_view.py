@@ -22,7 +22,7 @@ class ProgressView(discord.ui.View):
     async def p75(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.update_progress(interaction, 75, "🔵 마무리 작업", "1일")
 
-    @discord.ui.button(label="100%", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="100%", style=discord.ButtonStyle.success)
     async def p100(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.update_progress(interaction, 100, "✅ 완료", "완료")
 
