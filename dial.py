@@ -7,6 +7,7 @@ import re
 from discord.ext import commands, tasks
 from database.database import create_tables
 from zoneinfo import ZoneInfo
+from views.ticket_view import TicketOpenView
 
 TOKEN = os.getenv("TOKEN")
 
@@ -597,25 +598,6 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         await interaction.followup.send(
             f"✅ 신청서 제출 완료!\n{ticket_channel.mention}",
             ephemeral=True
-        )
-
-    
-from views.ticket_view import TicketOpenView
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="📩 티켓 열기",
-        style=discord.ButtonStyle.primary,
-        custom_id="open_ticket_btn"
-    )
-    async def open_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await interaction.response.send_modal(
-            PurchaseModal()
         )
         
         
