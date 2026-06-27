@@ -4,6 +4,7 @@ from datetime import datetime
 from config import *
 from views.close_ticket import TicketCloseView
 from views.progress_view import ProgressView
+from views.payment_view import PaymentView
 
 
 class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
