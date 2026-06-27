@@ -1,33 +1,24 @@
 import discord
 
-class LogoModal(discord.ui.Modal, title="🖌 Discord 로고 커미션 신청서"):
+class LogoModal(discord.ui.Modal, title="🖌 Discord 로고 커미션"):
 
-    logo_name = discord.ui.TextInput(
-        label="로고에 들어갈 이름",
-        placeholder="예: Dialian",
-        required=True,
-        max_length=50
-    )
-
-    logo_style = discord.ui.TextInput(
+    style = discord.ui.TextInput(
         label="원하는 로고 스타일",
-        placeholder="예: 심플, 네온, 다크, 3D 등",
+        placeholder="예: 미니멀, 네온, 게임풍...",
         style=discord.TextStyle.paragraph,
         required=True,
         max_length=500
     )
 
-    extra_request = discord.ui.TextInput(
-        label="추가 요청사항",
-        placeholder="없으면 '없음' 입력",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=500
+    reference = discord.ui.TextInput(
+        label="참고 이미지 링크 (없으면 없음)",
+        placeholder="https://...",
+        required=False
     )
 
     async def on_submit(self, interaction: discord.Interaction):
 
         await interaction.response.send_message(
-            "✅ 로고 신청서가 제출되었습니다.\n\n이제 티켓이 생성될 예정입니다.",
+            "✅ 로고 신청서가 접수되었습니다.",
             ephemeral=True
         )
