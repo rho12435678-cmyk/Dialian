@@ -120,11 +120,6 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             content=user.mention,
             embed=embed
         )
-        
-                await ticket_channel.send(
-            content=user.mention,
-            embed=embed
-        )
 
         await ticket_channel.send(
             embed=discord.Embed(
