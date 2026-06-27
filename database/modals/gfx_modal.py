@@ -117,7 +117,8 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             inline=False
         )
 
-                await ticket_channel.send(
+
+        await ticket_channel.send(
             content=user.mention,
             embed=embed
         )
@@ -158,7 +159,7 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             ),
             view=TicketCloseView()
         )
-
+        
         log_channel = discord.utils.get(
             guild.text_channels,
             name=LOG_CHANNEL_NAME
