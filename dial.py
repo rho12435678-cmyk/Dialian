@@ -348,8 +348,6 @@ try:
 except Exception as e:
     print(e)
 
-    await ctx.message.add_reaction("🎉")
-
 
 # ==================== [봇 시작 시스템] ====================
 
