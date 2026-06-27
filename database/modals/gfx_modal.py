@@ -8,6 +8,9 @@ from config import *
 from views.close_ticket import TicketCloseView
 
 class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
+    def __init__(self):
+    super().__init__()
+    self.selected_designer = None
 
     roblox_nickname = discord.ui.TextInput(
         label="GFX에 나올 로블록스 캐릭터 닉네임",
@@ -69,20 +72,23 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             )
         }
 
-        for dev_id in DEVELOPER_IDS:
-            dev_member = guild.get_member(dev_id)
+        if self.selected_designer:
 
-            if dev_member:
-                overwrites[dev_member] = discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    embed_links=True
-                )
+    dev_member = guild.get_member(self.selected_designer)
 
-        ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            overwrites=overwrites
+    if dev_member:
+
+        overwrites[dev_member] = discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=True,
+            attach_files=True,
+            embed_links=True
+        )
+
+        nickname = user.display_name.lower().replace(" ", "-")
+
+ticket_channel_name = f"티켓-{nickname}"
+
         )
 
         form_embed = discord.Embed(
@@ -154,20 +160,13 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
             color=0x5865F2
         )
 
-        for dev_id in DEVELOPER_IDS:
-            try:
-                developer = guild.get_member(dev_id)
+        if self.selected_designer:
 
-if developer is None:
-    developer = await interaction.client.fetch_user(dev_id)
+    developer = guild.get_member(self.selected_designer)
 
-                if developer and not developer.bot:
-                    await developer.send(embed=dev_dm_embed)
+    if developer:
 
-            except Exception as e:
-                print(f"[개발자 DM 실패] {e}")
-
-        await interaction.followup.send(
-            f"✅ 신청서 제출 완료!\n{ticket_channel.mention}",
-            ephemeral=True
-        )
+        try:
+            await developer.send(embed=dev_dm_embed)
+        except:
+            pass
