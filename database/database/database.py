@@ -49,25 +49,6 @@ holder TEXT
 
 )
 """)
-
-        # 후기 저장
-        await db.execute("""
-CREATE TABLE IF NOT EXISTS reviews(
-
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-developer_id INTEGER,
-
-customer_id INTEGER,
-
-stars INTEGER,
-
-review TEXT,
-
-created_at TEXT
-
-)
-""")
         
         # 고객 정보
         await db.execute("""
