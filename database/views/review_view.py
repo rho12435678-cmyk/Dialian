@@ -132,3 +132,55 @@ class StarRatingView(discord.ui.View):
                         )
 
                         await db.commit()
+                                        success_view = discord.ui.View()
+
+                try:
+                    invite = await review_channel.create_invite(
+                        max_age=300,
+                        max_uses=1
+                    )
+
+                    success_view.add_item(
+                        discord.ui.Button(
+                            label="😄 내가 쓴 후기 보러가기",
+                            url=invite.url,
+                            style=discord.ButtonStyle.link
+                        )
+                    )
+                except:
+                    pass
+
+                await interaction.followup.send(
+                    f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!",
+                    view=success_view,
+                    ephemeral=True
+                )
+
+                disabled_view = discord.ui.View()
+
+                for i in range(1, 6):
+                    style = (
+                        discord.ButtonStyle.success
+                        if i == 5
+                        else discord.ButtonStyle.secondary
+                    )
+
+                    disabled_view.add_item(
+                        discord.ui.Button(
+                            label=f"⭐ {i}점",
+                            style=style,
+                            custom_id=f"star_{i}",
+                            disabled=True
+                        )
+                    )
+
+                await interaction.message.edit(view=disabled_view)
+
+            else:
+                await interaction.followup.send(
+                    "후기 채널을 찾을 수 없습니다.",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            print(f"[별점 등록 에러] {e}")
