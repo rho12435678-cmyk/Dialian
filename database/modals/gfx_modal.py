@@ -123,36 +123,41 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         )
 
         await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 커미션 진행",
-                description=(
-                    f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
-                    "📌 상태 : 🟢 상담중\n"
-                    "📊 진행률 : 0%\n"
-                    "⏰ 예상 완료 : 미설정"
-                ),
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            ),
-            view=ProgressView()
-        )
+    embed=discord.Embed(
+        title="📌 커미션 진행",
+        description=(
+            f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
+            "📌 상태 : 🟢 상담중\n"
+            "📊 진행률 : 0%\n"
+            "⏰ 예상 완료 : 미설정"
+        ),
+        color=discord.Color.green(),
+        timestamp=datetime.now()
+    ),
+    view=ProgressView()
+)
 
-        await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 추가 요구사항",
-                description=(
-                    "참고 이미지와 추가 요구사항을 자유롭게 작성해주세요.\n\n"
-                    "• 원하는 포즈\n"
-                    "• 참고 이미지\n"
-                    "• 추가 텍스트\n"
-                    "• 배경 세부사항\n"
-                    "• 기타 요청사항"
-                ),
-                color=discord.Color.blurple(),
-                timestamp=datetime.now()
-            ),
-            view=TicketCloseView()
-        )
+await ticket_channel.send(
+    "💳 결제는 아래 버튼을 이용해주세요.",
+    view=PaymentView(self.selected_designer)
+)
+
+await ticket_channel.send(
+    embed=discord.Embed(
+        title="📌 추가 요구사항",
+        description=(
+            "참고 이미지와 추가 요구사항을 자유롭게 작성해주세요.\n\n"
+            "• 원하는 포즈\n"
+            "• 참고 이미지\n"
+            "• 추가 텍스트\n"
+            "• 배경 세부사항\n"
+            "• 기타 요청사항"
+        ),
+        color=discord.Color.blurple(),
+        timestamp=datetime.now()
+    ),
+    view=TicketCloseView()
+)
 
         log_channel = discord.utils.get(
             guild.text_channels,
