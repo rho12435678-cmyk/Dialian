@@ -1,12 +1,8 @@
 import discord
 import os
-import asyncio
-from io import BytesIO
-from datetime import datetime
 import re
-from discord.ext import commands, tasks
+from discord.ext import commands
 from database.database import create_tables
-from zoneinfo import ZoneInfo
 from views.ticket_view import TicketOpenView
 from config import *
 from views.close_ticket import TicketCloseView
@@ -83,11 +79,9 @@ async def on_ready():
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
 
-    if not auto_announce.is_running():
-        auto_announce.start()
+    
 
     print("✨ 영속성 버튼 등록 완료!")
-    print("📢 자동 판매공지 시작")
 
 if TOKEN:
     bot.run(TOKEN)
