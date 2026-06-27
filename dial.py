@@ -312,8 +312,6 @@ async def complete(ctx):
 
             break
 
-        from views.review_view import StarRatingView
-
     review_embed = discord.Embed(
         title="⭐ 작업이 완료되었습니다!",
         description="아래 버튼을 눌러 만족도를 평가해주세요.",
