@@ -323,15 +323,10 @@ async def complete(ctx):
         view=StarRatingView()
     )
 
-    await ctx.send(
-    embed=review_embed,
-    view=StarRatingView()
-)
+    try:
+        channel_name = ctx.channel.name
 
-try:
-    channel_name = ctx.channel.name
-
-    if channel_name.startswith("티켓-"):
+ if channel_name.startswith("티켓-"):
         nickname = channel_name.replace("티켓-", "")
 
         member = discord.utils.find(
