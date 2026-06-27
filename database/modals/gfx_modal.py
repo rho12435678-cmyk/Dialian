@@ -156,10 +156,10 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
 
         for dev_id in DEVELOPER_IDS:
             try:
-                developer = (
-                    guild.get_member(dev_id)
-                    or await bot.fetch_user(dev_id)
-                )
+                developer = guild.get_member(dev_id)
+
+if developer is None:
+    developer = await interaction.client.fetch_user(dev_id)
 
                 if developer and not developer.bot:
                     await developer.send(embed=dev_dm_embed)
