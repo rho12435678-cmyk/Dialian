@@ -1,4 +1,7 @@
 import discord
+import asyncio
+
+from datetime import datetime
 
 class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
 
