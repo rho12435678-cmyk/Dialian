@@ -38,6 +38,11 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         guild = interaction.guild
         user = interaction.user
 
+        designer_name = "미지정"
+
+if self.selected_designer:
+    designer_name = DESIGNERS["gfx"][self.selected_designer]
+
         nickname = user.display_name.lower().replace(" ", "-")
         ticket_channel_name = f"티켓-{nickname}"
 
@@ -88,6 +93,12 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         embed.add_field(
             name="🎮 Roblox 닉네임",
             value=self.roblox_nickname.value,
+            inline=False
+        )
+
+        embed.add_field(
+            name="👨‍💻 담당 디자이너",
+            value=designer_name,
             inline=False
         )
 
