@@ -8,25 +8,11 @@ from discord.ext import commands, tasks
 from database.database import create_tables
 from zoneinfo import ZoneInfo
 from views.ticket_view import TicketOpenView
+from config import *
 
 TOKEN = os.getenv("TOKEN")
 
-REVIEW_CHANNEL_NAME = "후기"
-LOG_CHANNEL_NAME = "구매로그"
-ANNOUNCE_CHANNEL_ID = 1505562851824369714
-
-# 자동 지급할 구매자 역할 ID
-BUYER_ROLE_ID = 1505076370332586155
-CUSTOMER_ROLE_ID = 1505074732700008531
-
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
-DEVELOPER_IDS = [
-    1292859064065458189,
-    1468584582113919129,
-    1465051418162626763,
-    859756809865789451,
-    375938495350571009
-]
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
