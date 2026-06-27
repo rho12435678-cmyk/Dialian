@@ -40,7 +40,7 @@ class StarRatingView(discord.ui.View):
                         break
 
             if not guild:
-                guild = bot.guilds[0] if bot.guilds else None
+                guild = interaction.client.guilds[0] if interaction.client.guilds else None
 
             if not guild:
                 return await interaction.followup.send(
