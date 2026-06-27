@@ -1,12 +1,8 @@
 import discord
 
-# 아직 import 하지 않습니다.
-# from modals.gfx_modal import PurchaseModal
-# from modals.uniform_modal import UniformModal
-# from modals.logo_modal import LogoModal
-
 from modals.uniform_modal import UniformModal
 from modals.logo_modal import LogoModal
+
 
 class CommissionSelect(discord.ui.Select):
 
@@ -43,21 +39,21 @@ class CommissionSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
 
-    if self.values[0] == "gfx":
-        await interaction.response.send_message(
-            "🎨 GFX 신청서는 다음 단계에서 연결됩니다.",
-            ephemeral=True
-        )
+        if self.values[0] == "gfx":
+            await interaction.response.send_message(
+                "🎨 GFX 신청서는 다음 단계에서 연결됩니다.",
+                ephemeral=True
+            )
 
-    elif self.values[0] == "uniform":
-        await interaction.response.send_modal(
-            UniformModal()
-        )
+        elif self.values[0] == "uniform":
+            await interaction.response.send_modal(
+                UniformModal()
+            )
 
-    elif self.values[0] == "logo":
-        await interaction.response.send_modal(
-            LogoModal()
-        )
+        elif self.values[0] == "logo":
+            await interaction.response.send_modal(
+                LogoModal()
+            )
 
 
 class TicketOpenView(discord.ui.View):
