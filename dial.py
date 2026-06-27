@@ -9,6 +9,7 @@ from database.database import create_tables
 from zoneinfo import ZoneInfo
 from views.ticket_view import TicketOpenView
 from config import *
+from views.close_ticket import TicketCloseView
 
 TOKEN = os.getenv("TOKEN")
 
