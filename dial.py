@@ -1,6 +1,8 @@
 import discord
 import os
 import re
+import aiosqlite
+from datetime import datetime, timedelta
 from discord.ext import commands
 from database.database import create_tables
 from views.ticket_view import TicketOpenView
@@ -64,6 +66,263 @@ async def t_create_panel(ctx):
         embed=embed,
         view=TicketOpenView()
     )
+
+@bot.command(name="통계")
+@commands.has_permissions(administrator=True)
+async def stats(ctx):
+
+    since = (datetime.now() - timedelta(days=14)).isoformat()
+
+    async with aiosqlite.connect("data/dialian.db") as db:
+
+        cursor = await db.execute(
+            """
+            SELECT
+                COUNT(*),
+                AVG(stars)
+            FROM reviews
+            WHERE created_at >= ?
+            """,
+            (since,)
+        )
+
+        total_reviews, avg_rating = await cursor.fetchone()
+
+        cursor = await db.execute(
+            """
+            SELECT
+                developer_id,
+                COUNT(*),
+                AVG(stars)
+            FROM reviews
+            WHERE created_at >= ?
+            GROUP BY developer_id
+            ORDER BY COUNT(*) DESC
+            """,
+            (since,)
+        )
+
+        developers = await cursor.fetchall()
+
+    embed = discord.Embed(
+        title="📊 최근 2주 통계",
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="⭐ 전체 후기",
+        value=total_reviews or 0,
+        inline=True
+    )
+
+    embed.add_field(
+        name="⭐ 평균 평점",
+        value=f"{(avg_rating or 0):.2f}/5",
+        inline=True
+    )
+
+    if developers:
+
+        text = ""
+
+        for dev_id, count, avg in developers:
+            member = ctx.guild.get_member(dev_id)
+
+            name = member.mention if member else str(dev_id)
+
+            text += (
+                f"{name}\n"
+                f"후기 {count}개 | 평균 {(avg or 0):.2f}⭐\n\n"
+            )
+
+        embed.add_field(
+            name="👨‍💻 디자이너 통계",
+            value=text,
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+@bot.command(name="계좌등록")
+@commands.has_permissions(administrator=True)
+async def register_bank(ctx, bank_name, account_number, holder):
+
+    async with aiosqlite.connect("data/dialian.db") as db:
+
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO bank_accounts(
+                developer_id,
+                bank_name,
+                account_number,
+                holder
+            )
+            VALUES(?,?,?,?)
+            """,
+            (
+                ctx.author.id,
+                bank_name,
+                account_number,
+                holder
+            )
+        )
+
+        await db.commit()
+
+    embed = discord.Embed(
+        title="✅ 계좌 등록 완료",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="은행",
+        value=bank_name,
+        inline=False
+    )
+
+    embed.add_field(
+        name="계좌번호",
+        value=f"`{account_number}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="예금주",
+        value=holder,
+        inline=False
+    )
+
+    await ctx.send(embed=embed)
+
+@bot.command(name="진행")
+@commands.has_permissions(administrator=True)
+async def progress(ctx, percent: int):
+
+    if percent not in [0, 25, 50, 75, 100]:
+        return await ctx.send("사용법: `!진행 0|25|50|75|100`")
+
+    status = {
+        0: "🟢 상담중",
+        25: "🟡 작업 시작",
+        50: "🟠 작업중",
+        75: "🔵 마무리 작업",
+        100: "✅ 완료"
+    }[percent]
+
+    async for msg in ctx.channel.history(limit=30):
+
+        if msg.author != bot.user:
+            continue
+
+        if not msg.embeds:
+            continue
+
+        embed = msg.embeds[0]
+
+        if embed.title != "📌 커미션 진행":
+            continue
+
+        lines = embed.description.split("\n")
+
+        designer = lines[0]
+        estimate = lines[3]
+
+        embed.description = (
+            f"{designer}\n\n"
+            f"📌 상태 : {status}\n"
+            f"📊 진행률 : {percent}%\n"
+            f"{estimate}"
+        )
+
+        await msg.edit(embed=embed)
+        return await ctx.message.add_reaction("✅")
+
+    await ctx.send("진행 패널을 찾지 못했습니다.")
+
+@bot.command(name="예상")
+@commands.has_permissions(administrator=True)
+async def estimate(ctx, days: str):
+
+    if days not in ["1일", "2일", "3일"]:
+        return await ctx.send("사용법: `!예상 1일|2일|3일`")
+
+    async for msg in ctx.channel.history(limit=30):
+
+        if msg.author != bot.user:
+            continue
+
+        if not msg.embeds:
+            continue
+
+        embed = msg.embeds[0]
+
+        if embed.title != "📌 커미션 진행":
+            continue
+
+        lines = embed.description.split("\n")
+
+        designer = lines[0]
+        status = lines[2]
+        progress = lines[3]
+
+        embed.description = (
+            f"{designer}\n\n"
+            f"{status}\n"
+            f"{progress}\n"
+            f"⏰ 예상 완료 : {days}"
+        )
+
+        await msg.edit(embed=embed)
+        return await ctx.message.add_reaction("✅")
+
+    await ctx.send("진행 패널을 찾지 못했습니다.")
+
+@bot.command(name="완료")
+@commands.has_permissions(administrator=True)
+async def complete(ctx):
+
+    async for msg in ctx.channel.history(limit=30):
+
+        if msg.author != bot.user:
+            continue
+
+        if not msg.embeds:
+            continue
+
+        embed = msg.embeds[0]
+
+        if embed.title == "📌 커미션 진행":
+
+            lines = embed.description.split("\n")
+
+            designer = lines[0]
+
+            embed.description = (
+                f"{designer}\n\n"
+                "📌 상태 : ✅ 완료\n"
+                "📊 진행률 : 100%\n"
+                "⏰ 예상 완료 : 완료"
+            )
+
+            await msg.edit(embed=embed)
+
+            break
+
+    from views.review_view import StarRatingView
+
+    review_embed = discord.Embed(
+        title="⭐ 작업이 완료되었습니다!",
+        description="아래 버튼을 눌러 만족도를 평가해주세요.",
+        color=discord.Color.gold()
+    )
+
+    await ctx.send(
+        embed=review_embed,
+        view=StarRatingView()
+    )
+
+    await ctx.message.add_reaction("🎉")
+
 
 # ==================== [봇 시작 시스템] ====================
 
