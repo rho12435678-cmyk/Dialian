@@ -5,6 +5,7 @@ from io import BytesIO
 from datetime import datetime
 import re
 from discord.ext import commands, tasks
+from database.database import create_tables
 from zoneinfo import ZoneInfo
 
 TOKEN = os.getenv("TOKEN")
@@ -685,6 +686,9 @@ async def t_create_panel(ctx):
 
 @bot.event
 async def on_ready():
+    
+    await create_tables()
+    
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
     print("--------------------------------------------------")
 
