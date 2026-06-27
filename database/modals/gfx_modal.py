@@ -3,6 +3,7 @@ from datetime import datetime
 
 from config import *
 from views.close_ticket import TicketCloseView
+from views.progress_view import ProgressView
 
 
 class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
@@ -121,13 +122,26 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         )
 
         await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 추가 요구사항",
-                description="참고 이미지와 추가 요구사항을 자유롭게 작성해주세요.",
-                color=discord.Color.green()
-            ),
-            view=TicketCloseView()
-        )
+    embed=discord.Embed(
+        title="📌 커미션 진행",
+        description=(
+            "상태 : 🟢 상담중\n"
+            "진행률 : 0%\n"
+            "예상 완료 : 미설정"
+        ),
+        color=discord.Color.green()
+    ),
+    view=ProgressView()
+)
+
+        await ticket_channel.send(
+    embed=discord.Embed(
+        title="📌 추가 요구사항",
+        description="참고 이미지와 추가 요구사항을 자유롭게 작성해주세요.",
+        color=discord.Color.blurple()
+    ),
+    view=TicketCloseView()
+)
 
         log_channel = discord.utils.get(
             guild.text_channels,
