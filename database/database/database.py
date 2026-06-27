@@ -12,16 +12,63 @@ async def create_tables():
 
         # 개발자 정보
         await db.execute("""
-        CREATE TABLE IF NOT EXISTS developers (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
-            specialty TEXT,
-            bank TEXT,
-            account TEXT,
-            owner TEXT
-        )
-        """)
+CREATE TABLE IF NOT EXISTS commissions(
 
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+ticket_channel INTEGER,
+
+customer_id INTEGER,
+
+designer_id INTEGER,
+
+category TEXT,
+
+status TEXT,
+
+progress INTEGER,
+
+estimate_day INTEGER,
+
+created_at TEXT
+
+)
+""")
+
+        #개발자 계좌
+        await db.execute("""
+CREATE TABLE IF NOT EXISTS bank_accounts(
+
+developer_id INTEGER PRIMARY KEY,
+
+bank_name TEXT,
+
+account_number TEXT,
+
+holder TEXT
+
+)
+""")
+
+        # 후기 저장
+        await db.execute("""
+CREATE TABLE IF NOT EXISTS reviews(
+
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+developer_id INTEGER,
+
+customer_id INTEGER,
+
+stars INTEGER,
+
+review TEXT,
+
+created_at TEXT
+
+)
+""")
+        
         # 고객 정보
         await db.execute("""
         CREATE TABLE IF NOT EXISTS customers (
