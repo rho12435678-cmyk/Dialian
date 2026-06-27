@@ -2,6 +2,10 @@ import discord
 
 from datetime import datetime
 from config import *
+import aiosqlite
+from datetime import datetime
+
+DATABASE = "data/dialian.db"
 
 class StarRatingView(discord.ui.View):
     def __init__(self):
@@ -87,6 +91,45 @@ class StarRatingView(discord.ui.View):
                 )
 
                 await review_channel.send(embed=review_embed)
+
+                if hasattr(interaction, "message") and interaction.message.embeds:
+
+    designer_id = None
+
+    try:
+        for field in interaction.message.embeds[0].fields:
+            if field.name == "👨‍💻 담당 디자이너":
+                text = field.value
+                if "<@" in text:
+                    designer_id = int(text.replace("<@", "").replace(">", "").replace("!", ""))
+    except:
+        pass
+
+    if designer_id:
+
+        async with aiosqlite.connect(DATABASE) as db:
+
+            await db.execute(
+                """
+                INSERT INTO reviews(
+                    developer_id,
+                    customer_id,
+                    stars,
+                    review,
+                    created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    designer_id,
+                    interaction.user.id,
+                    stars,
+                    "",
+                    datetime.now().isoformat()
+                )
+            )
+
+            await db.commit()
 
                 success_view = discord.ui.View()
 
