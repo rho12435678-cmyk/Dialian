@@ -323,6 +323,31 @@ async def complete(ctx):
         view=StarRatingView()
     )
 
+    await ctx.send(
+    embed=review_embed,
+    view=StarRatingView()
+)
+
+try:
+    channel_name = ctx.channel.name
+
+    if channel_name.startswith("티켓-"):
+        nickname = channel_name.replace("티켓-", "")
+
+        member = discord.utils.find(
+            lambda m: m.display_name.lower().replace(" ", "-") == nickname,
+            ctx.guild.members
+        )
+
+        if member:
+            role = ctx.guild.get_role(BUYER_ROLE_ID)
+
+            if role and role not in member.roles:
+                await member.add_roles(role)
+
+except Exception as e:
+    print(e)
+
     await ctx.message.add_reaction("🎉")
 
 
