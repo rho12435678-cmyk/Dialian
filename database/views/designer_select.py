@@ -1,8 +1,7 @@
 import discord
 
 from config import DESIGNERS
-from modals.gfx_modal import PurchaseModal
-
+from database.modal.gfx_modal import PurchaseModal
 
 class DesignerSelect(discord.ui.Select):
 
