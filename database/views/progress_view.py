@@ -32,6 +32,7 @@ class ProgressView(discord.ui.View):
     async def p100(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.update_progress(interaction, 100, "✅ 완료", "완료")
 
+
     async def update_progress(self, interaction, progress, status, estimate):
 
         if interaction.user.id not in DESIGNERS:
