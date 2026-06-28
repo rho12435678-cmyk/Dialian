@@ -1,49 +1,48 @@
 import discord
 
 DESIGNERS = [
-    375938495350571009,  # GFX + 복장
-    1292859064065458189,  # GFX + 로고
-    1468584582113919129,  # GFX
-    1465051418162626763,  # GFX
+    375938495350571009,
+    1292859064065458189,
+    1468584582113919129,
+    1465051418162626763,
 ]
 
 
 class ProgressView(discord.ui.View):
 
-    def __init__(self):
+    def __init__(self, progress_message):
         super().__init__(timeout=None)
+        self.progress_message = progress_message
 
     @discord.ui.button(label="0%", style=discord.ButtonStyle.secondary)
-    async def p0(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def p0(self, interaction, button):
         await self.update_progress(interaction, 0, "🟢 상담중", "미설정")
 
     @discord.ui.button(label="25%", style=discord.ButtonStyle.secondary)
-    async def p25(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def p25(self, interaction, button):
         await self.update_progress(interaction, 25, "🟡 작업 시작", "3일")
 
     @discord.ui.button(label="50%", style=discord.ButtonStyle.primary)
-    async def p50(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def p50(self, interaction, button):
         await self.update_progress(interaction, 50, "🟠 작업중", "2일")
 
     @discord.ui.button(label="75%", style=discord.ButtonStyle.success)
-    async def p75(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def p75(self, interaction, button):
         await self.update_progress(interaction, 75, "🔵 마무리 작업", "1일")
 
     @discord.ui.button(label="100%", style=discord.ButtonStyle.success)
-    async def p100(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def p100(self, interaction, button):
         await self.update_progress(interaction, 100, "✅ 완료", "완료")
 
     async def update_progress(self, interaction, progress, status, estimate):
 
-        # 디자이너만 진행률 변경 가능
         if interaction.user.id not in DESIGNERS:
-            await interaction.response.send_message(
-                "❌ 디자이너만 진행률을 변경할 수 있습니다.",
+            return await interaction.response.send_message(
+                "❌ 디자이너만 사용할 수 있습니다.",
                 ephemeral=True
             )
-            return
 
-        embed = interaction.message.embeds[0]
+        embed = self.progress_message.embeds[0]
 
         designer = embed.description.splitlines()[0].replace(
             "👨‍💻 담당 디자이너 : ", ""
@@ -56,12 +55,9 @@ class ProgressView(discord.ui.View):
             f"⏰ 예상 완료 : {estimate}"
         )
 
-        await interaction.message.edit(
-            embed=embed,
-            view=self
-        )
+        await self.progress_message.edit(embed=embed)
 
         await interaction.response.send_message(
-            "✅ 진행률이 변경되었습니다.",
+            "✅ 진행률을 변경했습니다.",
             ephemeral=True
         )
