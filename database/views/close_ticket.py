@@ -4,7 +4,9 @@ import re
 
 from datetime import datetime
 from config import *
-from views.review_view import StarRatingView
+from database.views.review_view import StarRatingView
+from database.views.payment_view import PaymentView
+from database.views.progress_view import ProgressView
 
 def sanitize_text(text):
     if not text:
