@@ -129,68 +129,68 @@ class TicketCloseView(discord.ui.View):
                 hours = duration.seconds // 3600
                 minutes = (duration.seconds % 3600) // 60
                 
-                                # ==============================
+                                                # ==============================
                 # 구매로그 채널
                 # ==============================
 
-                            log_channel = discord.utils.get(
+                log_channel = discord.utils.get(
                     guild.text_channels,
                     name=LOG_CHANNEL_NAME
                 )
 
                 if log_channel:
 
-                safe_log_embed = discord.Embed(
-                    title="🧾 구매/상담 로그",
-                    color=0x5865F2,
-                    timestamp=datetime.now()
-                )
+                    safe_log_embed = discord.Embed(
+                        title="🧾 구매/상담 로그",
+                        color=0x5865F2,
+                        timestamp=datetime.now()
+                    )
 
-                safe_log_embed.add_field(
-                    name="👤 고객",
-                    value=f"{ticket_owner.mention}",
-                    inline=True
-                )
+                    safe_log_embed.add_field(
+                        name="👤 고객",
+                        value=f"{ticket_owner.mention}",
+                        inline=True
+                    )
 
-                safe_log_embed.add_field(
-                    name="🔒 종료자",
-                    value=f"{interaction.user.mention}",
-                    inline=True
-                )
+                    safe_log_embed.add_field(
+                        name="🔒 종료자",
+                        value=f"{interaction.user.mention}",
+                        inline=True
+                    )
 
-                safe_log_embed.add_field(
-                    name="💬 메시지 수",
-                    value=str(message_count),
-                    inline=True
-                )
+                    safe_log_embed.add_field(
+                        name="💬 메시지 수",
+                        value=str(message_count),
+                        inline=True
+                    )
 
-                safe_log_embed.add_field(
-                    name="⏱ 상담 시간",
-                    value=f"{hours}시간 {minutes}분",
-                    inline=True
-                )
+                    safe_log_embed.add_field(
+                        name="⏱ 상담 시간",
+                        value=f"{hours}시간 {minutes}분",
+                        inline=True
+                    )
 
-                safe_log_embed.add_field(
-                    name="📎 첨부파일",
-                    value=f"{attachment_count}개",
-                    inline=True
-                )
+                    safe_log_embed.add_field(
+                        name="📎 첨부파일",
+                        value=f"{attachment_count}개",
+                        inline=True
+                    )
 
-                safe_log_embed.add_field(
-                    name="👥 참여자",
-                    value=", ".join(participants),
-                    inline=False
-                )
+                    safe_log_embed.add_field(
+                        name="👥 참여자",
+                        value=", ".join(participants),
+                        inline=False
+                    )
 
-                safe_log_embed.set_footer(
-                    text="전체 대화내용 및 개인정보는 저장되지 않았습니다."
-                )
+                    safe_log_embed.set_footer(
+                        text="전체 대화내용 및 개인정보는 저장되지 않았습니다."
+                    )
 
-                await log_channel.send(
-                    content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
-                    embed=safe_log_embed
-                )
-
+                    await log_channel.send(
+                        content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
+                        embed=safe_log_embed
+                    )
+                    
             # ==============================
             # 구매자 역할 자동 지급
             # ==============================
@@ -253,18 +253,18 @@ class TicketCloseView(discord.ui.View):
             except Exception as dm_e:
                 print(f"[DM 실패] {dm_e}")
 
-            await interaction.followup.send(
+                        await interaction.followup.send(
                 "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
             )
 
-                            await asyncio.sleep(5)
-                await channel.delete()
+            await asyncio.sleep(5)
+            await channel.delete()
 
-            else:
-                await interaction.followup.send(
-                    "❌ 올바른 티켓 채널이 아닙니다.",
-                    ephemeral=True
-                )
+        else:
+            await interaction.followup.send(
+                "❌ 올바른 티켓 채널이 아닙니다.",
+                ephemeral=True
+            )
 
         except Exception as e:
             print(f"[티켓 닫기 에러] {e}")
