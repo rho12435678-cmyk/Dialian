@@ -11,4 +11,7 @@ class UniformModal(discord.ui.Modal, title="👕 Roblox 복장 커미션 신청�
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        pass
+    await interaction.response.send_message(
+        "복장 신청이 접수되었습니다.",
+        ephemeral=True
+    )
