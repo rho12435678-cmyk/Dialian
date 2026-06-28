@@ -198,9 +198,9 @@ class PurchaseModal(discord.ui.Modal):
                     )
 
                     await developer.send(
-                        "💳 결제 정보 전송",
-                        view=PaymentView(ticket_channel)
-                    )
+    "💳 결제 정보 전송",
+    view=PaymentView(ticket_channel, self.selected_designer)
+)
 
                 except Exception:
                     pass
