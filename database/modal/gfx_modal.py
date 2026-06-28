@@ -135,7 +135,7 @@ class PurchaseModal(discord.ui.Modal):
             embed=embed
         )
 
-        await ticket_channel.send(
+        progress_message = await ticket_channel.send(
             embed=discord.Embed(
                 title="📌 커미션 진행",
                 description=(
@@ -146,13 +146,11 @@ class PurchaseModal(discord.ui.Modal):
                 ),
                 color=discord.Color.green(),
                 timestamp=datetime.now()
-            ),
-            view=ProgressView()
+            )
         )
 
         await ticket_channel.send(
-            "💳 결제는 아래 버튼을 이용해주세요.",
-            view=PaymentView(self.selected_designer)
+            "💳 결제는 담당 디자이너의 안내 후 진행됩니다."
         )
 
         await ticket_channel.send(
@@ -193,6 +191,17 @@ class PurchaseModal(discord.ui.Modal):
                         f"🔔 새로운 GFX 커미션이 들어왔습니다.\n"
                         f"{ticket_channel.mention}"
                     )
+
+                    await developer.send(
+                        "📊 진행률 관리",
+                        view=ProgressView(progress_message)
+                    )
+
+                    await developer.send(
+                        "💳 결제 정보 전송",
+                        view=PaymentView(ticket_channel)
+                    )
+
                 except Exception:
                     pass
 
