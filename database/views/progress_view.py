@@ -1,5 +1,11 @@
 import discord
 
+DESIGNERS = [
+    375938495350571009,
+    1292859064065458189,
+    1468584582113919129,
+    1465051418162626763,
+]
 
 class ProgressView(discord.ui.View):
 
