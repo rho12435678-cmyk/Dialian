@@ -6,6 +6,180 @@ from datetime import datetime
 from config import *
 from views.review_view import StarRatingView
 
+# ==================== [티켓 닫기 View] ====================
+
+class TicketCloseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="🔒 티켓 닫기",
+        style=discord.ButtonStyle.danger,
+        custom_id="close_ticket"
+    )
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        try:
+
+            # 봇 차단
+            if interaction.user.bot:
+                return
+
+            # 개발자만 티켓 종료 가능
+            if interaction.user.id not in DEVELOPER_IDS:
+                return await interaction.response.send_message(
+                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True
+                )
+
+            await interaction.response.defer()
+
+            channel = interaction.channel
+            channel_name = channel.name
+            guild = interaction.guild
+
+            if "티켓" in channel_name:
+
+                ticket_owner = None
+
+                try:
+                    owner_id = int(channel_name.split("-")[-1])
+
+                    ticket_owner = (
+                        guild.get_member(owner_id)
+                        or await guild.fetch_member(owner_id)
+                    )
+
+                except Exception:
+                    ticket_owner = interaction.user
+
+                await interaction.followup.send(
+                    "💾 안전하게 구매로그를 정리하는 중입니다..."
+                )
+
+                # ==============================
+                # 🔒 공개용 안전 구매로그 생성
+                # ==============================
+
+                message_count = 0
+                attachment_count = 0
+                participants = set()
+
+                recent_messages = []
+
+                async for msg in channel.history(
+                    limit=100,
+                    oldest_first=False
+                ):
+
+                    if msg.author.bot:
+                        continue
+
+                    message_count += 1
+                    participants.add(msg.author.display_name)
+
+                    if msg.attachments:
+                        attachment_count += len(msg.attachments)
+
+                    if len(recent_messages) < 3:
+
+                        clean_content = sanitize_text(msg.content)
+
+                        if not clean_content.strip():
+                            clean_content = "[파일 또는 이미지]"
+
+                        recent_messages.append(
+                            f"• {msg.author.display_name}: {clean_content}"
+                        )
+
+                created_at = channel.created_at
+                closed_at = datetime.now(created_at.tzinfo)
+
+                duration = closed_at - created_at
+
+                hours = duration.seconds // 3600
+                minutes = (duration.seconds % 3600) // 60
+
+                # ==============================
+                # 구매로그 채널
+                # ==============================
+
+                log_channel = discord.utils.get(
+                    guild.text_channels,
+                    name=LOG_CHANNEL_NAME
+                )
+
+                if log_channel:
+
+                    safe_log_embed = discord.Embed(
+                        title="🧾 구매/상담 로그",
+                        color=0x5865F2,
+                        timestamp=datetime.now()
+                    )
+
+                    safe_log_embed.add_field(
+                        name="👤 고객",
+                        value=f"{ticket_owner.mention}",
+                        inline=True
+                    )
+
+                    safe_log_embed.add_field(
+                        name="🔒 종료자",
+                        value=f"{interaction.user.mention}",
+                        inline=True
+                    )
+
+                    safe_log_embed.add_field(
+                        name="💬 메시지 수",
+                        value=str(message_count),
+                        inline=True
+                    )
+
+                    safe_log_embed.add_field(
+                        name="⏱ 상담 시간",
+                        value=f"{hours}시간 {minutes}분",
+                        inline=True
+                    )
+
+                    safe_log_embed.add_field(
+                        name="📎 첨부파일",
+                        value=f"{attachment_count}개",
+                        inline=True
+                    )
+
+                    safe_log_embed.add_field(
+                        name="👥 참여자",
+                        value=", ".join(participants),
+                        inline=False
+                    )
+
+
+                    safe_log_embed.set_footer(
+                        text="전체 대화내용 및 개인정보는 저장되지 않았습니다."
+                    )
+
+                    await log_channel.send(
+                        content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
+                        embed=safe_log_embed
+                    )
+
+                # ==============================
+                # 구매자 역할 자동 지급
+                # ==============================
+
+                try:
+
+                    buyer_role = guild.get_role(BUYER_ROLE_ID)
+
+                    if buyer_role and ticket_owner:
+
+                        if buyer_role not in ticket_owner.roles:
+
+                            await ticket_owner.add_roles(
+                                buyer_role,
+                                reason="커미션 완료 자동 구매자 역할 지급"
+                            )
+
                             try:
 
                                 success_role_embed = discord.Embed(
