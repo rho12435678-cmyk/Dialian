@@ -114,8 +114,11 @@ class TicketCloseView(discord.ui.View):
             # ==============================
             # 구매로그 채널
             # ==============================
-
-            if log_channel:
+           log_channel = discord.utils.get(
+               guild.text_channels,
+               name=LOG_CHANNEL_NAME
+           )
+           if log_channel:
 
                 safe_log_embed = discord.Embed(
                     title="🧾 구매/상담 로그",
