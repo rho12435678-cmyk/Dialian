@@ -1,6 +1,6 @@
 import discord
 
-from database.views.designer_select import DesignerView
+from database.views.category_view import CategoryView
 
 
 class TicketOpenView(discord.ui.View):
@@ -17,8 +17,9 @@ class TicketOpenView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+
         await interaction.response.send_message(
-            "담당 디자이너를 선택해주세요.",
-            view=DesignerView(),
+            "원하시는 커미션을 선택해주세요.",
+            view=CategoryView(),
             ephemeral=True
         )
