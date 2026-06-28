@@ -34,7 +34,7 @@ class ProgressView(discord.ui.View):
 
     async def update_progress(self, interaction, progress, status, estimate):
 
-    if interaction.user.id not in DESIGNERS:
+        if interaction.user.id not in DESIGNERS:
         await interaction.response.send_message(
             "❌ 디자이너만 진행률을 변경할 수 있습니다.",
             ephemeral=True
