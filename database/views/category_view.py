@@ -4,6 +4,7 @@ from database.views.designer_select import DesignerView
 from database.modal.logo_modal import LogoModal
 from database.modal.uniform_modal import UniformModal
 from config import DESIGNERS
+from database.modal.gfx_modal import PurchaseModal
 
 
 class CategoryView(discord.ui.View):
