@@ -1,14 +1,15 @@
 import discord
+from database.modal.gfx_modal import PurchaseModal
 
-class UniformModal(discord.ui.Modal, title="👕 Roblox 복장 커미션 신청서"):
 
-    content = discord.ui.TextInput(
-        label="원하는 복장 내용을 작성해주세요",
-        style=discord.TextStyle.paragraph,
-        placeholder="원하는 디자인, 색상, 참고사항 등을 자유롭게 작성해주세요.",
-        required=True,
-        max_length=1000
-    )
+class UniformModal(PurchaseModal):
+
+    MODAL_TITLE = "👕 Roblox 복장 커미션 신청서"
+    FORM_TITLE = "📋 Roblox 복장 신청서"
+
+    FIELD1 = "🎮 Roblox 닉네임"
+    FIELD2 = "👕 원하는 복장 종류"
+    FIELD3 = "📝 원하는 스타일"
 
     async def on_submit(self, interaction: discord.Interaction):
-        
+        await super().on_submit(interaction)
