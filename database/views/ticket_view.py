@@ -1,7 +1,7 @@
 import discord
 
-from modals.uniform_modal import UniformModal
-from modals.logo_modal import LogoModal
+from database.modals.uniform_modal import UniformModal
+from database.modals.logo_modal import LogoModal
 
 
 class CommissionSelect(discord.ui.Select):
