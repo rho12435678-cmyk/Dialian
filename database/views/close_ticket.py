@@ -37,11 +37,27 @@ class TicketCloseView(discord.ui.View):
         button: discord.ui.Button
     ):
 
-        await interaction.response.defer()
+        await interaction.followup.send()
 
-        channel = interaction.channel
-        channel_name = channel.name
-        guild = interaction.guild
+# 개발자만 티켓 종료 가능
+developer_ids = []
+
+for value in DESIGNERS.values():
+    if isinstance(value, dict):
+        if "id" in value:
+            developer_ids.append(value["id"])
+        else:
+            developer_ids.extend(value.keys())
+
+if interaction.user.id not in developer_ids:
+    return await interaction.followup.send(
+        "❌ 관리자만 티켓을 종료할 수 있습니다.",
+        ephemeral=True
+    )
+
+channel = interaction.channel
+channel_name = channel.name
+guild = interaction.guild
 
         if "티켓" in channel_name:
 
@@ -247,3 +263,7 @@ class TicketCloseView(discord.ui.View):
                 "❌ 올바른 티켓 채널이 아닙니다.",
                 ephemeral=True
             )
+            
+        except Exception as e:
+            print(f"[티켓 닫기 에러] 
+{e}")
