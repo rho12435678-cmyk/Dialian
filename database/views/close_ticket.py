@@ -47,24 +47,23 @@ class TicketCloseView(discord.ui.View):
 
             ticket_owner = None
 
-            try:
-                first_message = None
+try:
+    first_message = None
 
-                async for msg in channel.history(limit=1, oldest_first=True):
-                    first_message = msg
+    async for msg in channel.history(limit=1, oldest_first=True):
+        first_message = msg
 
-                if first_message and first_message.mentions:
-                    ticket_owner = first_message.mentions[0]
-                else:
-                    ticket_owner = interaction.user
+    if first_message and first_message.mentions:
+        ticket_owner = first_message.mentions[0]
+    else:
+        ticket_owner = interaction.user
 
-            except Exception:
-                ticket_owner = interaction.user
+except Exception:
+    ticket_owner = interaction.user
 
-            
-                            await interaction.followup.send(
-                "💾 안전하게 구매로그를 정리하는 중입니다..."
-            )
+await interaction.followup.send(
+    "💾 안전하게 구매로그를 정리하는 중입니다..."
+)
 
             # ==============================
             # 🔒 공개용 안전 구매로그 생성
