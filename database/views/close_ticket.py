@@ -111,7 +111,7 @@ class TicketCloseView(discord.ui.View):
             hours = duration.seconds // 3600
             minutes = (duration.seconds % 3600) // 60
 
-                        # ==============================
+            # ==============================
             # 구매로그 채널
             # ==============================
 
