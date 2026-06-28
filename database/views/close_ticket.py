@@ -82,7 +82,7 @@ class TicketCloseView(discord.ui.View):
                 except Exception:
                     ticket_owner = interaction.user
 
-                await interaction.followp.send(
+                await interaction.followup.send(
                     "💾 안전하게 구매로그를 정리하는 중입니다..."
                 )
 
@@ -229,11 +229,11 @@ class TicketCloseView(discord.ui.View):
             except Exception as role_err:
                 print(f"[구매자 역할 지급 실패] {role_err}")
 
-            # ==============================
+                                    # ==============================
             # 유저 DM
             # ==============================
 
-                        try:
+            try:
 
                 dm_embed = discord.Embed(
                     title="💌 서비스를 이용해 주셔서 감사합니다!",
