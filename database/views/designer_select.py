@@ -35,10 +35,10 @@ class DesignerSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
 
-        modal = PurchaseModal()
-        modal.selected_designer = int(self.values[0])
+    modal = PurchaseModal()
+    modal.selected_designer = int(self.values[0])
 
-        await interaction.response.send_modal(modal)
+    await interaction.response.send_modal(modal)
 
 
 class DesignerView(discord.ui.View):
