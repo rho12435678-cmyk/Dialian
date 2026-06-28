@@ -233,7 +233,6 @@ class TicketCloseView(discord.ui.View):
             # ==============================
             # 유저 DM
             # ==============================
-
             try:
 
                 dm_embed = discord.Embed(
