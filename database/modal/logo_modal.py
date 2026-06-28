@@ -12,4 +12,7 @@ class LogoModal(discord.ui.Modal, title="🖌 로고 커미션 신청서"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        pass
+    await interaction.response.send_message(
+        "로고 신청이 접수되었습니다.",
+        ephemeral=True
+    )
