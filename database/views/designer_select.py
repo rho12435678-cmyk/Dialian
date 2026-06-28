@@ -58,6 +58,8 @@ class DesignerSelect(discord.ui.Select):
 
 class DesignerView(discord.ui.View):
 
-    def __init__(self):
+    def __init__(self, guild: discord.Guild):
+
         super().__init__(timeout=180)
-        self.add_item(DesignerSelect())
+
+        self.add_item(DesignerSelect(guild))
