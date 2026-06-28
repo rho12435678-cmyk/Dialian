@@ -5,12 +5,12 @@ import aiosqlite
 from datetime import datetime, timedelta
 from discord.ext import commands
 from database.database import create_tables
-from views.ticket_view import TicketOpenView
 from config import *
-from views.close_ticket import TicketCloseView
-from views.review_view import StarRatingView
-from views.progress_view import ProgressView
-from views.payment_view import PaymentView
+from database.views.ticket_view import TicketOpenView
+from database.views.close_ticket import TicketCloseView
+from database.views.review_view import StarRatingView
+from database.views.progress_view import ProgressView
+from database.views.payment_view import PaymentView
 
 TOKEN = os.getenv("TOKEN")
 
