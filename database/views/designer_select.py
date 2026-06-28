@@ -37,19 +37,13 @@ class DesignerSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
 
-        designer_id = int(self.values[0])
+        
+async def callback(self, interaction: discord.Interaction):
 
-        # GFX + 로고 디자이너
-        if designer_id == DESIGNERS["logo"]["id"]:
-            modal = LogoModal()
+    modal = PurchaseModal()
+    modal.selected_designer = int(self.values[0])
 
-        # GFX + 복장 디자이너
-        elif designer_id == DESIGNERS["uniform"]["id"]:
-            modal = UniformModal()
-
-        # 일반 GFX
-        else:
-            modal = PurchaseModal()
+    await interaction.response.send_modal(modal)
 
         modal.selected_designer = designer_id
 
