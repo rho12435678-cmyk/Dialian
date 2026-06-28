@@ -34,21 +34,28 @@ class ProgressView(discord.ui.View):
 
     async def update_progress(self, interaction, progress, status, estimate):
 
-        embed = interaction.message.embeds[0]
-
-        embed.description = (
-            f"👨‍💻 담당 디자이너 : {embed.description.splitlines()[0].replace('👨‍💻 담당 디자이너 : ','')}\n\n"
-            f"📌 상태 : {status}\n"
-            f"📊 진행률 : {progress}%\n"
-            f"⏰ 예상 완료 : {estimate}"
-        )
-
-        await interaction.message.edit(
-            embed=embed,
-            view=self
-        )
-
+    if interaction.user.id not in DESIGNERS:
         await interaction.response.send_message(
-            "진행률이 변경되었습니다.",
+            "❌ 디자이너만 진행률을 변경할 수 있습니다.",
             ephemeral=True
         )
+        return
+
+    embed = interaction.message.embeds[0]
+
+    embed.description = (
+        f"👨‍💻 담당 디자이너 : {embed.description.splitlines()[0].replace('👨‍💻 담당 디자이너 : ','')}\n\n"
+        f"📌 상태 : {status}\n"
+        f"📊 진행률 : {progress}%\n"
+        f"⏰ 예상 완료 : {estimate}"
+    )
+
+    await interaction.message.edit(
+        embed=embed,
+        view=self
+    )
+
+    await interaction.response.send_message(
+        "진행률이 변경되었습니다.",
+        ephemeral=True
+    )
