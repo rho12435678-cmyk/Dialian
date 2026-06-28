@@ -1,8 +1,8 @@
 import discord
 
 from database.views.designer_select import DesignerView
-from config import DESIGNERS
 from database.modal.gfx_modal import PurchaseModal
+from config import DESIGNERS
 
 
 class CategoryView(discord.ui.View):
@@ -35,9 +35,9 @@ class CategoryView(discord.ui.View):
         button: discord.ui.Button
     ):
         modal = PurchaseModal()
-modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
-await interaction.response.send_modal(modal)
+        modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
 
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(
         label="👕 Roblox 복장",
@@ -48,23 +48,7 @@ await interaction.response.send_modal(modal)
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-        modal = UniformModal()
+        modal = PurchaseModal()
         modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
+
         await interaction.response.send_modal(modal)
-
-@discord.ui.button(label="🖼️ 로고", style=discord.ButtonStyle.success)
-async def logo(self, interaction, button):
-
-    modal = PurchaseModal()
-    modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
-
-    await interaction.response.send_modal(modal)
-
-@discord.ui.button(label="👕 Roblox 복장", style=discord.ButtonStyle.secondary)
-async def uniform(self, interaction, button):
-
-    modal = PurchaseModal()
-modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
-await interaction.response.send_modal(modal)
-
-    await interaction.response.send_modal(modal)
