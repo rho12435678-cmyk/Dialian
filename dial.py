@@ -370,3 +370,5 @@ if TOKEN:
     bot.run(TOKEN)
 else:
     print("❌ TOKEN 환경변수를 찾을 수 없습니다.")
+
+# redeploy
