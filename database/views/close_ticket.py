@@ -168,79 +168,70 @@ class TicketCloseView(discord.ui.View):
                     text="전체 대화내용 및 개인정보는 저장되지 않았습니다."
                 )
 
-                await log_channel.send(
-                    content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
-                    embed=safe_log_embed
+                if log_channel:
+    # 로그 보내기
+    await log_channel.send(...)
+
+# ==============================
+# 구매자 역할 자동 지급
+# ==============================
+
+try:
+    buyer_role = guild.get_role(BUYER_ROLE_ID)
+
+    if buyer_role and ticket_owner:
+        if buyer_role not in ticket_owner.roles:
+            await ticket_owner.add_roles(
+                buyer_role,
+                reason="커미션 완료 자동 구매자 역할 지급"
+            )
+
+            try:
+                success_role_embed = discord.Embed(
+                    title="🎉 구매자 역할 지급 완료",
+                    description=(
+                        f"`{guild.name}` 서버에서\n"
+                        f"구매자 역할이 지급되었습니다!"
+                    ),
+                    color=discord.Color.green()
                 )
 
-                # ==============================
-                # 구매자 역할 자동 지급
-                # ==============================
+                await ticket_owner.send(embed=success_role_embed)
 
-                try:
+            except:
+                pass
 
-                    buyer_role = guild.get_role(BUYER_ROLE_ID)
+except Exception as role_err:
+    print(f"[구매자 역할 지급 실패] {role_err}")
 
-                    if buyer_role and ticket_owner:
+# ==============================
+# 유저 DM
+# ==============================
 
-                        if buyer_role not in ticket_owner.roles:
+try:
+    dm_embed = discord.Embed(
+        title="💌 서비스를 이용해 주셔서 감사합니다!",
+        description=(
+            "진행하시던 커미션 완료되어 티켓이 종료되었습니다.\n"
+            "아래 버튼을 통해 만족도 별점을 남겨주세요!"
+        ),
+        color=0x5865F2
+    )
 
-                            await ticket_owner.add_roles(
-                                buyer_role,
-                                reason="커미션 완료 자동 구매자 역할 지급"
-                            )
+    await ticket_owner.send(
+        embed=dm_embed,
+        view=StarRatingView()
+    )
 
-                            try:
+except Exception as dm_e:
+    print(f"[DM 실패] {dm_e}")
 
-                                success_role_embed = discord.Embed(
-                                    title="🎉 구매자 역할 지급 완료",
-                                    description=(
-                                        f"`{guild.name}` 서버에서\n"
-                                        f"구매자 역할이 지급되었습니다!"
-                                    ),
-                                    color=discord.Color.green()
-                                )
+await interaction.followup.send(
+    "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
+)
 
-                                await ticket_owner.send(
-                                    embed=success_role_embed
-                                )
-
-                            except:
-                                pass
-
-                except Exception as role_err:
-                    print(f"[구매자 역할 지급 실패] {role_err}")
-
-                # ==============================
-                # 유저 DM
-                # ==============================
-
-                try:
-
-                    dm_embed = discord.Embed(
-                        title="💌 서비스를 이용해 주셔서 감사합니다!",
-                        description=(
-                            "진행하시던 커미션 완료되어 티켓이 종료되었습니다.\n"
-                            "아래 버튼을 통해 만족도 별점을 남겨주세요!"
-                        ),
-                        color=0x5865F2
-                    )
-
-                    await ticket_owner.send(
-                        embed=dm_embed,
-                        view=StarRatingView()
-                    )
-
-                except Exception as dm_e:
-                    print(f"[DM 실패] {dm_e}")
-
-                await interaction.followup.send(
-                    "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
-                )
-
-                await asyncio.sleep(5)
-                await channel.delete()
-
+await asyncio.sleep(5)
+await channel.delete()
             else:
 
                 await interaction.followup.send(
