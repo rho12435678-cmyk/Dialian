@@ -55,30 +55,19 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-            await interaction.response.defer()
+            try:
+    first_message = None
 
-            channel = interaction.channel
-            channel_name = channel.name
-            guild = interaction.guild
+    async for msg in channel.history(limit=1, oldest_first=True):
+        first_message = msg
 
-            if "티켓" in channel_name:
+    if first_message and first_message.mentions:
+        ticket_owner = first_message.mentions[0]
+    else:
+        ticket_owner = interaction.user
 
-                ticket_owner = None
-
-                try:
-                    owner_id = int(channel_name.split("-")[-1])
-
-                    ticket_owner = (
-                        guild.get_member(owner_id)
-                        or await guild.fetch_member(owner_id)
-                    )
-
-                except Exception:
-                    ticket_owner = interaction.user
-
-                await interaction.followup.send(
-                    "💾 안전하게 구매로그를 정리하는 중입니다..."
-                )
+except Exception:
+    ticket_owner = interaction.user
 
                 # ==============================
                 # 🔒 공개용 안전 구매로그 생성
