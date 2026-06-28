@@ -43,7 +43,7 @@ class TicketCloseView(discord.ui.View):
         channel_name = channel.name
         guild = interaction.guild
 
-                if "티켓" in channel_name:
+        if "티켓" in channel_name:
 
             ticket_owner = None
 
@@ -247,6 +247,3 @@ class TicketCloseView(discord.ui.View):
                     "❌ 올바른 티켓 채널이 아닙니다.",
                     ephemeral=True
                 )
-
-        except Exception as e:
-            print(f"[티켓 닫기 에러] {e}")
