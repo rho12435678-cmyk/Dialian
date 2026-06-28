@@ -111,14 +111,16 @@ class TicketCloseView(discord.ui.View):
             hours = duration.seconds // 3600
             minutes = (duration.seconds % 3600) // 60
 
-            # ==============================
+                        # ==============================
             # 구매로그 채널
             # ==============================
-           log_channel = discord.utils.get(
-               guild.text_channels,
-               name=LOG_CHANNEL_NAME
-           )
-           if log_channel:
+
+            log_channel = discord.utils.get(
+                guild.text_channels,
+                name=LOG_CHANNEL_NAME
+            )
+
+            if log_channel:
 
                 safe_log_embed = discord.Embed(
                     title="🧾 구매/상담 로그",
