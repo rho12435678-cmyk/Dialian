@@ -37,21 +37,17 @@ class TicketCloseView(discord.ui.View):
             if interaction.user.bot:
                 return
 
-            # 개발자만 티켓 종료 가능
+                        # 개발자만 티켓 종료 가능
             developer_ids = []
 
-for value in DESIGNERS.values():
-    if isinstance(value, dict):
-        if "id" in value:
-            developer_ids.append(value["id"])
-        else:
-            developer_ids.extend(value.keys())
+            for value in DESIGNERS.values():
+                if isinstance(value, dict):
+                    if "id" in value:
+                        developer_ids.append(value["id"])
+                    else:
+                        developer_ids.extend(value.keys())
 
-if interaction.user.id not in developer_ids:
-    return await interaction.response.send_message(
-        "❌ 관리자만 티켓을 종료할 수 있습니다.",
-        ephemeral=True
-    )
+            if interaction.user.id not in developer_ids:
                 return await interaction.response.send_message(
                     "❌ 관리자만 티켓을 종료할 수 있습니다.",
                     ephemeral=True
