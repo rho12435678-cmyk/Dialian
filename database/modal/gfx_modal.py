@@ -58,8 +58,7 @@ class PurchaseModal(discord.ui.Modal):
             developer = guild.get_member(self.selected_designer)
             designer_name = developer.mention if developer else "미지정"
 
-        nickname = user.display_name.lower().replace(" ", "-")
-        ticket_channel_name = f"티켓-{nickname}"
+        ticket_channel_name = f"티켓-{user.id}"
 
         if discord.utils.get(guild.text_channels, name=ticket_channel_name):
             return await interaction.response.send_message(
