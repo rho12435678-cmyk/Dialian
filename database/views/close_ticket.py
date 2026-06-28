@@ -3,9 +3,7 @@ import asyncio
 import re
 
 from datetime import datetime
-
 from config import *
-
 from views.review_view import StarRatingView
 
                             try:
