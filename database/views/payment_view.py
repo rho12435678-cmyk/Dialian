@@ -1,5 +1,5 @@
 import discord
-from config import PAYMENTS
+import aiosqlite
 
 
 class PaymentView(discord.ui.View):
@@ -15,14 +15,33 @@ class PaymentView(discord.ui.View):
     )
     async def payment(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        info = PAYMENTS[self.designer_id]
+        async with aiosqlite.connect("data/dialian.db") as db:
+
+            cursor = await db.execute(
+                """
+                SELECT bank_name, account_number, holder
+                FROM bank_accounts
+                WHERE developer_id = ?
+                """,
+                (self.designer_id,)
+            )
+
+            data = await cursor.fetchone()
+
+        if data is None:
+            return await interaction.response.send_message(
+                "❌ 담당 디자이너의 계좌가 등록되어 있지 않습니다.",
+                ephemeral=True
+            )
+
+        bank_name, account_number, holder = data
 
         embed = discord.Embed(
             title="💳 결제 정보",
             description=(
-                f"🏦 {info['bank']}\n"
-                f"계좌 : {info['account']}\n"
-                f"예금주 : {info['owner']}\n\n"
+                f"🏦 {bank_name}\n"
+                f"계좌번호 : `{account_number}`\n"
+                f"예금주 : **{holder}**\n\n"
                 "✅ 입금 후 담당 디자이너에게 말씀해주세요."
             ),
             color=discord.Color.green()
