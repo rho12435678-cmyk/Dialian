@@ -33,11 +33,11 @@ class TicketCloseView(discord.ui.View):
 
         try:
 
-            # 봇 차단
+                        # 봇 차단
             if interaction.user.bot:
                 return
 
-                        # 개발자만 티켓 종료 가능
+            # 개발자만 티켓 종료 가능
             developer_ids = []
 
             for value in DESIGNERS.values():
