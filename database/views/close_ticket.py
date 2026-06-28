@@ -33,42 +33,36 @@ class TicketCloseView(discord.ui.View):
     )
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        try:
+        
+          await interaction.response.defer()
 
-            # 봇 차단
-            if interaction.user.bot:
-                return
+channel = interaction.channel
+channel_name = channel.name
+guild = interaction.guild
 
-            # 개발자만 티켓 종료 가능
-            developer_ids = []
+if "티켓" in channel_name:
 
-            for value in DESIGNERS.values():
-                if isinstance(value, dict):
-                    if "id" in value:
-                        developer_ids.append(value["id"])
-                    else:
-                        developer_ids.extend(value.keys())
+    ticket_owner = None
 
-            if interaction.user.id not in developer_ids:
-                return await interaction.response.send_message(
-                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
-                    ephemeral=True
-                )
+    try:
+        first_message = None
 
-            try:
-    first_message = None
+        async for msg in channel.history(limit=1, oldest_first=True):
+            first_message = msg
 
-    async for msg in channel.history(limit=1, oldest_first=True):
-        first_message = msg
+        if first_message and first_message.mentions:
+            ticket_owner = first_message.mentions[0]
+        else:
+            ticket_owner = interaction.user
 
-    if first_message and first_message.mentions:
-        ticket_owner = first_message.mentions[0]
-    else:
+    except Exception:
         ticket_owner = interaction.user
 
-except Exception:
-    ticket_owner = interaction.user
-
+    await interaction.followup.send(
+        "💾 안전하게 구매로그를 정리하는 중입니다..."
+    )
+                
+        
                 # ==============================
                 # 🔒 공개용 안전 구매로그 생성
                 # ==============================
