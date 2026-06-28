@@ -16,31 +16,38 @@ class PurchaseModal(discord.ui.Modal):
     FIELD2 = "🖼 GFX 종류"
     FIELD3 = "🎨 원하는 스타일"
 
-    def __init__(self):
+
+        def __init__(self):
         super().__init__(title=self.MODAL_TITLE)
+
         self.selected_designer = None
 
-    roblox_nickname = discord.ui.TextInput(
-        label="GFX에 나올 로블록스 캐릭터 닉네임",
-        placeholder="예: Builderman",
-        required=True,
-        max_length=30
-    )
+        self.roblox_nickname = discord.ui.TextInput(
+            label=self.FIELD1,
+            placeholder="입력해주세요.",
+            required=True,
+            max_length=30
+        )
 
-    gfx_type = discord.ui.TextInput(
-        label="GFX 장르",
-        placeholder="예: 프로필, 배너, 썸네일",
-        required=True,
-        max_length=50
-    )
+        self.gfx_type = discord.ui.TextInput(
+            label=self.FIELD2,
+            placeholder="입력해주세요.",
+            required=True,
+            max_length=50
+        )
 
-    gfx_style = discord.ui.TextInput(
-        label="원하는 GFX 배경 / 스타일",
-        placeholder="예: 네온도시, 전장, 다크테마",
-        required=True,
-        style=discord.TextStyle.paragraph,
-        max_length=300
-    )
+        self.gfx_style = discord.ui.TextInput(
+            label=self.FIELD3,
+            placeholder="입력해주세요.",
+            required=True,
+            style=discord.TextStyle.paragraph,
+            max_length=300
+        )
+
+        self.add_item(self.roblox_nickname)
+        self.add_item(self.gfx_type)
+        self.add_item(self.gfx_style)
+    
 
     async def on_submit(self, interaction: discord.Interaction):
 
