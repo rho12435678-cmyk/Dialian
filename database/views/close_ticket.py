@@ -6,6 +6,18 @@ from datetime import datetime
 from config import *
 from views.review_view import StarRatingView
 
+def sanitize_text(text):
+    if not text:
+        return "[내용 없음]"
+
+    text = re.sub(r'https?://\S+', '[LINK]', text)
+    text = re.sub(r'discord\.gg/\S+', '[INVITE]', text)
+    text = re.sub(r'\S+@\S+', '[EMAIL]', text)
+    text = re.sub(r'\d{2,3}-\d{3,4}-\d{4}', '[PHONE]', text)
+    text = re.sub(r'\d{6,}', '[NUMBER]', text)
+
+    return text[:80]
+
 # ==================== [티켓 닫기 View] ====================
 
 class TicketCloseView(discord.ui.View):
@@ -26,7 +38,20 @@ class TicketCloseView(discord.ui.View):
                 return
 
             # 개발자만 티켓 종료 가능
-            if interaction.user.id not in DEVELOPER_IDS:
+            developer_ids = []
+
+for value in DESIGNERS.values():
+    if isinstance(value, dict):
+        if "id" in value:
+            developer_ids.append(value["id"])
+        else:
+            developer_ids.extend(value.keys())
+
+if interaction.user.id not in developer_ids:
+    return await interaction.response.send_message(
+        "❌ 관리자만 티켓을 종료할 수 있습니다.",
+        ephemeral=True
+    )
                 return await interaction.response.send_message(
                     "❌ 관리자만 티켓을 종료할 수 있습니다.",
                     ephemeral=True
