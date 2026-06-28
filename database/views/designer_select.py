@@ -35,8 +35,6 @@ class DesignerSelect(discord.ui.Select):
             options=options
         )
 
-    async def callback(self, interaction: discord.Interaction):
-
         
 async def callback(self, interaction: discord.Interaction):
 
