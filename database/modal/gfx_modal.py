@@ -16,8 +16,7 @@ class PurchaseModal(discord.ui.Modal):
     FIELD2 = "🖼 GFX 종류"
     FIELD3 = "🎨 원하는 스타일"
 
-
-        def __init__(self):
+    def __init__(self):
         super().__init__(title=self.MODAL_TITLE)
 
         self.selected_designer = None
@@ -47,7 +46,6 @@ class PurchaseModal(discord.ui.Modal):
         self.add_item(self.roblox_nickname)
         self.add_item(self.gfx_type)
         self.add_item(self.gfx_style)
-    
 
     async def on_submit(self, interaction: discord.Interaction):
 
