@@ -1,7 +1,9 @@
+import os
 import aiosqlite
 
-DATABASE = "data/dialian.db"
+os.makedirs("data", exist_ok=True)
 
+DATABASE = "data/dialian.db"
 
 async def connect():
     return await aiosqlite.connect(DATABASE)
