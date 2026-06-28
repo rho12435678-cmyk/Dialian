@@ -1,8 +1,8 @@
 import discord
 
 from database.views.designer_select import DesignerView
-from database.modal.gfx_modal import PurchaseModal
 from config import DESIGNERS
+from database.modal.gfx_modal import PurchaseModal
 
 
 class CategoryView(discord.ui.View):
@@ -14,11 +14,8 @@ class CategoryView(discord.ui.View):
         label="🎨 GFX",
         style=discord.ButtonStyle.primary
     )
-    async def gfx(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    async def gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         await interaction.response.send_message(
             "담당 GFX 디자이너를 선택해주세요.",
             view=DesignerView(interaction.guild),
@@ -29,11 +26,8 @@ class CategoryView(discord.ui.View):
         label="🖼️ 로고",
         style=discord.ButtonStyle.success
     )
-    async def logo(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    async def logo(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         modal = PurchaseModal()
         modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
 
@@ -43,11 +37,8 @@ class CategoryView(discord.ui.View):
         label="👕 Roblox 복장",
         style=discord.ButtonStyle.secondary
     )
-    async def uniform(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    async def uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         modal = PurchaseModal()
         modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
 
