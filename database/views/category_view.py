@@ -1,47 +1,53 @@
 import discord
 
+from database.views.designer_select import DesignerView
+from database.modal.logo_modal import LogoModal
+from database.modal.uniform_modal import UniformModal
 from config import DESIGNERS
-from database.modal.gfx_modal import PurchaseModal
 
 
-class DesignerSelect(discord.ui.Select):
+class CategoryView(discord.ui.View):
 
-    def __init__(self, guild: discord.Guild):
+    def __init__(self):
+        super().__init__(timeout=180)
 
-        options = []
-
-        for dev_id in DESIGNERS["gfx"].keys():
-            member = guild.get_member(dev_id)
-
-            if member:
-                label = member.display_name
-            else:
-                label = f"알 수 없는 디자이너 ({dev_id})"
-
-            options.append(
-                discord.SelectOption(
-                    label=label,
-                    value=str(dev_id)
-                )
-            )
-
-        super().__init__(
-            placeholder="담당 GFX 디자이너를 선택하세요.",
-            min_values=1,
-            max_values=1,
-            options=options
+    @discord.ui.button(
+        label="🎨 GFX",
+        style=discord.ButtonStyle.primary
+    )
+    async def gfx(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_message(
+            "담당 GFX 디자이너를 선택해주세요.",
+            view=DesignerView(interaction.guild),
+            ephemeral=True
         )
 
-    async def callback(self, interaction: discord.Interaction):
-
-        modal = PurchaseModal()
-        modal.selected_designer = int(self.values[0])
-
+    @discord.ui.button(
+        label="🖼️ 로고",
+        style=discord.ButtonStyle.success
+    )
+    async def logo(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        modal = LogoModal()
+        modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
         await interaction.response.send_modal(modal)
 
-
-class DesignerView(discord.ui.View):
-
-    def __init__(self, guild: discord.Guild):
-        super().__init__(timeout=180)
-        self.add_item(DesignerSelect(guild))
+    @discord.ui.button(
+        label="👕 Roblox 복장",
+        style=discord.ButtonStyle.secondary
+    )
+    async def uniform(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        modal = UniformModal()
+        modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
+        await interaction.response.send_modal(modal)
