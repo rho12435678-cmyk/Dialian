@@ -129,14 +129,14 @@ class TicketCloseView(discord.ui.View):
                 hours = duration.seconds // 3600
                 minutes = (duration.seconds % 3600) // 60
                 
-            # ==============================
-            # 구매로그 채널
-            # ==============================
+                                # ==============================
+                # 구매로그 채널
+                # ==============================
 
-            log_channel = discord.utils.get(
-                guild.text_channels,
-                name=LOG_CHANNEL_NAME
-            )
+                log_channel = discord.utils.get(
+                    guild.text_channels,
+                    name=LOG_CHANNEL_NAME
+                )
 
             if log_channel:
 
@@ -260,12 +260,12 @@ class TicketCloseView(discord.ui.View):
             await asyncio.sleep(5)
             await channel.delete()
 
-        else:
+            else:
+                await 
+interaction.followup.send(
+                    "❌ 올바른 티켓 채널이 아닙니다.",
+                    ephemeral=True
+                )
 
-            await interaction.followup.send(
-                "❌ 올바른 티켓 채널이 아닙니다.",
-                ephemeral=True
-            )
-
-    except Exception as e:
-        print(f"[티켓 닫기 에러] {e}")
+        except Exception as e:
+            print(f"[티켓 닫기 에러] {e}")
