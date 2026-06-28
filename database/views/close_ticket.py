@@ -61,53 +61,53 @@ class TicketCloseView(discord.ui.View):
             except Exception:
                 ticket_owner = interaction.user
 
-            await interaction.followup.send(
+            
+                            await interaction.followup.send(
                 "💾 안전하게 구매로그를 정리하는 중입니다..."
             )
-             
-        
-                # ==============================
-                # 🔒 공개용 안전 구매로그 생성
-                # ==============================
 
-                message_count = 0
-                attachment_count = 0
-                participants = set()
+            # ==============================
+            # 🔒 공개용 안전 구매로그 생성
+            # ==============================
 
-                recent_messages = []
+            message_count = 0
+            attachment_count = 0
+            participants = set()
 
-                async for msg in channel.history(
-                    limit=100,
-                    oldest_first=False
-                ):
+            recent_messages = []
 
-                    if msg.author.bot:
-                        continue
+            async for msg in channel.history(
+                limit=100,
+                oldest_first=False
+            ):
 
-                    message_count += 1
-                    participants.add(msg.author.display_name)
+                if msg.author.bot:
+                    continue
 
-                    if msg.attachments:
-                        attachment_count += len(msg.attachments)
+                message_count += 1
+                participants.add(msg.author.display_name)
 
-                    if len(recent_messages) < 3:
+                if msg.attachments:
+                    attachment_count += len(msg.attachments)
 
-                        clean_content = sanitize_text(msg.content)
+                if len(recent_messages) < 3:
 
-                        if not clean_content.strip():
-                            clean_content = "[파일 또는 이미지]"
+                    clean_content = sanitize_text(msg.content)
 
-                        recent_messages.append(
-                            f"• {msg.author.display_name}: {clean_content}"
-                        )
+                    if not clean_content.strip():
+                        clean_content = "[파일 또는 이미지]"
 
-                created_at = channel.created_at
-                closed_at = datetime.now(created_at.tzinfo)
+                    recent_messages.append(
+                        f"• {msg.author.display_name}: {clean_content}"
+                    )
 
-                duration = closed_at - created_at
+            created_at = channel.created_at
+            closed_at = datetime.now(created_at.tzinfo)
 
-                hours = duration.seconds // 3600
-                minutes = (duration.seconds % 3600) // 60
+            duration = closed_at - created_at
+
+            hours = duration.seconds // 3600
+            minutes = (duration.seconds % 3600) // 60
 
                 # ==============================
                 # 구매로그 채널
