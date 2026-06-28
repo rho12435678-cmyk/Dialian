@@ -234,7 +234,7 @@ class TicketCloseView(discord.ui.View):
             # 유저 DM
             # ==============================
 
-                        try:
+            try:
 
                 dm_embed = discord.Embed(
                     title="💌 서비스를 이용해 주셔서 감사합니다!",
