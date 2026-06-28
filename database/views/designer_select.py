@@ -8,20 +8,28 @@ from database.modal.uniform_modal import UniformModal
 
 class DesignerSelect(discord.ui.Select):
 
-    def __init__(self):
+    def __init__(self, guild: discord.Guild):
 
         options = []
 
-        for dev_id, name in DESIGNERS["gfx"].items():
+        for dev_id in DESIGNERS["gfx"].keys():
+
+            member = guild.get_member(dev_id)
+
+            if member:
+                label = member.display_name      # 서버 별명
+            else:
+                label = f"알 수 없는 디자이너 ({dev_id})"
+
             options.append(
                 discord.SelectOption(
-                    label=name,
+                    label=label,
                     value=str(dev_id)
                 )
             )
 
         super().__init__(
-            placeholder="담당 디자이너를 선택하세요.",
+            placeholder="담당 GFX 디자이너를 선택하세요.",
             min_values=1,
             max_values=1,
             options=options
