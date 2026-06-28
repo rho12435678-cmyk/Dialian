@@ -223,9 +223,6 @@ class TicketCloseView(discord.ui.View):
                                 embed=success_role_embed
                             )
 
-                        except:
-                            pass
-
             except Exception as role_err:
                 print(f"[구매자 역할 지급 실패] {role_err}")
 
@@ -233,6 +230,7 @@ class TicketCloseView(discord.ui.View):
             # ==============================
             # 유저 DM
             # ==============================
+            
             try:
 
                 dm_embed = discord.Embed(
@@ -259,11 +257,11 @@ class TicketCloseView(discord.ui.View):
             await asyncio.sleep(5)
             await channel.delete()
 
-        else:
+            else:
             await interaction.followup.send(
                 "❌ 올바른 티켓 채널이 아닙니다.",
                 ephemeral=True
             )
 
-    except Exception as e:
+        except Exception as e:
         print(f"[티켓 닫기 에러] {e}")
