@@ -2,7 +2,6 @@ import discord
 
 from database.views.designer_select import DesignerView
 from config import DESIGNERS
-from database.modal.gfx_modal import PurchaseModal
 from database.modal.logo_modal import LogoModal
 from database.modal.uniform_modal import UniformModal
 
@@ -31,8 +30,9 @@ class CategoryView(discord.ui.View):
     async def logo(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         modal = LogoModal()
-modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
-await interaction.response.send_modal(modal)
+        modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
+
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(
         label="👕 Roblox 복장",
@@ -40,7 +40,7 @@ await interaction.response.send_modal(modal)
     )
     async def uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        
-modal = UniformModal()
-modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
-await interaction.response.send_modal(modal)
+        modal = UniformModal()
+        modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
+
+        await interaction.response.send_modal(modal)
