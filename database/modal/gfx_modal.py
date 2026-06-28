@@ -182,13 +182,14 @@ class PurchaseModal(discord.ui.Modal):
                 f"신청자 : {user.mention}"
             )
 
-        if self.selected_designer:
+if self.selected_designer:
     developer = guild.get_member(self.selected_designer)
 
     if developer:
         try:
             await developer.send(
-                f"🔔 새로운 GFX 커미션이 들어왔습니다.\n{ticket_channel.mention}"
+                f"🔔 새로운 GFX 커미션이 들어왔습니다.\n"
+                f"{ticket_channel.mention}"
             )
 
             await developer.send(
@@ -203,3 +204,8 @@ class PurchaseModal(discord.ui.Modal):
 
         except Exception:
             pass
+
+await interaction.followup.send(
+    f"✅ 신청 완료!\n{ticket_channel.mention}",
+    ephemeral=True
+)
