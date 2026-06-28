@@ -234,7 +234,7 @@ class TicketCloseView(discord.ui.View):
             # 유저 DM
             # ==============================
 
-            try:
+                        try:
 
                 dm_embed = discord.Embed(
                     title="💌 서비스를 이용해 주셔서 감사합니다!",
@@ -253,7 +253,7 @@ class TicketCloseView(discord.ui.View):
             except Exception as dm_e:
                 print(f"[DM 실패] {dm_e}")
 
-                await interaction.followup.send(
+            await interaction.followup.send(
                 "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
             )
 
