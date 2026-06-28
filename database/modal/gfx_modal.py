@@ -7,10 +7,17 @@ from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 
 
-class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
+class PurchaseModal(discord.ui.Modal):
+
+    MODAL_TITLE = "🎨 GFX 커미션 신청서"
+
+    FORM_TITLE = "📋 GFX 커미션 신청서"
+    FIELD1 = "🎮 Roblox 닉네임"
+    FIELD2 = "🖼 GFX 종류"
+    FIELD3 = "🎨 원하는 스타일"
 
     def __init__(self):
-        super().__init__()
+        super().__init__(title=self.MODAL_TITLE)
         self.selected_designer = None
 
     roblox_nickname = discord.ui.TextInput(
@@ -88,7 +95,7 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         )
 
         embed = discord.Embed(
-            title="📋 GFX 커미션 신청서",
+            title=self.FORM_TITLE,
             color=0x5865F2,
             timestamp=datetime.now()
         )
@@ -100,19 +107,19 @@ class PurchaseModal(discord.ui.Modal, title="🎨 GFX 커미션 신청서"):
         )
 
         embed.add_field(
-            name="🎮 Roblox 닉네임",
+            name=self.FIELD1,
             value=self.roblox_nickname.value,
             inline=False
         )
 
         embed.add_field(
-            name="🖼 GFX 종류",
+            name=self.FIELD2,
             value=self.gfx_type.value,
             inline=False
         )
 
         embed.add_field(
-            name="🎨 원하는 스타일",
+            name=self.FIELD3,
             value=self.gfx_style.value,
             inline=False
         )
