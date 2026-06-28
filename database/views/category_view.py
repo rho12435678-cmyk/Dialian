@@ -52,3 +52,19 @@ class CategoryView(discord.ui.View):
         modal = UniformModal()
         modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
         await interaction.response.send_modal(modal)
+
+@discord.ui.button(label="🖼️ 로고", style=discord.ButtonStyle.success)
+async def logo(self, interaction, button):
+
+    modal = PurchaseModal()
+    modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
+
+    await interaction.response.send_modal(modal)
+
+@discord.ui.button(label="👕 Roblox 복장", style=discord.ButtonStyle.secondary)
+async def uniform(self, interaction, button):
+
+    modal = PurchaseModal()
+    modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
+
+    await interaction.response.send_modal(modal)
