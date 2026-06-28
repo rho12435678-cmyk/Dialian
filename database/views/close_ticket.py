@@ -37,52 +37,54 @@ class TicketCloseView(discord.ui.View):
         button: discord.ui.Button
     ):
 
-        await interaction.followup.send()
+        try:
 
-# 개발자만 티켓 종료 가능
-developer_ids = []
+            await interaction.response.defer()
 
-for value in DESIGNERS.values():
-    if isinstance(value, dict):
-        if "id" in value:
-            developer_ids.append(value["id"])
-        else:
-            developer_ids.extend(value.keys())
+            # 개발자만 티켓 종료 가능
+            developer_ids = []
 
-if interaction.user.id not in developer_ids:
-    return await interaction.followup.send(
-        "❌ 관리자만 티켓을 종료할 수 있습니다.",
-        ephemeral=True
-    )
+            for value in DESIGNERS.values():
+                if isinstance(value, dict):
+                    if "id" in value:
+                        developer_ids.append(value["id"])
+                    else:
+                        developer_ids.extend(value.keys())
 
-channel = interaction.channel
-channel_name = channel.name
-guild = interaction.guild
+            if interaction.user.id not in developer_ids:
+                return await interaction.followup.send(
+                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True
+                )
 
-        if "티켓" in channel_name:
+            channel = interaction.channel
+            channel_name = channel.name
+            guild = interaction.guild
 
-            ticket_owner = None
+            if "티켓" in channel_name:
 
-            try:
-                first_message = None
+                ticket_owner = None
 
-                async for msg in channel.history(
-                    limit=1,
-                    oldest_first=True
-                ):
-                    first_message = msg
+                try:
+                    first_message = None
 
-                if first_message and first_message.mentions:
-                    ticket_owner = first_message.mentions[0]
-                else:
+                    async for msg in channel.history(
+                        limit=1,
+                        oldest_first=True
+                    ):
+                        first_message = msg
+
+                    if first_message and first_message.mentions:
+                        ticket_owner = first_message.mentions[0]
+                    else:
+                        ticket_owner = interaction.user
+
+                except Exception:
                     ticket_owner = interaction.user
 
-            except Exception:
-                ticket_owner = interaction.user
-
-            await interaction.followup.send(
-                "💾 안전하게 구매로그를 정리하는 중입니다..."
-            )
+                await interaction.response.defer(
+                    "💾 안전하게 구매로그를 정리하는 중입니다..."
+                )
 
             # ==============================
             # 🔒 공개용 안전 구매로그 생성
