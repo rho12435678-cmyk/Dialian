@@ -1,11 +1,12 @@
 import discord
 
 DESIGNERS = [
-    375938495350571009,
-    1292859064065458189,
-    1468584582113919129,
-    1465051418162626763,
+    375938495350571009,  # GFX + 복장
+    1292859064065458189,  # GFX + 로고
+    1468584582113919129,  # GFX
+    1465051418162626763,  # GFX
 ]
+
 
 class ProgressView(discord.ui.View):
 
@@ -32,31 +33,35 @@ class ProgressView(discord.ui.View):
     async def p100(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.update_progress(interaction, 100, "✅ 완료", "완료")
 
+    async def update_progress(self, interaction, progress, status, estimate):
 
-async def update_progress(self, interaction, progress, status, estimate):
+        # 디자이너만 진행률 변경 가능
+        if interaction.user.id not in DESIGNERS:
+            await interaction.response.send_message(
+                "❌ 디자이너만 진행률을 변경할 수 있습니다.",
+                ephemeral=True
+            )
+            return
 
-    if interaction.user.id not in DESIGNERS:
+        embed = interaction.message.embeds[0]
+
+        designer = embed.description.splitlines()[0].replace(
+            "👨‍💻 담당 디자이너 : ", ""
+        )
+
+        embed.description = (
+            f"👨‍💻 담당 디자이너 : {designer}\n\n"
+            f"📌 상태 : {status}\n"
+            f"📊 진행률 : {progress}%\n"
+            f"⏰ 예상 완료 : {estimate}"
+        )
+
+        await interaction.message.edit(
+            embed=embed,
+            view=self
+        )
+
         await interaction.response.send_message(
-            "❌ 디자이너만 진행률을 변경할 수 있습니다.",
+            "✅ 진행률이 변경되었습니다.",
             ephemeral=True
         )
-        return
-
-    embed = interaction.message.embeds[0]
-
-    embed.description = (
-        f"👨‍💻 담당 디자이너 : {embed.description.splitlines()[0].replace('👨‍💻 담당 디자이너 : ','')}\n\n"
-        f"📌 상태 : {status}\n"
-        f"📊 진행률 : {progress}%\n"
-        f"⏰ 예상 완료 : {estimate}"
-    )
-
-    await interaction.message.edit(
-        embed=embed,
-        view=self
-    )
-
-    await interaction.response.send_message(
-        "진행률이 변경되었습니다.",
-        ephemeral=True
-    )
