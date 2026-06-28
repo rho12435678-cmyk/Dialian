@@ -11,11 +11,10 @@ class DesignerSelect(discord.ui.Select):
         options = []
 
         for dev_id in DESIGNERS["gfx"].keys():
-
             member = guild.get_member(dev_id)
 
             if member:
-                label = member.display_name  # 서버 별명
+                label = member.display_name
             else:
                 label = f"알 수 없는 디자이너 ({dev_id})"
 
@@ -35,10 +34,10 @@ class DesignerSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
 
-    modal = PurchaseModal()
-    modal.selected_designer = int(self.values[0])
+        modal = PurchaseModal()
+        modal.selected_designer = int(self.values[0])
 
-    await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(modal)
 
 
 class DesignerView(discord.ui.View):
