@@ -1,17 +1,18 @@
-import discord
+from database.modal.gfx_modal import PurchaseModal
 
-class LogoModal(discord.ui.Modal, title="🖌 Discord 로고 커미션"):
 
-    style = discord.ui.TextInput(
-        label="원하는 로고 스타일",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=500
-    )
+class LogoModal(PurchaseModal):
 
-    async def on_submit(self, interaction: discord.Interaction):
+    def __init__(self):
+        super().__init__()
 
-        await interaction.response.send_message(
-            "로고 커미션은 다음 단계에서 자동으로 담당 디자이너에게 배정됩니다.",
-            ephemeral=True
-        )
+        self.title = "🖌 로고 커미션 신청서"
+
+        self.roblox_nickname.label = "로고 이름"
+        self.roblox_nickname.placeholder = "예: My Server"
+
+        self.gfx_type.label = "로고 종류"
+        self.gfx_type.placeholder = "예: Discord 서버 로고"
+
+        self.gfx_style.label = "원하는 로고 스타일"
+        self.gfx_style.placeholder = "예: 미니멀, 네온, 게이밍"
