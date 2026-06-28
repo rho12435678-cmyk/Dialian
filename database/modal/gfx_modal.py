@@ -183,24 +183,23 @@ class PurchaseModal(discord.ui.Modal):
             )
 
         if self.selected_designer:
-            developer = guild.get_member(self.selected_designer)
+    developer = guild.get_member(self.selected_designer)
 
-            if developer:
-                                try:
-                    await developer.send(
-                        f"🔔 새로운 GFX 커미션이 들어왔습니다.\n"
-                        f"{ticket_channel.mention}"
-                    )
+    if developer:
+        try:
+            await developer.send(
+                f"🔔 새로운 GFX 커미션이 들어왔습니다.\n{ticket_channel.mention}"
+            )
 
-                    await developer.send(
-                        "📊 진행률 관리",
-                        view=ProgressView(progress_message)
-                    )
+            await developer.send(
+                "📊 진행률 관리",
+                view=ProgressView(progress_message)
+            )
 
-                    await developer.send(
-                        "💳 결제 정보 전송",
-                        view=PaymentView(ticket_channel, self.selected_designer)
-                    )
+            await developer.send(
+                "💳 결제 정보 전송",
+                view=PaymentView(ticket_channel, self.selected_designer)
+            )
 
-                except Exception:
-                    pass
+        except Exception:
+            pass
