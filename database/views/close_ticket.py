@@ -133,12 +133,12 @@ class TicketCloseView(discord.ui.View):
                 # 구매로그 채널
                 # ==============================
 
-                log_channel = discord.utils.get(
+                            log_channel = discord.utils.get(
                     guild.text_channels,
                     name=LOG_CHANNEL_NAME
                 )
 
-            if log_channel:
+                if log_channel:
 
                 safe_log_embed = discord.Embed(
                     title="🧾 구매/상담 로그",
@@ -257,12 +257,11 @@ class TicketCloseView(discord.ui.View):
                 "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
             )
 
-            await asyncio.sleep(5)
-            await channel.delete()
+                            await asyncio.sleep(5)
+                await channel.delete()
 
             else:
-                await 
-interaction.followup.send(
+                await interaction.followup.send(
                     "❌ 올바른 티켓 채널이 아닙니다.",
                     ephemeral=True
                 )
