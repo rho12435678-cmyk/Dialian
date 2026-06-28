@@ -31,9 +31,9 @@ class TicketCloseView(discord.ui.View):
     )
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        try:
+                try:
 
-                        # 봇 차단
+            # 봇 차단
             if interaction.user.bot:
                 return
 
