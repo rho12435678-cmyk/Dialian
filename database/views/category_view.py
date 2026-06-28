@@ -23,7 +23,7 @@ class CategoryView(discord.ui.View):
 
         await interaction.response.send_message(
             "담당 GFX 디자이너를 선택해주세요.",
-            view=DesignerView(),
+            view=DesignerView(interaction.guild),
             ephemeral=True
         )
 
