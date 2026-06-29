@@ -78,6 +78,10 @@ class SimpleTicketModal(discord.ui.Modal):
             overwrites=overwrites
         )
 
+await ticket_channel.edit(
+    topic=str(user.id)
+)
+
         embed = discord.Embed(
             title=self.FORM_TITLE,
             color=0x5865F2,
