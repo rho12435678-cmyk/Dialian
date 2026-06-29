@@ -382,19 +382,18 @@ async def complete(ctx):
 
 @bot.event
 async def on_ready():
-    
+
     await create_tables()
-    
+
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
     print("--------------------------------------------------")
 
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
-   # bot.add_view(ProgressView())
     bot.add_view(DeliveryView())
-    
-    DailyNotice(bot)
+
+    DailyNotice(bot)   # ← 반드시 여기
 
     print("✨ 영속성 버튼 등록 완료!")
 
