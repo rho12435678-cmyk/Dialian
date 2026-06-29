@@ -265,5 +265,5 @@ class TicketCloseView(discord.ui.View):
                 ephemeral=True
             )
 
-        except Exception as e:
-            print(f"[티켓 닫기 에러] {e}")
+    except Exception as e:
+        print(f"[티켓 닫기 에러] {e}")
