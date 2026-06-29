@@ -39,6 +39,7 @@ class TicketCloseView(discord.ui.View):
     ):
 
         try:
+
             await interaction.response.defer()
 
             developer_ids = []
@@ -65,15 +66,18 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-                        ticket_owner = interaction.user
-
+            ticket_owner = interaction.user
             designer_id = None
 
             try:
+
                 async for msg in channel.history(
                     limit=20,
                     oldest_first=True
                 ):
+
+                    if msg.mentions:
+                        ticket_owner = msg.mentions[0]
 
                     if not msg.embeds:
                         continue
@@ -84,29 +88,22 @@ class TicketCloseView(discord.ui.View):
                         continue
 
                     for field in embed.fields:
+
                         if field.name == "👨‍💻 담당 디자이너":
+
                             if "<@" in field.value:
+
                                 designer_id = int(
                                     field.value.replace("<@", "")
                                                .replace("!", "")
                                                .replace(">", "")
                                 )
+
                             break
 
                     if designer_id:
                         break
 
-            except Exception:
-                pass
-
-            try:
-                async for msg in channel.history(
-                    limit=1,
-                    oldest_first=True
-                ):
-                    if msg.mentions:
-                        ticket_owner = msg.mentions[0]
-                        break
             except Exception:
                 pass
 
@@ -118,7 +115,6 @@ class TicketCloseView(discord.ui.View):
             attachment_count = 0
             participants = set()
             recent_messages = []
-
 
             async for msg in channel.history(
                 limit=100,
@@ -153,10 +149,6 @@ class TicketCloseView(discord.ui.View):
             total_minutes = int(duration.total_seconds() // 60)
             hours = total_minutes // 60
             minutes = total_minutes % 60
-
-            # ==============================
-            # 구매로그 채널
-            # ==============================
 
             log_channel = discord.utils.get(
                 guild.text_channels,
@@ -222,6 +214,7 @@ class TicketCloseView(discord.ui.View):
             # ==============================
 
             try:
+
                 buyer_role = guild.get_role(BUYER_ROLE_ID)
 
                 if (
@@ -236,6 +229,7 @@ class TicketCloseView(discord.ui.View):
                     )
 
                     try:
+
                         success_role_embed = discord.Embed(
                             title="🎉 구매자 역할 지급 완료",
                             description=(
@@ -260,6 +254,7 @@ class TicketCloseView(discord.ui.View):
             # ==============================
 
             try:
+
                 dm_embed = discord.Embed(
                     title="💌 서비스를 이용해 주셔서 감사합니다!",
                     description=(
@@ -269,13 +264,14 @@ class TicketCloseView(discord.ui.View):
                     color=0x5865F2
                 )
 
-            await ticket_owner.send(
-    embed=dm_embed,
-    view=StarRatingView(designer_id)
-            )
+                await ticket_owner.send(
+                    embed=dm_embed,
+                    view=StarRatingView(designer_id)
+                )
 
             except Exception as dm_e:
                 print(f"[DM 실패] {dm_e}")
+
 
             await interaction.followup.send(
                 "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
