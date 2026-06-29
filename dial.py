@@ -197,6 +197,24 @@ async def register_bank(ctx, bank_name, account_number, holder):
 
     await ctx.send(embed=embed)
 
+@bot.command(name="계좌삭제")
+@commands.has_permissions(administrator=True)
+async def delete_bank(ctx):
+
+    async with aiosqlite.connect("data/dialian.db") as db:
+
+        await db.execute(
+            """
+            DELETE FROM bank_accounts
+            WHERE developer_id = ?
+            """,
+            (ctx.author.id,)
+        )
+
+        await db.commit()
+
+    await ctx.send("✅ 등록된 계좌가 삭제되었습니다.")
+
 @bot.command(name="진행")
 @commands.has_permissions(administrator=True)
 async def progress(ctx, percent: int):
