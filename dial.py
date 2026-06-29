@@ -12,7 +12,7 @@ from database.views.review_view import StarRatingView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.delivery_view import DeliveryView
-from database.views.database.DailyNotice import DailyNotice
+from database.DailyNotice import DailyNotice
 
 TOKEN = os.getenv("TOKEN")
 
