@@ -5,13 +5,11 @@ from config import *
 
 KST = timezone(timedelta(hours=9))
 
-class DailyNotice:
-
     def __init__(self, bot):
         self.bot = bot
         self.daily_notice.start()
 
-    @tasks.loop(time=time(hour=23, minute=48, tzinfo=KST))
+    @tasks.loop(time=time(hour=23, minute=50, tzinfo=KST))
     async def daily_notice(self):
         print("공지 실행 시작")
 
