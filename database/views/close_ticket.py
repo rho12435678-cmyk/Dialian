@@ -225,8 +225,8 @@ class TicketCloseView(discord.ui.View):
                         except:
                             pass
 
-                        except Exception as role_err:
-                            print(f"[구매자 역할 지급 실패] {role_err}")
+            except Exception as role_err:
+                print(f"[구매자 역할 지급 실패] {role_err}")
 
 
             # ==============================
