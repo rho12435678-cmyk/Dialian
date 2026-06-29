@@ -32,14 +32,16 @@ class TicketCloseView(discord.ui.View):
         style=discord.ButtonStyle.danger,
         custom_id="close_ticket"
     )
-    async def close_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-                try:
 
-            await interaction.response.defer()
+    async def close_button(
+    self,
+    interaction: discord.Interaction,
+    button: discord.ui.Button
+):
+
+    try:
+
+        await interaction.response.defer()
 
             developer_ids = []
 
