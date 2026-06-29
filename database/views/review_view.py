@@ -8,8 +8,10 @@ DATABASE = "data/dialian.db"
 
 
 class StarRatingView(discord.ui.View):
-    def __init__(self):
+
+    def __init__(self, designer_id=None):
         super().__init__(timeout=None)
+        self.designer_id = designer_id
 
     @discord.ui.button(
         label="⭐ 1점",
