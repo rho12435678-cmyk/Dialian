@@ -209,11 +209,12 @@ class TicketCloseView(discord.ui.View):
                         )
 
                         try:
-
-                            success_role_embed = discord.Embed(
+                            success_role_embed = 
+                        discord.Embed(
                                 title="🎉 구매자 역할 지급 완료",
                                 description=(
-                                    f"`{guild.name}` 서버에서\n"
+                                    f"`{guild.name}` 서버에서
+                        \n"
                                     f"구매자 역할이 지급되었습니다!"
                                 ),
                                 color=discord.Color.green()
@@ -222,11 +223,12 @@ class TicketCloseView(discord.ui.View):
                             await ticket_owner.send(
                                 embed=success_role_embed
                             )
-                            except:
-                                pass
 
-                            except Exception as role_err:
-                                print(f"[구매자 역할 지급 실패] {role_err}")
+                        except:
+                            pass
+
+            except Exception as role_err:
+                print(f"[구매자 역할 지급 실패] {role_err}")
 
 
             # ==============================
@@ -260,10 +262,10 @@ class TicketCloseView(discord.ui.View):
             await channel.delete()
 
             else:
-            await interaction.followup.send(
+                await interaction.followup.send(
                 "❌ 올바른 티켓 채널이 아닙니다.",
                 ephemeral=True
-            )
+                )
 
             except Exception as e:
                 print(f"[티켓 닫기 에러] {e}")
