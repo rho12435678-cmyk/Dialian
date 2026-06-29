@@ -12,9 +12,11 @@ class DailyNotice:
         self.bot = bot
         self.daily_notice.start()
 
-    @tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
+    @tasks.loop(time=time(hour=20, minute=35, tzinfo=KST))
     async def daily_notice(self):
 
+        print("공지 실행")
+        
         channel = self.bot.get_channel(SALE_NOTICE_CHANNEL_ID)
 
         if channel is None:
@@ -48,4 +50,5 @@ class DailyNotice:
 
     @daily_notice.before_loop
     async def before(self):
+        print("DailyNotice 시작")
         await self.bot.wait_until_ready()
