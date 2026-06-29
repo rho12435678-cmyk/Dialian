@@ -77,14 +77,15 @@ holder TEXT
         """)
 
         # 후기
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id INTEGER,
-            customer_id INTEGER,
-            rating INTEGER,
-            review TEXT
-        )
-        """)
+await db.execute("""
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    developer_id INTEGER,
+    customer_id INTEGER,
+    stars INTEGER,
+    review TEXT,
+    created_at TEXT
+)
+""")
 
         await db.commit()
