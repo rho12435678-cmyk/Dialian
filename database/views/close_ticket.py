@@ -67,6 +67,34 @@ class TicketCloseView(discord.ui.View):
 
             ticket_owner = interaction.user
 
+            designer_id = None
+
+try:
+    async for msg in channel.history(limit=20, oldest_first=True):
+        if not msg.embeds:
+            continue
+
+        embed = msg.embeds[0]
+
+        if embed.title != "📋 커미션 신청서":
+            continue
+
+        for field in embed.fields:
+            if field.name == "👨‍💻 담당 디자이너":
+                if "<@" in field.value:
+                    designer_id = int(
+                        field.value.replace("<@", "")
+                                   .replace("!", "")
+                                   .replace(">", "")
+                    )
+                break
+
+        if designer_id:
+            break
+
+except Exception:
+    pass
+
             try:
                 async for msg in channel.history(
                     limit=1,
@@ -238,8 +266,8 @@ class TicketCloseView(discord.ui.View):
                 )
 
                 await ticket_owner.send(
-                    embed=dm_embed,
-                    view=StarRatingView()
+    embed=dm_embed,
+    view=StarRatingView(designer_id)
                 )
 
             except Exception as dm_e:
