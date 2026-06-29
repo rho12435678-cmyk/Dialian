@@ -9,7 +9,7 @@ KST = timezone(timedelta(hours=9))
         self.bot = bot
         self.daily_notice.start()
 
-    @tasks.loop(time=time(hour=23, minute=50, tzinfo=KST))
+    @tasks.loop(time=time(hour=23, minute=55, tzinfo=KST))
     async def daily_notice(self):
         print("공지 실행 시작")
 
