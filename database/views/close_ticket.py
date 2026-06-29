@@ -26,29 +26,29 @@ class TicketCloseView(discord.ui.View):
 
     def __init__(self):
         super().__init__(timeout=None)
-        
-@discord.ui.button(
-    label="🔒 티켓 닫기",
-    style=discord.ButtonStyle.danger,
-    custom_id="close_ticket"
-)
-async def close_button(
-    self,
-    interaction: discord.Interaction,
-    button: discord.ui.Button
-):
-    try:
 
-        await interaction.response.defer()
+    @discord.ui.button(
+        label="🔒 티켓 닫기",
+        style=discord.ButtonStyle.danger,
+        custom_id="close_ticket"
+    )
+    async def close_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        try:
 
-        developer_ids = []
+            await interaction.response.defer()
 
-        for value in DESIGNERS.values():
-            if isinstance(value, dict):
-                if "id" in value:
-                    developer_ids.append(value["id"])
-                else:
-                    developer_ids.extend(value.keys())
+            developer_ids = []
+
+            for value in DESIGNERS.values():
+                if isinstance(value, dict):
+                    if "id" in value:
+                        developer_ids.append(value["id"])
+                    else:
+                        developer_ids.extend(value.keys())
 
             if interaction.user.id not in developer_ids:
                 return await interaction.followup.send(
