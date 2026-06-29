@@ -393,7 +393,7 @@ async def on_ready():
     bot.add_view(TicketCloseView())
     bot.add_view(DeliveryView())
 
-    DailyNotice(bot)   # ← 반드시 여기
+    DailyNotice(bot) 
 
     print("✨ 영속성 버튼 등록 완료!")
 
