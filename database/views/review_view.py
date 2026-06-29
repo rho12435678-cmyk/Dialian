@@ -142,6 +142,7 @@ class StarRatingView(discord.ui.View):
                 )
 
                 designer_id = self.designer_id
+                print(f"[REVIEW] designer_id = {designer_id}")
 
                 # ==========================
                 # SQLite 저장
@@ -172,6 +173,7 @@ class StarRatingView(discord.ui.View):
                         )
 
                         await db.commit()
+                        print("[REVIEW] DB 저장 완료")
 
                 success_view = discord.ui.View()
 
