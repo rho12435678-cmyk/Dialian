@@ -9,8 +9,7 @@ DESIGNERS = [
 
 
 class ProgressView(discord.ui.View):
-
-    def __init__(self, progress_message):
+    def __init__(self, progress_message=None):
         super().__init__(timeout=None)
         self.progress_message = progress_message
 
