@@ -40,77 +40,73 @@ class TicketCloseView(discord.ui.View):
 
         try:
 
-            await interaction.response.defer()
+    await interaction.response.defer()
 
-            developer_ids = []
+    developer_ids = []
 
-            for value in DESIGNERS.values():
-                if isinstance(value, dict):
-                    if "id" in value:
-                        developer_ids.append(value["id"])
-                    else:
-                        developer_ids.extend(value.keys())
+    for value in DESIGNERS.values():
+        if isinstance(value, dict):
+            if "id" in value:
+                developer_ids.append(value["id"])
+            else:
+                developer_ids.extend(value.keys())
 
-            if interaction.user.id not in developer_ids:
-                return await interaction.followup.send(
-                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
-                    ephemeral=True
-                )
+    if interaction.user.id not in developer_ids:
+        return await interaction.followup.send(
+            "❌ 관리자만 티켓을 종료할 수 있습니다.",
+            ephemeral=True
+        )
 
-            channel = interaction.channel
-            guild = interaction.guild
+    channel = interaction.channel
+    guild = interaction.guild
 
-            if "티켓" not in channel.name:
-                return await interaction.followup.send(
-                    "❌ 올바른 티켓 채널이 아닙니다.",
-                    ephemeral=True
-                )
+    if "티켓" not in channel.name:
+        return await interaction.followup.send(
+            "❌ 올바른 티켓 채널이 아닙니다.",
+            ephemeral=True
+        )
 
-ticket_owner = None
-ticket_owner = None
-designer_id = None
+    ticket_owner = interaction.user
+    designer_id = None
 
-# 채널 Topic에 저장된 구매자 ID 읽기
-try:
-    if channel.topic:
-        ticket_owner = guild.get_member(int(channel.topic))
-except Exception:
-    pass
+    try:
 
-try:
+        async for msg in channel.history(
+            limit=20,
+            oldest_first=True
+        ):
 
-    async for msg in channel.history(
-        limit=20,
-        oldest_first=True
-    ):
+            if msg.mentions:
+                ticket_owner = msg.mentions[0]
 
-        if not msg.embeds:
-            continue
+            if not msg.embeds:
+                continue
 
-        embed = msg.embeds[0]
+            embed = msg.embeds[0]
 
-        if embed.title != "📋 커미션 신청서":
-            continue
+            if embed.title != "📋 커미션 신청서":
+                continue
 
-        for field in embed.fields:
+            for field in embed.fields:
 
-            if field.name == "👨‍💻 담당 디자이너":
+                if field.name == "👨‍💻 담당 디자이너":
 
-                if "<@" in field.value:
+                    if "<@" in field.value:
 
-                    designer_id = int(
-                        field.value.replace("<@", "")
-                                   .replace("!", "")
-                                   .replace(">", "")
-                    )
+                        designer_id = int(
+                            field.value.replace("<@", "")
+                                       .replace("!", "")
+                                       .replace(">", "")
+                        )
 
+                    break
+
+            if designer_id:
                 break
 
-        if designer_id:
-            break
+    except Exception:
+        pass
 
-except Exception:
-    pass
 
 # 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
 if ticket_owner is None:
