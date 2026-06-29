@@ -66,46 +66,55 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-            ticket_owner = interaction.user
-            designer_id = None
+ticket_owner = None
+designer_id = None
 
-            try:
+# 채널 Topic에 저장된 구매자 ID 읽기
+try:
+    if channel.topic:
+        ticket_owner = guild.get_member(int(channel.topic))
+except Exception:
+    pass
 
-                async for msg in channel.history(
-                    limit=20,
-                    oldest_first=True
-                ):
+try:
 
-                    if msg.mentions:
-                        ticket_owner = msg.mentions[0]
+    async for msg in channel.history(
+        limit=20,
+        oldest_first=True
+    ):
 
-                    if not msg.embeds:
-                        continue
+        # ↓↓↓ 이 부분은 삭제
+        # if msg.mentions:
+        #     ticket_owner = msg.mentions[0]
 
-                    embed = msg.embeds[0]
+        if not msg.embeds:
+            continue
 
-                    if embed.title != "📋 커미션 신청서":
-                        continue
+        embed = msg.embeds[0]
 
-                    for field in embed.fields:
+        if embed.title != "📋 커미션 신청서":
+            continue
 
-                        if field.name == "👨‍💻 담당 디자이너":
+        for field in embed.fields:
 
-                            if "<@" in field.value:
+            if field.name == "👨‍💻 담당 디자이너":
 
-                                designer_id = int(
-                                    field.value.replace("<@", "")
-                                               .replace("!", "")
-                                               .replace(">", "")
-                                )
+                if "<@" in field.value:
+                    designer_id = int(
+                        field.value.replace("<@", "")
+                                   .replace("!", "")
+                                   .replace(">", "")
+                    )
 
-                            break
+                break
 
-                    if designer_id:
-                        break
+        if designer_id:
+            break
 
-            except Exception:
-                pass
+except Exception:
+    pass
+                        
+            
 
             await interaction.followup.send(
                 "💾 안전하게 구매로그를 정리하는 중입니다..."
