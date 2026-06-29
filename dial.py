@@ -148,7 +148,13 @@ async def stats(ctx):
 
 @bot.command(name="계좌등록")
 @commands.has_permissions(administrator=True)
-async def register_bank(ctx, bank_name, account_number, holder):
+async def register_bank(
+    ctx,
+    member: discord.Member,
+    bank_name,
+    account_number,
+    holder
+):
 
     async with aiosqlite.connect("data/dialian.db") as db:
 
@@ -163,7 +169,7 @@ async def register_bank(ctx, bank_name, account_number, holder):
             VALUES(?,?,?,?)
             """,
             (
-                ctx.author.id,
+                member.id,
                 bank_name,
                 account_number,
                 holder
@@ -175,6 +181,12 @@ async def register_bank(ctx, bank_name, account_number, holder):
     embed = discord.Embed(
         title="✅ 계좌 등록 완료",
         color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="대상 디자이너",
+        value=member.mention,
+        inline=False
     )
 
     embed.add_field(
@@ -196,6 +208,7 @@ async def register_bank(ctx, bank_name, account_number, holder):
     )
 
     await ctx.send(embed=embed)
+
 
 @bot.command(name="계좌삭제")
 @commands.has_permissions(administrator=True)
