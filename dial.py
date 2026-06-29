@@ -393,6 +393,8 @@ async def on_ready():
     bot.add_view(ProgressView())
     bot.add_view(PaymentView(0))
     bot.add_view(DeliveryView())
+    
+    DailyNotice(bot)
 
     
 
