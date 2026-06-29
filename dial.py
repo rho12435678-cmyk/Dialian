@@ -390,7 +390,7 @@ async def on_ready():
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
-    bot.add_view(ProgressView())
+   # bot.add_view(ProgressView())
     bot.add_view(PaymentView(0))
     bot.add_view(DeliveryView())
     
