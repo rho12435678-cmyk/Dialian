@@ -65,35 +65,39 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-            ticket_owner = interaction.user
+                        ticket_owner = interaction.user
 
             designer_id = None
 
-try:
-    async for msg in channel.history(limit=20, oldest_first=True):
-        if not msg.embeds:
-            continue
+            try:
+                async for msg in channel.history(
+                    limit=20,
+                    oldest_first=True
+                ):
 
-        embed = msg.embeds[0]
+                    if not msg.embeds:
+                        continue
 
-        if embed.title != "📋 커미션 신청서":
-            continue
+                    embed = msg.embeds[0]
 
-        for field in embed.fields:
-            if field.name == "👨‍💻 담당 디자이너":
-                if "<@" in field.value:
-                    designer_id = int(
-                        field.value.replace("<@", "")
-                                   .replace("!", "")
-                                   .replace(">", "")
-                    )
-                break
+                    if embed.title != "📋 커미션 신청서":
+                        continue
 
-        if designer_id:
-            break
+                    for field in embed.fields:
+                        if field.name == "👨‍💻 담당 디자이너":
+                            if "<@" in field.value:
+                                designer_id = int(
+                                    field.value.replace("<@", "")
+                                               .replace("!", "")
+                                               .replace(">", "")
+                                )
+                            break
 
-except Exception:
-    pass
+                    if designer_id:
+                        break
+
+            except Exception:
+                pass
 
             try:
                 async for msg in channel.history(
@@ -265,10 +269,10 @@ except Exception:
                     color=0x5865F2
                 )
 
-                await ticket_owner.send(
+            await ticket_owner.send(
     embed=dm_embed,
     view=StarRatingView(designer_id)
-                )
+            )
 
             except Exception as dm_e:
                 print(f"[DM 실패] {dm_e}")
