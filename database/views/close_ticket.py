@@ -37,89 +37,91 @@ class TicketCloseView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+                try:
 
-        try:
+            await interaction.response.defer()
 
-    await interaction.response.defer()
+            developer_ids = []
 
-    developer_ids = []
+            for value in DESIGNERS.values():
+                if isinstance(value, dict):
+                    if "id" in value:
+                        developer_ids.append(value["id"])
+                    else:
+                        developer_ids.extend(value.keys())
 
-    for value in DESIGNERS.values():
-        if isinstance(value, dict):
-            if "id" in value:
-                developer_ids.append(value["id"])
-            else:
-                developer_ids.extend(value.keys())
+            if interaction.user.id not in developer_ids:
+                return await interaction.followup.send(
+                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True
+                )
 
-    if interaction.user.id not in developer_ids:
-        return await interaction.followup.send(
-            "❌ 관리자만 티켓을 종료할 수 있습니다.",
-            ephemeral=True
-        )
+            channel = interaction.channel
+            guild = interaction.guild
 
-    channel = interaction.channel
-    guild = interaction.guild
+            if "티켓" not in channel.name:
+                return await interaction.followup.send(
+                    "❌ 올바른 티켓 채널이 아닙니다.",
+                    ephemeral=True
+                )
 
-    if "티켓" not in channel.name:
-        return await interaction.followup.send(
-            "❌ 올바른 티켓 채널이 아닙니다.",
-            ephemeral=True
-        )
+            ticket_owner = None
+            designer_id = None
 
-    ticket_owner = None
-designer_id = None
+            # 채널 Topic에 저장된 구매자 ID 읽기
+            try:
+                if channel.topic:
+                    ticket_owner = guild.get_member(int(channel.topic))
+            except Exception:
+                pass
 
-# 채널 Topic에 저장된 구매자 ID 읽기
-try:
-    if channel.topic:
-        ticket_owner = guild.get_member(int(channel.topic))
-except Exception:
-    pass
+            try:
 
-try:
+                async for msg in channel.history(
+                    limit=20,
+                    oldest_first=True
+                ):
 
-    async for msg in channel.history(
-        limit=20,
-        oldest_first=True
-    ):
+                    if not msg.embeds:
+                        continue
 
-        if not msg.embeds:
-            continue
+                    embed = msg.embeds[0]
 
-        embed = msg.embeds[0]
+                    if embed.title != "📋 커미션 신청서":
+                        continue
 
-        if embed.title != "📋 커미션 신청서":
-            continue
+                    for field in embed.fields:
 
-        for field in embed.fields:
+                        if field.name == "👨‍💻 담당 디자이너":
 
-            if field.name == "👨‍💻 담당 디자이너":
+                            if "<@" in field.value:
 
-                if "<@" in field.value:
+                                designer_id = int(
+                                    field.value.replace("<@", "")
+                                               .replace("!", "")
+                                               .replace(">", "")
+                                )
 
-                    designer_id = int(
-                        field.value.replace("<@", "")
-                                   .replace("!", "")
-                                   .replace(">", "")
-                    )
+                            break
 
-                break
+                    if designer_id:
+                        break
 
-        if designer_id:
-            break
+            except Exception:
+                pass
 
-except Exception:
-    pass
-
-# 오래된 티켓(Topic 없는 티켓) 호환
-if ticket_owner is None:
-    try:
-        async for msg in channel.history(limit=1, oldest_first=True):
-            if msg.mentions:
-                ticket_owner = msg.mentions[0]
-                break
-    except Exception:
-        pass
+            # 오래된 티켓(Topic 없는 티켓) 호환
+            if ticket_owner is None:
+                try:
+                    async for msg in channel.history(
+                        limit=1,
+                        oldest_first=True
+                    ):
+                        if msg.mentions:
+                            ticket_owner = msg.mentions[0]
+                            break
+                except Exception:
+                    pass
 
             await interaction.followup.send(
                 "💾 안전하게 구매로그를 정리하는 중입니다..."
@@ -218,14 +220,13 @@ if ticket_owner is None:
                 )
 
                 await log_channel.send(
-    content=(
-        f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다."
-        if ticket_owner
-        else "🔒 티켓이 종료되었습니다."
-    ),
-    embed=safe_log_embed
+                    content=(
+                        f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다."
+                        if ticket_owner
+                        else "🔒 티켓이 종료되었습니다."
+                    ),
+                    embed=safe_log_embed
                 )
-
 
             # ==============================
             # 구매자 역할 자동 지급
@@ -235,11 +236,12 @@ if ticket_owner is None:
 
                 buyer_role = guild.get_role(BUYER_ROLE_ID)
 
-                if ticket_owner and buyer_role and buyer_role not in ticket_owner.roles:
-                    await ticket_owner.add_roles(
-                        buyer_role,
-                        reason="커미션 완료 자동 구매자 역할 지급"
-                    )
+                if (
+                    ticket_owner
+                    and buyer_role
+                    and buyer_role not in 
+                    ticket_owner.roles
+                    ):
 
                     try:
 
@@ -276,11 +278,13 @@ if ticket_owner is None:
                     ),
                     color=0x5865F2
                 )
+                
+                if ticket_owner:
 
-                await ticket_owner.send(
-                    embed=dm_embed,
-                    view=StarRatingView(designer_id)
-                )
+                   await ticket_owner.send(
+                       embed=dm_embed,
+                view=StarRatingView(designer_id)
+                   )
 
             except Exception as dm_e:
                 print(f"[DM 실패] {dm_e}")
