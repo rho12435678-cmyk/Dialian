@@ -40,10 +40,11 @@ class TicketCloseView(discord.ui.View):
 ):
     try:
         await interaction.response.defer()
-        
-            developer_ids = []
 
-            for value in DESIGNERS.values():
+        developer_ids = []
+
+        for value in DESIGNERS.values():
+            
                 if isinstance(value, dict):
                     if "id" in value:
                         developer_ids.append(value["id"])
