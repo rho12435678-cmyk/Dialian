@@ -67,6 +67,7 @@ class TicketCloseView(discord.ui.View):
                 )
 
 ticket_owner = None
+ticket_owner = None
 designer_id = None
 
 # 채널 Topic에 저장된 구매자 ID 읽기
@@ -83,10 +84,6 @@ try:
         oldest_first=True
     ):
 
-        # ↓↓↓ 이 부분은 삭제
-        # if msg.mentions:
-        #     ticket_owner = msg.mentions[0]
-
         if not msg.embeds:
             continue
 
@@ -100,6 +97,7 @@ try:
             if field.name == "👨‍💻 담당 디자이너":
 
                 if "<@" in field.value:
+
                     designer_id = int(
                         field.value.replace("<@", "")
                                    .replace("!", "")
@@ -113,8 +111,56 @@ try:
 
 except Exception:
     pass
-                        
-            
+
+# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
+if ticket_owner is None:
+    try:
+        async for msg in channel.history(limit=1, oldest_first=True):
+            if msg.mentions:
+                ticket_owner = msg.mentions[0]
+                break
+    except Exception:
+        pass
+
+# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
+if ticket_owner is None:
+    try:
+        async for msg in channel.history(limit=1, oldest_first=True):
+            if msg.mentions:
+                ticket_owner = msg.mentions[0]
+                break
+    except Exception:
+        pass
+
+# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
+if ticket_owner is None:
+    try:
+        async for msg in channel.history(limit=1, oldest_first=True):
+            if msg.mentions:
+                ticket_owner = msg.mentions[0]
+                break
+    except Exception:
+        pass
+
+# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
+if ticket_owner is None:
+    try:
+        async for msg in channel.history(limit=1, oldest_first=True):
+            if msg.mentions:
+                ticket_owner = msg.mentions[0]
+                break
+    except Exception:
+        pass
+
+# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
+if ticket_owner is None:
+    try:
+        async for msg in channel.history(limit=1, oldest_first=True):
+            if msg.mentions:
+                ticket_owner = msg.mentions[0]
+                break
+    except Exception:
+        pass
 
             await interaction.followup.send(
                 "💾 안전하게 구매로그를 정리하는 중입니다..."
