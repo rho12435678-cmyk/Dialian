@@ -141,49 +141,7 @@ class StarRatingView(discord.ui.View):
                     embed=review_embed
                 )
 
-                # ==========================
-                # 담당 디자이너 찾기
-                # ==========================
-
-                designer_id = None
-
-                for channel in guild.text_channels:
-
-                    if ticket_owner not in channel.members:
-                        continue
-
-                    async for msg in channel.history(
-                        limit=30,
-                        oldest_first=True
-                    ):
-
-                        if not msg.embeds:
-                            continue
-
-                        embed = msg.embeds[0]
-
-                        if embed.title != "📋 커미션 신청서":
-                            continue
-
-                        for field in embed.fields:
-
-                            if field.name == "👨‍💻 담당 디자이너":
-
-                                if "<@" in field.value:
-
-                                    designer_id = int(
-                                        field.value.replace("<@", "")
-                                                   .replace("!", "")
-                                                   .replace(">", "")
-                                    )
-
-                                break
-
-                        if designer_id:
-                            break
-
-                    if designer_id:
-                        break
+                designer_id = self.designer_id
 
                 # ==========================
                 # SQLite 저장
