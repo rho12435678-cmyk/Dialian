@@ -66,89 +66,52 @@ class TicketCloseView(discord.ui.View):
             ephemeral=True
         )
 
-    ticket_owner = interaction.user
-    designer_id = None
+    ticket_owner = None
+designer_id = None
 
-    try:
+# 채널 Topic에 저장된 구매자 ID 읽기
+try:
+    if channel.topic:
+        ticket_owner = guild.get_member(int(channel.topic))
+except Exception:
+    pass
 
-        async for msg in channel.history(
-            limit=20,
-            oldest_first=True
-        ):
+try:
 
-            if msg.mentions:
-                ticket_owner = msg.mentions[0]
+    async for msg in channel.history(
+        limit=20,
+        oldest_first=True
+    ):
 
-            if not msg.embeds:
-                continue
+        if not msg.embeds:
+            continue
 
-            embed = msg.embeds[0]
+        embed = msg.embeds[0]
 
-            if embed.title != "📋 커미션 신청서":
-                continue
+        if embed.title != "📋 커미션 신청서":
+            continue
 
-            for field in embed.fields:
+        for field in embed.fields:
 
-                if field.name == "👨‍💻 담당 디자이너":
+            if field.name == "👨‍💻 담당 디자이너":
 
-                    if "<@" in field.value:
+                if "<@" in field.value:
 
-                        designer_id = int(
-                            field.value.replace("<@", "")
-                                       .replace("!", "")
-                                       .replace(">", "")
-                        )
+                    designer_id = int(
+                        field.value.replace("<@", "")
+                                   .replace("!", "")
+                                   .replace(">", "")
+                    )
 
-                    break
-
-            if designer_id:
                 break
 
-    except Exception:
-        pass
+        if designer_id:
+            break
 
+except Exception:
+    pass
 
-# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
-if ticket_owner is None:
-    try:
-        async for msg in channel.history(limit=1, oldest_first=True):
-            if msg.mentions:
-                ticket_owner = msg.mentions[0]
-                break
-    except Exception:
-        pass
-
-# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
-if ticket_owner is None:
-    try:
-        async for msg in channel.history(limit=1, oldest_first=True):
-            if msg.mentions:
-                ticket_owner = msg.mentions[0]
-                break
-    except Exception:
-        pass
-
-# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
-if ticket_owner is None:
-    try:
-        async for msg in channel.history(limit=1, oldest_first=True):
-            if msg.mentions:
-                ticket_owner = msg.mentions[0]
-                break
-    except Exception:
-        pass
-
-# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
-if ticket_owner is None:
-    try:
-        async for msg in channel.history(limit=1, oldest_first=True):
-            if msg.mentions:
-                ticket_owner = msg.mentions[0]
-                break
-    except Exception:
-        pass
-
-# 혹시 Topic이 없는 오래된 티켓이면 기존 방식으로 한 번만 시도
+# 오래된 티켓(Topic 없는 티켓) 호환
 if ticket_owner is None:
     try:
         async for msg in channel.history(limit=1, oldest_first=True):
