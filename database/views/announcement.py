@@ -1,9 +1,9 @@
 import discord
 from discord.ext import tasks
-from datetime import time
+from datetime import datetime, timedelta, timezone, time
 from config import *
 
-KST = datetime.timezone(datetime.timedelta(hours=9))
+KST = timezone(timedelta(hours=9))
 
 class DailyNotice:
 
