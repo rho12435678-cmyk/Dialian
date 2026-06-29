@@ -13,11 +13,11 @@ def sanitize_text(text):
     if not text:
         return "[내용 없음]"
 
-    text = re.sub(r'https?://\S+', '[LINK]', text)
-    text = re.sub(r'discord\.gg/\S+', '[INVITE]', text)
-    text = re.sub(r'\S+@\S+', '[EMAIL]', text)
-    text = re.sub(r'\d{2,3}-\d{3,4}-\d{4}', '[PHONE]', text)
-    text = re.sub(r'\d{6,}', '[NUMBER]', text)
+    text = re.sub(r'https?://\S+', "[LINK]", text)
+    text = re.sub(r"discord\.gg/\S+", "[INVITE]", text)
+    text = re.sub(r"\S+@\S+", "[EMAIL]", text)
+    text = re.sub(r"\d{2,3}-\d{3,4}-\d{4}", "[PHONE]", text)
+    text = re.sub(r"\d{6,}", "[NUMBER]", text)
 
     return text[:80]
 
@@ -65,22 +65,18 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-            try:
-                first_message = None
+            ticket_owner = interaction.user
 
+            try:
                 async for msg in channel.history(
                     limit=1,
                     oldest_first=True
                 ):
-                    first_message = msg
-
-                if first_message and first_message.mentions:
-                    ticket_owner = first_message.mentions[0]
-                else:
-                    ticket_owner = interaction.user
-
+                    if msg.mentions:
+                        ticket_owner = msg.mentions[0]
+                        break
             except Exception:
-                ticket_owner = interaction.user
+                pass
 
             await interaction.followup.send(
                 "💾 안전하게 구매로그를 정리하는 중입니다..."
@@ -91,7 +87,8 @@ class TicketCloseView(discord.ui.View):
             participants = set()
             recent_messages = []
 
-                            async for msg in channel.history(
+
+            async for msg in channel.history(
                 limit=100,
                 oldest_first=False
             ):
@@ -106,6 +103,7 @@ class TicketCloseView(discord.ui.View):
                     attachment_count += len(msg.attachments)
 
                 if len(recent_messages) < 3:
+
                     clean_content = sanitize_text(msg.content)
 
                     if not clean_content.strip():
@@ -120,8 +118,9 @@ class TicketCloseView(discord.ui.View):
 
             duration = closed_at - created_at
 
-            hours = duration.seconds // 3600
-            minutes = (duration.seconds % 3600) // 60
+            total_minutes = int(duration.total_seconds() // 60)
+            hours = total_minutes // 60
+            minutes = total_minutes % 60
 
             # ==============================
             # 구매로그 채널
@@ -135,7 +134,7 @@ class TicketCloseView(discord.ui.View):
             if log_channel:
 
                 safe_log_embed = discord.Embed(
-                    title="🧾 구매/상담 로그",
+                    title="🧾 구매 / 상담 로그",
                     color=0x5865F2,
                     timestamp=datetime.now()
                 )
@@ -172,50 +171,54 @@ class TicketCloseView(discord.ui.View):
 
                 safe_log_embed.add_field(
                     name="👥 참여자",
-                    value=", ".join(participants),
+                    value=", ".join(sorted(participants)),
                     inline=False
                 )
 
                 safe_log_embed.set_footer(
-                    text="전체 대화내용 및 개인정보는 저장되지 않았습니다."
+                    text="전체 대화 내용 및 개인정보는 저장되지 않았습니다."
                 )
 
                 await log_channel.send(
                     content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
                     embed=safe_log_embed
                 )
-                    
-                        # ==============================
+
+
+            # ==============================
             # 구매자 역할 자동 지급
             # ==============================
 
             try:
                 buyer_role = guild.get_role(BUYER_ROLE_ID)
 
-                if buyer_role and ticket_owner:
-                    if buyer_role not in ticket_owner.roles:
+                if (
+                    buyer_role
+                    and ticket_owner
+                    and buyer_role not in ticket_owner.roles
+                ):
 
-                        await ticket_owner.add_roles(
-                            buyer_role,
-                            reason="커미션 완료 자동 구매자 역할 지급"
+                    await ticket_owner.add_roles(
+                        buyer_role,
+                        reason="커미션 완료 자동 구매자 역할 지급"
+                    )
+
+                    try:
+                        success_role_embed = discord.Embed(
+                            title="🎉 구매자 역할 지급 완료",
+                            description=(
+                                f"`{guild.name}` 서버에서\n"
+                                "구매자 역할이 지급되었습니다!"
+                            ),
+                            color=discord.Color.green()
                         )
 
-                        try:
-                            success_role_embed = discord.Embed(
-                                title="🎉 구매자 역할 지급 완료",
-                                description=(
-                                    f"`{guild.name}` 서버에서\n"
-                                    "구매자 역할이 지급되었습니다!"
-                                ),
-                                color=discord.Color.green()
-                            )
+                        await ticket_owner.send(
+                            embed=success_role_embed
+                        )
 
-                            await ticket_owner.send(
-                                embed=success_role_embed
-                            )
-
-                        except Exception:
-                            pass
+                    except Exception:
+                        pass
 
             except Exception as role_err:
                 print(f"[구매자 역할 지급 실패] {role_err}")
@@ -228,7 +231,7 @@ class TicketCloseView(discord.ui.View):
                 dm_embed = discord.Embed(
                     title="💌 서비스를 이용해 주셔서 감사합니다!",
                     description=(
-                        "진행하시던 커미션 완료되어 티켓이 종료되었습니다.\n"
+                        "진행하시던 커미션이 완료되어 티켓이 종료되었습니다.\n"
                         "아래 버튼을 통해 만족도 별점을 남겨주세요!"
                     ),
                     color=0x5865F2
@@ -241,7 +244,8 @@ class TicketCloseView(discord.ui.View):
 
             except Exception as dm_e:
                 print(f"[DM 실패] {dm_e}")
-                            await interaction.followup.send(
+
+            await interaction.followup.send(
                 "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
             )
 
