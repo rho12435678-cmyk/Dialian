@@ -1,9 +1,10 @@
 import discord
 from discord.ext import tasks
-from datetime import datetime, timedelta, timezone, time
+from datetime import timezone, timedelta, time
 from config import *
 
 KST = timezone(timedelta(hours=9))
+
 
 class DailyNotice:
 
@@ -22,9 +23,22 @@ class DailyNotice:
         embed = discord.Embed(
             description=(
                 "@CUSTOMER/손님\n\n"
-                "🎨 **Roblox GFX 커미션 받습니다!**\n\n"
+
+                "🎨 **Roblox GFX / 로고 / 복장 커미션 받습니다!**\n\n"
+
+                "✨ **제작 가능**\n"
+                "• 🎨 Roblox GFX\n"
+                "• 🖌️ 로고 디자인\n"
+                "• 👕 Roblox 복장 제작\n\n"
+
+                "✅ 디자이너 직접 상담\n"
+                "✅ 실시간 진행률 확인\n"
+                "✅ 안전한 티켓 시스템\n"
+                "✅ 빠른 작업 및 고퀄리티 제작\n\n"
+
                 "📸 예시작은 <#예시채널ID> 에서 확인해주세요.\n"
-                "💳 구매는 <#구매채널ID> 를 이용해주세요.\n\n"
+                "💳 구매 및 문의는 <#구매채널ID> 를 이용해주세요.\n\n"
+
                 "감사합니다 🙏"
             ),
             color=0xF4A300
