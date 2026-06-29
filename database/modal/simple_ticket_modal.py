@@ -73,15 +73,15 @@ class SimpleTicketModal(discord.ui.Modal):
                     attach_files=True
                 )
 
-        ticket_channel = await guild.create_text_channel(
-    name=ticket_channel_name,
-    overwrites=overwrites,
-    topic=str(user.id)
+                ticket_channel = await guild.create_text_channel(
+            name=ticket_channel_name,
+            overwrites=overwrites,
+            topic=str(user.id)
         )
 
-await ticket_channel.edit(
-    topic=str(user.id)
-)
+        await ticket_channel.edit(
+            topic=str(user.id)
+        )
 
         embed = discord.Embed(
             title=self.FORM_TITLE,
