@@ -209,8 +209,7 @@ class TicketCloseView(discord.ui.View):
                         )
 
                         try:
-                            success_role_embed = 
-                        discord.Embed(
+                            success_role_embed = discord.Embed(
                                 title="🎉 구매자 역할 지급 완료",
                                 description=(
                                     f"`{guild.name}` 서버에서
