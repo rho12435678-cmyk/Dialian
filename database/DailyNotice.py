@@ -12,15 +12,22 @@ class DailyNotice:
         self.daily_notice.start()
 
     @tasks.loop(time=time(hour=23, minute=30, tzinfo=KST))
-    async def daily_notice(self):
+async def daily_notice():
+    print("공지 실행 시작")
 
-        print("공지 실행")
-
+    try:
         channel = self.bot.get_channel(SALE_NOTICE_CHANNEL_ID)
+        print(f"채널: {channel}")
 
         if channel is None:
             print("채널 없음")
             return
+
+        await channel.send(embed=embed)
+        print("공지 전송 완료")
+
+    except Exception as e:
+        print(f"공지 오류: {e}")
 
         embed = discord.Embed(
             description=(
