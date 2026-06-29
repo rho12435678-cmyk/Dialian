@@ -178,9 +178,9 @@ if ticket_owner is None:
                 )
 
                 safe_log_embed.add_field(
-                    name="👤 고객",
-                    value=ticket_owner.mention,
-                    inline=True
+    name="👤 고객",
+    value=ticket_owner.mention if ticket_owner else "알 수 없음",
+    inline=True
                 )
 
                 safe_log_embed.add_field(
@@ -218,8 +218,12 @@ if ticket_owner is None:
                 )
 
                 await log_channel.send(
-                    content=f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다.",
-                    embed=safe_log_embed
+    content=(
+        f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다."
+        if ticket_owner
+        else "🔒 티켓이 종료되었습니다."
+    ),
+    embed=safe_log_embed
                 )
 
 
@@ -231,12 +235,7 @@ if ticket_owner is None:
 
                 buyer_role = guild.get_role(BUYER_ROLE_ID)
 
-                if (
-                    buyer_role
-                    and ticket_owner
-                    and buyer_role not in ticket_owner.roles
-                ):
-
+                if ticket_owner and buyer_role and buyer_role not in ticket_owner.roles:
                     await ticket_owner.add_roles(
                         buyer_role,
                         reason="커미션 완료 자동 구매자 역할 지급"
