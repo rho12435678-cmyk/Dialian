@@ -385,15 +385,18 @@ async def on_ready():
 
     await create_tables()
 
+    print("on_ready")
+
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
-    print("--------------------------------------------------")
 
     bot.add_view(TicketOpenView())
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
     bot.add_view(DeliveryView())
 
-    DailyNotice(bot) 
+    print("DailyNotice 생성 전")
+    DailyNotice(bot)
+    print("DailyNotice 생성 완료")
 
     print("✨ 영속성 버튼 등록 완료!")
 
