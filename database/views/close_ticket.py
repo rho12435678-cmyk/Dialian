@@ -195,7 +195,7 @@ class TicketCloseView(discord.ui.View):
             # 구매자 역할 자동 지급
             # ==============================
 
-            try:
+                 try:
 
                 buyer_role = guild.get_role(BUYER_ROLE_ID)
 
@@ -225,15 +225,15 @@ class TicketCloseView(discord.ui.View):
                         except:
                             pass
 
-            except Exception as role_err:
-                print(f"[구매자 역할 지급 실패] {role_err}")
+                except Exception as role_err:
+                    print(f"[구매자 역할 지급 실패] {role_err}")
 
 
             # ==============================
             # 유저 DM
             # ==============================
             
-            try:
+                try:
 
                 dm_embed = discord.Embed(
                     title="💌 서비스를 이용해 주셔서 감사합니다!",
@@ -249,21 +249,21 @@ class TicketCloseView(discord.ui.View):
                     view=StarRatingView()
                 )
 
-            except Exception as dm_e:
-                print(f"[DM 실패] {dm_e}")
+                   except Exception as dm_e:
+                       print(f"[DM 실패] {dm_e}")
 
-            await interaction.followup.send(
-                "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
-            )
+                   await interaction.followup.send(
+                       "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
+                )
 
-            await asyncio.sleep(5)
-            await channel.delete()
+                   await asyncio.sleep(5)
+                   await channel.delete()
 
-        else:
-            await interaction.followup.send(
-                "❌ 올바른 티켓 채널이 아닙니다.",
-                ephemeral=True
-            )
+               else:
+                   await interaction.followup.send(
+                       "❌ 올바른 티켓 채널이 아닙니다.",
+                       ephemeral=True
+                )
 
-    except Exception as e:
-        print(f"[티켓 닫기 에러] {e}")
+              except Exception as e:
+                  print(f"[티켓 닫기 에러] {e}")
