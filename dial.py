@@ -392,12 +392,9 @@ async def on_ready():
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
    # bot.add_view(ProgressView())
-    bot.add_view(PaymentView(0))
     bot.add_view(DeliveryView())
     
     DailyNotice(bot)
-
-    
 
     print("✨ 영속성 버튼 등록 완료!")
 
@@ -405,5 +402,3 @@ if TOKEN:
     bot.run(TOKEN)
 else:
     print("❌ TOKEN 환경변수를 찾을 수 없습니다.")
-
-# redeploy
