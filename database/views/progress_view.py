@@ -15,26 +15,37 @@ class ProgressView(discord.ui.View):
         super().__init__(timeout=None)
         self.progress_message = progress_message
 
-    @discord.ui.button(label="0%", style=discord.ButtonStyle.secondary)
-    async def p0(self, interaction, button):
-        await self.update_progress(interaction, 0, "🟢 상담중", "미설정")
+    @discord.ui.button(
+    label="0%",
+    style=discord.ButtonStyle.secondary,
+    custom_id="progress_0"
+)
+async def p0(self, interaction, button):
+    await self.update_progress(interaction, 0, "🟢 상담중", "미설정")
 
-    @discord.ui.button(label="25%", style=discord.ButtonStyle.secondary)
-    async def p25(self, interaction, button):
-        await self.update_progress(interaction, 25, "🟡 작업 시작", "3일")
+    @discord.ui.button(
+    label="25%",
+    style=discord.ButtonStyle.secondary,
+    custom_id="progress_25"
+)
+async def p25(self, interaction, button):
+    await self.update_progress(interaction, 25, "🟡 작업 시작", "3일")
 
-    @discord.ui.button(label="50%", style=discord.ButtonStyle.primary)
-    async def p50(self, interaction, button):
-        await self.update_progress(interaction, 50, "🟠 작업중", "2일")
+    @discord.ui.button(
+    label="50%",
+    style=discord.ButtonStyle.primary,
+    custom_id="progress_50"
+)
+async def p50(self, interaction, button):
+    await self.update_progress(interaction, 50, "🟠 작업중", "2일")
 
-    @discord.ui.button(label="75%", style=discord.ButtonStyle.success)
-    async def p75(self, interaction, button):
-        await self.update_progress(interaction, 75, "🔵 마무리 작업", "1일")
-
-    @discord.ui.button(label="100%", style=discord.ButtonStyle.success)
-    async def p100(self, interaction, button):
-        await self.update_progress(interaction, 100, "✅ 완료", "완료")
-
+    @discord.ui.button(
+    label="75%",
+    style=discord.ButtonStyle.success,
+    custom_id="progress_75"
+)
+async def p75(self, interaction, button):
+    await self.update_progress(interaction, 75, "🔵 마무리 작업", "1일")
     async def update_progress(self, interaction, progress, status, estimate):
 
         if interaction.user.id not in DESIGNERS:
