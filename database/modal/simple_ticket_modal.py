@@ -74,8 +74,9 @@ class SimpleTicketModal(discord.ui.Modal):
                 )
 
         ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            overwrites=overwrites
+    name=ticket_channel_name,
+    overwrites=overwrites,
+    topic=str(user.id)
         )
 
 await ticket_channel.edit(
