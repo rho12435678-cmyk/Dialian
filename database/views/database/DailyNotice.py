@@ -12,7 +12,7 @@ class DailyNotice:
         self.bot = bot
         self.daily_notice.start()
 
-    @tasks.loop(time=time(hour=22, minute=4, tzinfo=KST))
+    @tasks.loop(time=time(hour=22, minute=6, tzinfo=KST))
     async def daily_notice(self):
 
         print("공지 실행")
