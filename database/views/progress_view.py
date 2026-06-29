@@ -58,22 +58,21 @@ class ProgressView(discord.ui.View):
 
         await self.progress_message.edit(embed=embed)
 
+        if progress == 100:
+
+            await interaction.channel.send(
+                embed=discord.Embed(
+                    title="📦 작업이 완료되었습니다!",
+                    description=(
+                        "담당 디자이너는 아래 버튼을 눌러 "
+                        "완성작을 전달해주세요."
+                    ),
+                    color=discord.Color.green()
+                ),
+                view=DeliveryView()
+            )
+
         await interaction.response.send_message(
-
-if progress == 100:
-
-    await interaction.channel.send(
-        embed=discord.Embed(
-            title="📦 작업이 완료되었습니다!",
-            description=(
-                "담당 디자이너는 아래 버튼을 눌러 "
-                "완성작을 전달해주세요."
-            ),
-            color=discord.Color.green()
-        ),
-        view=DeliveryView()
-    )
-
             "✅ 진행률을 변경했습니다.",
             ephemeral=True
         )
