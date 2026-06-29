@@ -212,9 +212,8 @@ class TicketCloseView(discord.ui.View):
                             success_role_embed = discord.Embed(
                                 title="🎉 구매자 역할 지급 완료",
                                 description=(
-                                    f"`{guild.name}` 서버에서
-                        \n"
-                                    f"구매자 역할이 지급되었습니다!"
+                                    f"`{guild.name}` 서버에서\n"
+                                    "구매자 역할이 지급되었습니다!"
                                 ),
                                 color=discord.Color.green()
                             )
