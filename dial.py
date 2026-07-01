@@ -393,7 +393,6 @@ async def on_ready():
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
     # bot.add_view(ProgressView())
-    bot.add_view(DeliveryView())
 
     print("DailyNotice 생성 전")
     DailyNotice(bot)
