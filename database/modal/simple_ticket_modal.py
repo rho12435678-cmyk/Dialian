@@ -64,24 +64,25 @@ class SimpleTicketModal(discord.ui.Modal):
         }
 
         if self.selected_designer:
-            developer = guild.get_member(self.selected_designer)
+    developer = guild.get_member(self.selected_designer)
 
-            if developer:
-                overwrites[developer] = discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True
-                )
-
-                ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            overwrites=overwrites,
-            topic=str(user.id)
+    if developer:
+        overwrites[developer] = discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=True,
+            attach_files=True
         )
 
-        await ticket_channel.edit(
-            topic=str(user.id)
-        )
+# 티켓 생성 (디자이너 선택 여부와 상관없이 실행)
+ticket_channel = await guild.create_text_channel(
+    name=ticket_channel_name,
+    overwrites=overwrites,
+    topic=str(user.id)
+)
+
+await ticket_channel.edit(
+    topic=str(user.id)
+)
 
         embed = discord.Embed(
             title=self.FORM_TITLE,
@@ -106,7 +107,7 @@ class SimpleTicketModal(discord.ui.Modal):
             embed=embed
         )
 
-        await ticket_channel.send(
+        progress_message = await ticket_channel.send(
     embed=discord.Embed(
         title="📌 커미션 진행",
         description=(
@@ -119,6 +120,29 @@ class SimpleTicketModal(discord.ui.Modal):
         timestamp=datetime.now()
     )
 )
+
+        if self.selected_designer:
+    developer = guild.get_member(self.selected_designer)
+
+    if developer:
+        try:
+            await developer.send(
+                f"🔔 새로운 커미션이 들어왔습니다.\n"
+                f"{ticket_channel.mention}"
+            )
+
+            await developer.send(
+                "📊 진행률 관리",
+                view=ProgressView(progress_message)
+            )
+
+            await developer.send(
+                "💳 결제 정보 전송",
+                view=PaymentView(ticket_channel, self.selected_designer)
+            )
+
+        except Exception:
+            pass
 
         await interaction.followup.send(
             f"✅ 신청 완료!\n{ticket_channel.mention}",
