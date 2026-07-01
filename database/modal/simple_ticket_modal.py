@@ -142,4 +142,3 @@ class SimpleTicketModal(discord.ui.Modal):
         f"✅ 신청 완료!\n{ticket_channel.mention}",
         ephemeral=True
     )
-)
