@@ -24,9 +24,11 @@ def sanitize_text(text):
 
 class TicketCloseView(discord.ui.View):
 
-    def __init__(self):
+    def __init__(self, ticket_channel):
         super().__init__(timeout=None)
 
+        self.ticket_channel = ticket_channel
+        
     @discord.ui.button(
         label="🔒 티켓 닫기",
         style=discord.ButtonStyle.danger,
@@ -56,8 +58,8 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-            channel = interaction.channel
-            guild = interaction.guild
+            channel = self.ticket_channel
+            guild = channel.guild
 
             if "티켓" not in channel.name:
                 return await interaction.followup.send(
