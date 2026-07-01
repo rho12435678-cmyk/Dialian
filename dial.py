@@ -314,6 +314,16 @@ async def estimate(ctx, days: str):
 
     await ctx.send("진행 패널을 찾지 못했습니다.")
 
+@bot.command(name="청소")
+@commands.has_permissions(manage_messages=True)
+async def clear(ctx, amount: int):
+
+    await ctx.channel.purge(limit=amount + 1)
+
+    msg = await ctx.send(f"✅ {amount}개의 메시지를 삭제했습니다.")
+
+    await msg.delete(delay=3)
+
 @bot.command(name="완료")
 @commands.has_permissions(administrator=True)
 async def complete(ctx):
