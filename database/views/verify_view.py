@@ -1,6 +1,6 @@
 import discord
 
-VERIFY_ROLE = 1234567890   # 인증 역할 ID
+VERIFY_ROLE = 1505074732700008531   # 인증 역할 ID
 
 class VerifyView(discord.ui.View):
 
