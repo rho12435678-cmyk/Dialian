@@ -4,6 +4,7 @@ from datetime import datetime
 from config import *
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
+from database.views.close_ticket import TicketCloseView
 
 
 class SimpleTicketModal(discord.ui.Modal):
@@ -133,6 +134,10 @@ async def on_submit(self, interaction: discord.Interaction):
                 await developer.send(
                     "💳 결제 정보 전송",
                     view=PaymentView(ticket_channel, self.selected_designer)
+                )
+                await developer.send(
+                    "🔒 티켓 관리",
+                    view=TicketCloseView(ticket_channel)
                 )
 
             except Exception:
