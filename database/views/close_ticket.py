@@ -268,31 +268,6 @@ class TicketCloseView(discord.ui.View):
             except Exception as role_err:
                 print(f"[구매자 역할 지급 실패] {role_err}")
 
-            # ==============================
-            # 유저 DM
-            # ==============================
-
-            try:
-
-                dm_embed = discord.Embed(
-                    title="💌 서비스를 이용해 주셔서 감사합니다!",
-                    description=(
-                        "진행하시던 커미션이 완료되어 티켓이 종료되었습니다.\n"
-                        "아래 버튼을 통해 만족도 별점을 남겨주세요!"
-                    ),
-                    color=0x5865F2
-                )
-
-                if ticket_owner:
-
-                    await ticket_owner.send(
-                        embed=dm_embed,
-                        view=StarRatingView(designer_id)
-                    )
-
-            except Exception as dm_e:
-                print(f"[DM 실패] {dm_e}")
-
             await interaction.followup.send(
                 "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
             )
