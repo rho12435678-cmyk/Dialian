@@ -121,21 +121,6 @@ class SimpleTicketModal(discord.ui.Modal):
             view=ProgressView()
         )
 
-        await ticket_channel.send(
-            "💳 결제는 아래 버튼을 이용해주세요.",
-            view=PaymentView(self.selected_designer)
-        )
-
-        await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 추가 요구사항",
-                description="필요한 참고 이미지나 추가 설명을 자유롭게 작성해주세요.",
-                color=discord.Color.blurple(),
-                timestamp=datetime.now()
-            ),
-            view=TicketCloseView()
-        )
-
         await interaction.followup.send(
             f"✅ 신청 완료!\n{ticket_channel.mention}",
             ephemeral=True
