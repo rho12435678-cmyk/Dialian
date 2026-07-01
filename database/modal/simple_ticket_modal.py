@@ -27,7 +27,7 @@ class SimpleTicketModal(discord.ui.Modal):
 
         self.add_item(self.content)
 
-    async def on_submit(self, interaction: discord.Interaction):
+async def on_submit(self, interaction: discord.Interaction):
 
     guild = interaction.guild
     user = interaction.user
