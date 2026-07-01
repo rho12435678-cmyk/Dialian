@@ -28,122 +28,123 @@ class SimpleTicketModal(discord.ui.Modal):
 
         self.add_item(self.content)
 
-async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
 
-    guild = interaction.guild
-    user = interaction.user
+        guild = interaction.guild
+        user = interaction.user
 
-    designer_name = "미지정"
+        designer_name = "미지정"
 
-    if self.selected_designer:
-        developer = guild.get_member(self.selected_designer)
-        designer_name = developer.mention if developer else "미지정"
+        if self.selected_designer:
+            developer = guild.get_member(self.selected_designer)
+            designer_name = developer.mention if developer else "미지정"
 
-    nickname = user.display_name.lower().replace(" ", "-")
-    ticket_channel_name = f"티켓-{nickname}"
+        nickname = user.display_name.lower().replace(" ", "-")
+        ticket_channel_name = f"티켓-{nickname}"
 
-    if discord.utils.get(guild.text_channels, name=ticket_channel_name):
-        return await interaction.response.send_message(
-            "이미 생성된 티켓이 있습니다.",
-            ephemeral=True
-        )
+        if discord.utils.get(guild.text_channels, name=ticket_channel_name):
+            return await interaction.response.send_message(
+                "이미 생성된 티켓이 있습니다.",
+                ephemeral=True
+            )
 
-    await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
 
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(
-            read_messages=True,
-            send_messages=True,
-            attach_files=True
-        ),
-        guild.me: discord.PermissionOverwrite(
-            read_messages=True,
-            send_messages=True
-        )
-    }
-
-    if self.selected_designer:
-        developer = guild.get_member(self.selected_designer)
-
-        if developer:
-            overwrites[developer] = discord.PermissionOverwrite(
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(
                 read_messages=True,
                 send_messages=True,
                 attach_files=True
-            )
-
-    ticket_channel = await guild.create_text_channel(
-        name=ticket_channel_name,
-        overwrites=overwrites,
-        topic=str(user.id)
-    )
-
-    embed = discord.Embed(
-        title=self.FORM_TITLE,
-        color=0x5865F2,
-        timestamp=datetime.now()
-    )
-
-    embed.add_field(
-        name="👨‍💻 담당 디자이너",
-        value=designer_name,
-        inline=False
-    )
-
-    embed.add_field(
-        name=self.FIELD_NAME,
-        value=self.content.value,
-        inline=False
-    )
-
-    await ticket_channel.send(
-        content=user.mention,
-        embed=embed
-    )
-
-    progress_message = await ticket_channel.send(
-        embed=discord.Embed(
-            title="📌 커미션 진행",
-            description=(
-                f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
-                "📌 상태 : 🟢 상담중\n"
-                "📊 진행률 : 0%\n"
-                "⏰ 예상 완료 : 미설정"
             ),
-            color=discord.Color.green(),
+            guild.me: discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True
+            )
+        }
+
+        if self.selected_designer:
+            developer = guild.get_member(self.selected_designer)
+
+            if developer:
+                overwrites[developer] = discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True,
+                    attach_files=True
+                )
+
+        ticket_channel = await guild.create_text_channel(
+            name=ticket_channel_name,
+            overwrites=overwrites,
+            topic=str(user.id)
+        )
+
+        embed = discord.Embed(
+            title=self.FORM_TITLE,
+            color=0x5865F2,
             timestamp=datetime.now()
         )
-    )
 
-    if self.selected_designer:
-        developer = guild.get_member(self.selected_designer)
+        embed.add_field(
+            name="👨‍💻 담당 디자이너",
+            value=designer_name,
+            inline=False
+        )
 
-        if developer:
-            try:
-                await developer.send(
-                    f"🔔 새로운 커미션이 들어왔습니다.\n"
-                    f"{ticket_channel.mention}"
-                )
+        embed.add_field(
+            name=self.FIELD_NAME,
+            value=self.content.value,
+            inline=False
+        )
 
-                await developer.send(
-                    "📊 진행률 관리",
-                    view=ProgressView(progress_message)
-                )
+        await ticket_channel.send(
+            content=user.mention,
+            embed=embed
+        )
 
-                await developer.send(
-                    "💳 결제 정보 전송",
-                    view=PaymentView(ticket_channel, self.selected_designer)
-                )
-                await developer.send(
-                    "🔒 티켓 관리",
-                    view=TicketCloseView(ticket_channel)
-                )
+        progress_message = await ticket_channel.send(
+            embed=discord.Embed(
+                title="📌 커미션 진행",
+                description=(
+                    f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
+                    "📌 상태 : 🟢 상담중\n"
+                    "📊 진행률 : 0%\n"
+                    "⏰ 예상 완료 : 미설정"
+                ),
+                color=discord.Color.green(),
+                timestamp=datetime.now()
+            )
+        )
 
-            except Exception:
-                pass
+        if self.selected_designer:
+            developer = guild.get_member(self.selected_designer)
 
-    await interaction.followup.send(
-        f"✅ 신청 완료!\n{ticket_channel.mention}",
-        ephemeral=True
-    )
+            if developer:
+                try:
+                    await developer.send(
+                        f"🔔 새로운 커미션이 들어왔습니다.\n"
+                        f"{ticket_channel.mention}"
+                    )
+
+                    await developer.send(
+                        "📊 진행률 관리",
+                        view=ProgressView(progress_message)
+                    )
+
+                    await developer.send(
+                        "💳 결제 정보 전송",
+                        view=PaymentView(ticket_channel, self.selected_designer)
+                    )
+
+                    await developer.send(
+                        "🔒 티켓 관리",
+                        view=TicketCloseView(ticket_channel)
+                    )
+
+                except Exception as e:
+                    print(e)
+
+        await interaction.followup.send(
+            f"✅ 신청 완료!\n{ticket_channel.mention}",
+            ephemeral=True
+        )
