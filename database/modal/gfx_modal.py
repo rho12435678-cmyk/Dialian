@@ -148,27 +148,6 @@ class PurchaseModal(discord.ui.Modal):
             )
         )
 
-        await ticket_channel.send(
-            "💳 결제는 담당 디자이너의 안내 후 진행됩니다."
-        )
-
-        await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 추가 요구사항",
-                description=(
-                    "참고 이미지와 추가 요구사항을 자유롭게 작성해주세요.\n\n"
-                    "• 원하는 포즈\n"
-                    "• 참고 이미지\n"
-                    "• 추가 텍스트\n"
-                    "• 배경 세부사항\n"
-                    "• 기타 요청사항"
-                ),
-                color=discord.Color.blurple(),
-                timestamp=datetime.now()
-            ),
-            view=TicketCloseView()
-        )
-
         log_channel = discord.utils.get(
             guild.text_channels,
             name=LOG_CHANNEL_NAME
