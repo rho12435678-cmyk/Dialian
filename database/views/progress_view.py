@@ -1,7 +1,5 @@
 import discord
 
-from database.views.delivery_view import DeliveryView
-
 DESIGNERS = [
     375938495350571009,
     1292859064065458189,
