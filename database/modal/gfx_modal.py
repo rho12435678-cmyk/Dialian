@@ -94,8 +94,9 @@ class PurchaseModal(discord.ui.Modal):
                 )
 
         ticket_channel = await guild.create_text_channel(
-            name=ticket_channel_name,
-            overwrites=overwrites
+    name=ticket_channel_name,
+    overwrites=overwrites,
+    topic=str(user.id)
         )
 
         embed = discord.Embed(
@@ -177,6 +178,11 @@ class PurchaseModal(discord.ui.Modal):
                     await developer.send(
                         "💳 결제 정보 전송",
                         view=PaymentView(ticket_channel, self.selected_designer)
+                    )
+                    
+                    await developer.send(
+                        "🔒 티켓 관리",
+                        view=TicketCloseView(ticket_channel)
                     )
 
                 except Exception:
