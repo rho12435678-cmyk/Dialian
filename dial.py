@@ -12,6 +12,7 @@ from database.views.review_view import StarRatingView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.DailyNotice import DailyNotice
+from database.views.verify_view import VerifyView
 
 TOKEN = os.getenv("TOKEN")
 
@@ -324,6 +325,21 @@ async def clear(ctx, amount: int):
 
     await msg.delete(delay=3)
 
+@bot.command(name="인증패널")
+@commands.has_permissions(administrator=True)
+async def verify_panel(ctx):
+
+    embed = discord.Embed(
+        title="✅ 서버 인증",
+        description="아래 버튼을 눌러 인증을 완료해주세요.",
+        color=discord.Color.green()
+    )
+
+    await ctx.send(
+        embed=embed,
+        view=VerifyView()
+    )
+
 @bot.command(name="완료")
 @commands.has_permissions(administrator=True)
 async def complete(ctx):
@@ -402,6 +418,7 @@ async def on_ready():
     bot.add_view(StarRatingView())
     bot.add_view(TicketCloseView())
     # bot.add_view(ProgressView())
+    bot.add_view(VerifyView())
 
     print("DailyNotice 생성 전")
     DailyNotice(bot)
