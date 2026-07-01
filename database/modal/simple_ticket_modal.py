@@ -107,19 +107,18 @@ class SimpleTicketModal(discord.ui.Modal):
         )
 
         await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 커미션 진행",
-                description=(
-                    f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
-                    "📌 상태 : 🟢 상담중\n"
-                    "📊 진행률 : 0%\n"
-                    "⏰ 예상 완료 : 미설정"
-                ),
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            ),
-            view=ProgressView()
-        )
+    embed=discord.Embed(
+        title="📌 커미션 진행",
+        description=(
+            f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
+            "📌 상태 : 🟢 상담중\n"
+            "📊 진행률 : 0%\n"
+            "⏰ 예상 완료 : 미설정"
+        ),
+        color=discord.Color.green(),
+        timestamp=datetime.now()
+    )
+)
 
         await interaction.followup.send(
             f"✅ 신청 완료!\n{ticket_channel.mention}",
