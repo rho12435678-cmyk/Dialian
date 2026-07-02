@@ -6,8 +6,9 @@ from database.views.close_ticket import TicketCloseView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 
-
 class PurchaseModal(discord.ui.Modal):
+
+    COMMISSION_NAME = "GFX"
 
     MODAL_TITLE = "🎨 GFX 커미션 신청서"
 
@@ -156,7 +157,7 @@ class PurchaseModal(discord.ui.Modal):
 
         if log_channel:
             await log_channel.send(
-                f"📩 새로운 GFX 티켓 생성\n"
+                f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성"
                 f"{ticket_channel.mention}\n"
                 f"신청자 : {user.mention}"
             )
@@ -166,7 +167,7 @@ class PurchaseModal(discord.ui.Modal):
             if developer:
                 try:
                     await developer.send(
-                        f"🔔 새로운 GFX 커미션이 들어왔습니다.\n"
+                        f"🔔 새로운 {self.COMMISSION_NAME} 커미션이 들어왔습니다.\n"
                         f"{ticket_channel.mention}"
                     )
 
