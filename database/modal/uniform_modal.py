@@ -4,6 +4,8 @@ from database.modal.gfx_modal import PurchaseModal
 
 class UniformModal(PurchaseModal):
 
+    COMMISSION_NAME = "Roblox 복장"
+
     MODAL_TITLE = "👕 Roblox 복장 커미션 신청서"
     FORM_TITLE = "📋 Roblox 복장 신청서"
 
