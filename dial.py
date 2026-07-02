@@ -229,6 +229,52 @@ async def delete_bank(ctx):
 
     await ctx.send("✅ 등록된 계좌가 삭제되었습니다.")
 
+@bot.command(name="계좌목록")
+@commands.has_permissions(administrator=True)
+async def bank_list(ctx):
+
+    async with aiosqlite.connect("data/dialian.db") as db:
+
+        cursor = await db.execute(
+            """
+            SELECT
+                developer_id,
+                bank_name,
+                account_number,
+                holder
+            FROM bank_accounts
+            ORDER BY developer_id
+            """
+        )
+
+        rows = await cursor.fetchall()
+
+    if not rows:
+        return await ctx.send("❌ 등록된 계좌가 없습니다.")
+
+    embed = discord.Embed(
+        title="💳 디자이너 계좌 목록",
+        color=discord.Color.blurple()
+    )
+
+    for developer_id, bank, account, holder in rows:
+
+        member = ctx.guild.get_member(developer_id)
+
+        name = member.mention if member else f"`{developer_id}`"
+
+        embed.add_field(
+            name=name,
+            value=(
+                f"🏦 **은행** : {bank}\n"
+                f"💳 **계좌** : `{account}`\n"
+                f"👤 **예금주** : {holder}"
+            ),
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
 @bot.command(name="진행")
 @commands.has_permissions(administrator=True)
 async def progress(ctx, percent: int):
