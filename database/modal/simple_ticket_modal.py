@@ -101,18 +101,18 @@ class SimpleTicketModal(discord.ui.Modal):
             content=user.mention,
             embed=embed
         )
-        
-        log_channel = discord.utils.get(
-    guild.text_channels,
-    name=LOG_CHANNEL_NAME
-)
 
-if log_channel:
-    await log_channel.send(
-        f"📩 새로운 로고 티켓 생성\n"
-        f"{ticket_channel.mention}\n"
-        f"신청자 : {user.mention}"
-    )
+        log_channel = discord.utils.get(
+            guild.text_channels,
+            name=LOG_CHANNEL_NAME
+        )
+
+        if log_channel:
+            await log_channel.send(
+                f"📩 새로운 로고 티켓 생성\n"
+                f"{ticket_channel.mention}\n"
+                f"신청자 : {user.mention}"
+            )
 
         progress_message = await ticket_channel.send(
             embed=discord.Embed(
