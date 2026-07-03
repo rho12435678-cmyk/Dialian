@@ -20,13 +20,6 @@ jobs:
 
           script: |
             cd /root/Dialian
-
             git pull
-
-            pkill -f "python3 dial.py" || true
-
-            source venv/bin/activate
-
-            export TOKEN="${{ secrets.TOKEN }}"
-
-            nohup python3 dial.py > bot.log 2>&1 &
+            sudo systemctl restart dialian
+            sudo systemctl status dialian --no-pager
