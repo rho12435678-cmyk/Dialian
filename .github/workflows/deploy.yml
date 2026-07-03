@@ -30,3 +30,7 @@ jobs:
             export TOKEN="${{ secrets.TOKEN }}"
 
             nohup python3 dial.py > bot.log 2>&1 &
+
+            sleep 3
+
+            tail -20 bot.log
