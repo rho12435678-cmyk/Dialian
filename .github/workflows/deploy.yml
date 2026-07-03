@@ -1,26 +1,15 @@
-name: Deploy Bot
+- name: Deploy
+  uses: appleboy/ssh-action@v1.2.0
+  with:
+    host: ${{ secrets.HOST }}
+    username: ${{ secrets.USERNAME }}
+    key: ${{ secrets.SSH_PRIVATE_KEY }}
+    port: 22
 
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Deploy
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-          script: |
-            cd /root/Dialian
-            git pull
-            pkill -f "python dial.py" || true
-            source venv/bin/activate
-            export TOKEN="${{ secrets.TOKEN }}"
-            nohup python dial.py > bot.log 2>&1 &
+    script: |
+      cd /root/Dialian
+      git pull
+      pkill -f "python dial.py" || true
+      source venv/bin/activate
+      export TOKEN="${{ secrets.TOKEN }}"
+      nohup python dial.py > bot.log 2>&1 &
