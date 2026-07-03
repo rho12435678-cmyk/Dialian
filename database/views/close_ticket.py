@@ -4,9 +4,19 @@ import re
 
 from datetime import datetime
 from config import *
-from database.views.review_view import StarRatingView
-from database.views.payment_view import PaymentView
-from database.views.progress_view import ProgressView
+
+
+def has_designer_role(member):
+    if member is None:
+        return False
+
+    role_ids = {
+        role_id
+        for role_id in DESIGNER_ROLE_IDS.values()
+        if role_id
+    }
+
+    return any(role.id in role_ids for role in member.roles)
 
 
 def sanitize_text(text):
@@ -20,6 +30,90 @@ def sanitize_text(text):
     text = re.sub(r"\d{6,}", "[NUMBER]", text)
 
     return text[:80]
+
+
+async def delete_ticket_dm_messages(bot_user, designer, ticket_channel):
+    if designer is None:
+        return 0
+
+    deleted = 0
+
+    try:
+        dm_channel = designer.dm_channel or await designer.create_dm()
+
+        async for msg in dm_channel.history(
+            limit=100,
+            after=ticket_channel.created_at
+        ):
+            if msg.author.id != bot_user.id:
+                continue
+
+            try:
+                await msg.delete()
+                deleted += 1
+            except Exception as e:
+                print(f"[DM 삭제 실패] message_id={msg.id} error={e}")
+
+    except Exception as e:
+        print(f"[DM 정리 실패] designer={designer} error={e}")
+
+    return deleted
+
+
+async def get_or_create_archive_category(guild):
+    category = discord.utils.get(
+        guild.categories,
+        name=ARCHIVE_CATEGORY_NAME
+    )
+
+    if category:
+        return category
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True,
+            read_message_history=True,
+            manage_channels=True
+        )
+    }
+
+    return await guild.create_category(
+        ARCHIVE_CATEGORY_NAME,
+        overwrites=overwrites,
+        reason="티켓 아카이브 카테고리 자동 생성"
+    )
+
+
+async def archive_ticket_channel(channel):
+    guild = channel.guild
+    archive_category = await get_or_create_archive_category(guild)
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_channels=True
+        )
+    }
+
+    for role in guild.roles:
+        if role.permissions.administrator:
+            overwrites[role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            )
+
+    await channel.edit(
+        name=f"보관-{channel.name}",
+        category=archive_category,
+        overwrites=overwrites,
+        sync_permissions=False,
+        reason="티켓 종료 후 아카이브"
+    )
 
 
 class TicketCloseView(discord.ui.View):
@@ -43,25 +137,10 @@ class TicketCloseView(discord.ui.View):
 
             await interaction.response.defer()
 
-            developer_ids = []
-
-            for value in DESIGNERS.values():
-                if isinstance(value, dict):
-                    if "id" in value:
-                        developer_ids.append(value["id"])
-                    else:
-                        developer_ids.extend(value.keys())
-
-            if interaction.user.id not in developer_ids:
-                return await interaction.followup.send(
-                    "❌ 관리자만 티켓을 종료할 수 있습니다.",
-                    ephemeral=True
-                )
-
             channel = self.ticket_channel
             guild = channel.guild
 
-            if "티켓" not in channel.name:
+            if not channel.name.startswith("티켓-"):
                 return await interaction.followup.send(
                     "❌ 올바른 티켓 채널이 아닙니다.",
                     ephemeral=True
@@ -89,7 +168,7 @@ class TicketCloseView(discord.ui.View):
 
                     embed = msg.embeds[0]
 
-                    if embed.title != "📋 커미션 신청서":
+                    if "커미션 신청서" not in embed.title:
                         continue
 
                     for field in embed.fields:
@@ -112,6 +191,40 @@ class TicketCloseView(discord.ui.View):
             except Exception:
                 pass
 
+            closer = guild.get_member(interaction.user.id)
+            is_manager = (
+                closer is not None
+                and closer.guild_permissions.administrator
+            )
+            is_assigned_designer = (
+                designer_id is not None
+                and interaction.user.id == designer_id
+            )
+            is_role_designer = has_designer_role(closer)
+
+            if not (is_manager or is_assigned_designer or is_role_designer):
+                return await interaction.followup.send(
+                    "❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True
+                )
+
+            dm_deleted_count = 0
+
+            if designer_id:
+                designer = guild.get_member(designer_id)
+
+                if designer is None:
+                    try:
+                        designer = await guild.fetch_member(designer_id)
+                    except Exception:
+                        designer = None
+
+                dm_deleted_count = await delete_ticket_dm_messages(
+                    interaction.client.user,
+                    designer,
+                    channel
+                )
+
             # 오래된 티켓(Topic 없는 티켓) 호환
             if ticket_owner is None:
                 try:
@@ -124,10 +237,6 @@ class TicketCloseView(discord.ui.View):
                             break
                 except Exception:
                     pass
-
-            await interaction.followup.send(
-                "💾 안전하게 구매로그를 정리하는 중입니다..."
-            )
 
             message_count = 0
             attachment_count = 0
@@ -218,7 +327,7 @@ class TicketCloseView(discord.ui.View):
                 )
 
                 safe_log_embed.set_footer(
-                    text="전체 대화 내용 및 개인정보는 저장되지 않았습니다."
+                    text="개인정보는 저장되지 않았습니다."
                 )
 
                 await log_channel.send(
@@ -270,12 +379,33 @@ class TicketCloseView(discord.ui.View):
             except Exception as role_err:
                 print(f"[구매자 역할 지급 실패] {role_err}")
 
-            await interaction.followup.send(
-                "⚠️ 로그 정리 완료! 채널은 5초 후 삭제됩니다."
+            archive_notice = discord.Embed(
+                title="🔒 티켓이 종료되었습니다",
+                description=(
+                    "상담 기록 보관을 위해 이 채널은 잠시 후 "
+                    "아카이브로 이동합니다."
+                ),
+                color=discord.Color.dark_grey(),
+                timestamp=datetime.now()
             )
 
+            archive_notice.add_field(
+                name="처리 내용",
+                value=(
+                    "• 구매/상담 로그 저장\n"
+                    "• 디자이너 관리 DM 정리\n"
+                    "• 채널 보관함 이동"
+                ),
+                inline=False
+            )
+
+            archive_notice.set_footer(
+                text="이 채널은 삭제되지 않고 관리자 전용 보관함에 저장됩니다."
+            )
+
+            await channel.send(embed=archive_notice)
             await asyncio.sleep(5)
-            await channel.delete()
+            await archive_ticket_channel(channel)
 
         except Exception as e:
             print(f"[티켓 닫기 에러] {e}")

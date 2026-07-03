@@ -1,10 +1,40 @@
 import discord
 import aiosqlite
+import re
 
 from datetime import datetime
 from config import *
 
 DATABASE = "data/dialian.db"
+
+
+def parse_designer_id(text):
+    match = re.search(r"<@!?(\d+)>", text or "")
+
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+async def find_designer_id_from_ticket(channel):
+    if not isinstance(channel, discord.TextChannel):
+        return None
+
+    async for msg in channel.history(limit=50, oldest_first=True):
+        for embed in msg.embeds:
+            for field in embed.fields:
+                designer_id = parse_designer_id(field.value)
+
+                if designer_id:
+                    return designer_id
+
+            designer_id = parse_designer_id(embed.description)
+
+            if designer_id:
+                return designer_id
+
+    return None
 
 
 class StarRatingView(discord.ui.View):
@@ -64,6 +94,19 @@ class StarRatingView(discord.ui.View):
             await interaction.response.defer(ephemeral=True)
 
             ticket_owner = interaction.user
+            channel = interaction.channel
+
+            if isinstance(channel, discord.TextChannel) and channel.topic:
+                try:
+                    owner_id = int(channel.topic)
+                except ValueError:
+                    owner_id = None
+
+                if owner_id and interaction.user.id != owner_id:
+                    return await interaction.followup.send(
+                        "❌ 티켓을 생성한 구매자만 후기를 남길 수 있습니다.",
+                        ephemeral=True
+                    )
 
             guild = None
 
@@ -141,7 +184,10 @@ class StarRatingView(discord.ui.View):
                     embed=review_embed
                 )
 
-                designer_id = self.designer_id
+                designer_id = (
+                    self.designer_id
+                    or await find_designer_id_from_ticket(channel)
+                )
                 print(f"[REVIEW] designer_id = {designer_id}")
 
                 # ==========================

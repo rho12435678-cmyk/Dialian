@@ -18,8 +18,11 @@ TOKEN = os.getenv("TOKEN")
 
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 
-intents = discord.Intents.all()
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+daily_notice = None
 
 
 # ==================== [보안용 텍스트 정리 함수] ====================
@@ -44,6 +47,15 @@ def sanitize_text(text):
     text = re.sub(r'\d{6,}', '[NUMBER]', text)
 
     return text[:80]
+
+
+def mask_account(account_number):
+    digits = re.sub(r"\D", "", account_number)
+
+    if len(digits) <= 4:
+        return "****"
+
+    return f"{digits[:3]}****{digits[-4:]}"
 
 # ==================== [티켓 패널 명령어] ====================
 
@@ -198,7 +210,7 @@ async def register_bank(
 
     embed.add_field(
         name="계좌번호",
-        value=f"`{account_number}`",
+        value=f"`{mask_account(account_number)}`",
         inline=False
     )
 
@@ -267,7 +279,7 @@ async def bank_list(ctx):
             name=name,
             value=(
                 f"🏦 **은행** : {bank}\n"
-                f"💳 **계좌** : `{account}`\n"
+                f"💳 **계좌** : `{mask_account(account)}`\n"
                 f"👤 **예금주** : {holder}"
             ),
             inline=False
@@ -303,7 +315,13 @@ async def progress(ctx, percent: int):
         if embed.title != "📌 커미션 진행":
             continue
 
-        lines = embed.description.split("\n")
+        if not embed.description:
+            continue
+
+        lines = embed.description.splitlines()
+
+        if len(lines) < 4:
+            return await ctx.send("진행 패널 형식이 올바르지 않습니다.")
 
         designer = lines[0]
         estimate = lines[3]
@@ -342,7 +360,13 @@ async def estimate(ctx, days: str):
         if embed.title != "📌 커미션 진행":
             continue
 
-        lines = embed.description.split("\n")
+        if not embed.description:
+            continue
+
+        lines = embed.description.splitlines()
+
+        if len(lines) < 4:
+            return await ctx.send("진행 패널 형식이 올바르지 않습니다.")
 
         designer = lines[0]
         status = lines[2]
@@ -386,9 +410,45 @@ async def verify_panel(ctx):
         view=VerifyView()
     )
 
+
+@bot.command(name="dm테스트")
+@commands.has_permissions(administrator=True)
+async def dm_test(ctx, member: discord.Member):
+
+    await ctx.send(
+        f"🔎 DM 테스트 시작\n"
+        f"대상: {member.mention}\n"
+        f"ID: `{member.id}`\n"
+        f"서버 멤버 여부: `{member.guild.id == ctx.guild.id}`"
+    )
+
+    try:
+        dm_channel = await member.create_dm()
+        await dm_channel.send("✅ Dialian 봇 DM 테스트입니다.")
+
+    except discord.Forbidden as e:
+        return await ctx.send(
+            "❌ DM 전송 실패: Discord가 이 유저에게 DM을 막았습니다.\n"
+            f"에러 코드: `{getattr(e, 'code', 'unknown')}`\n"
+            f"원문: `{e}`\n\n"
+            "부계에서 해당 서버의 DM 허용 설정, 봇 차단 여부, "
+            "개인정보 설정을 확인해야 합니다."
+        )
+
+    except Exception as e:
+        return await ctx.send(
+            "❌ DM 전송 중 예외가 발생했습니다.\n"
+            f"`{type(e).__name__}: {e}`"
+        )
+
+    await ctx.send("✅ DM 전송 성공")
+
+
 @bot.command(name="완료")
 @commands.has_permissions(administrator=True)
 async def complete(ctx):
+
+    designer_id = None
 
     async for msg in ctx.channel.history(limit=30):
 
@@ -402,9 +462,19 @@ async def complete(ctx):
 
         if embed.title == "📌 커미션 진행":
 
-            lines = embed.description.split("\n")
+            if not embed.description:
+                continue
+
+            lines = embed.description.splitlines()
+
+            if not lines:
+                return await ctx.send("진행 패널 형식이 올바르지 않습니다.")
 
             designer = lines[0]
+            designer_match = re.search(r"<@!?(\d+)>", designer)
+
+            if designer_match:
+                designer_id = int(designer_match.group(1))
 
             embed.description = (
                 f"{designer}\n\n"
@@ -425,34 +495,138 @@ async def complete(ctx):
 
     await ctx.send(
         embed=review_embed,
-        view=StarRatingView()
+        view=StarRatingView(designer_id)
     )
 
     try:
         channel_name = ctx.channel.name
 
-        if channel_name.startswith("티켓-"):
+        if ctx.channel.topic:
+            member = ctx.guild.get_member(int(ctx.channel.topic))
+        elif channel_name.startswith("티켓-"):
             nickname = channel_name.replace("티켓-", "")
 
             member = discord.utils.find(
                 lambda m: m.display_name.lower().replace(" ", "-") == nickname,
                 ctx.guild.members
             )
+        else:
+            member = None
 
-            if member:
-                role = ctx.guild.get_role(BUYER_ROLE_ID)
+        if member:
+            role = ctx.guild.get_role(BUYER_ROLE_ID)
 
-                if role and role not in member.roles:
-                    await member.add_roles(role)
+            if role and role not in member.roles:
+                await member.add_roles(role)
 
     except Exception as e:
         print(e)
+
+
+async def send_private_command_notice(ctx, title, description):
+    try:
+        if ctx.guild:
+            permissions = ctx.channel.permissions_for(ctx.guild.me)
+
+            if permissions.manage_messages:
+                await ctx.message.delete()
+
+    except Exception:
+        pass
+
+    message = f"{title}\n\n{description}"
+
+    try:
+        await ctx.author.send(message)
+        return
+
+    except discord.Forbidden:
+        pass
+
+    try:
+        await ctx.reply(
+            "명령어 입력이 올바르지 않습니다. DM을 보낼 수 없어 여기서 잠시 안내합니다.",
+            mention_author=False,
+            delete_after=8
+        )
+
+    except Exception:
+        pass
+
+
+def get_command_usage(ctx):
+    if ctx.command is None:
+        return None
+
+    signature = ctx.command.signature
+    usage = f"!{ctx.command.name} {signature}".strip()
+    return usage
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    error = getattr(error, "original", error)
+
+    if isinstance(error, commands.CommandNotFound):
+        return await send_private_command_notice(
+            ctx,
+            "❌ 존재하지 않는 명령어입니다.",
+            (
+                "명령어를 다시 확인해주세요.\n\n"
+                "자주 쓰는 명령어:\n"
+                "`!티켓생성`\n"
+                "`!인증패널`\n"
+                "`!진행 0|25|50|75|100`\n"
+                "`!예상 1일|2일|3일`\n"
+                "`!완료`"
+            )
+        )
+
+    if isinstance(error, commands.MissingRequiredArgument):
+        usage = get_command_usage(ctx)
+
+        return await send_private_command_notice(
+            ctx,
+            "❌ 명령어 입력값이 부족합니다.",
+            f"아래 형식으로 다시 입력해주세요.\n`{usage}`"
+        )
+
+    if isinstance(error, commands.BadArgument):
+        usage = get_command_usage(ctx)
+
+        return await send_private_command_notice(
+            ctx,
+            "❌ 명령어 입력 형식이 올바르지 않습니다.",
+            f"멘션, 숫자, 날짜 형식을 다시 확인해주세요.\n`{usage}`"
+        )
+
+    if isinstance(error, commands.MissingPermissions):
+        return await send_private_command_notice(
+            ctx,
+            "❌ 권한이 부족합니다.",
+            "이 명령어를 사용할 권한이 없습니다."
+        )
+
+    if isinstance(error, commands.BotMissingPermissions):
+        return await send_private_command_notice(
+            ctx,
+            "❌ 봇 권한이 부족합니다.",
+            "봇 역할 권한을 확인해주세요."
+        )
+
+    print(f"[명령어 에러] {ctx.command}: {error}")
+    await send_private_command_notice(
+        ctx,
+        "❌ 명령어 처리 중 오류가 발생했습니다.",
+        "입력 내용을 확인한 뒤 다시 시도해주세요."
+    )
 
 
 # ==================== [봇 시작 시스템] ====================
 
 @bot.event
 async def on_ready():
+    global daily_notice
 
     await create_tables()
 
@@ -465,9 +639,10 @@ async def on_ready():
     # bot.add_view(ProgressView())
     bot.add_view(VerifyView())
 
-    print("DailyNotice 생성 전")
-    DailyNotice(bot)
-    print("DailyNotice 생성 완료")
+    if daily_notice is None:
+        print("DailyNotice 생성 전")
+        daily_notice = DailyNotice(bot)
+        print("DailyNotice 생성 완료")
 
     print("✨ 영속성 버튼 등록 완료!")
 

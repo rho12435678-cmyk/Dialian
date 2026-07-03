@@ -7,13 +7,19 @@ class PaymentView(discord.ui.View):
     def __init__(self, ticket_channel: discord.TextChannel, designer_id: int):
         super().__init__(timeout=None)
         self.ticket_channel = ticket_channel
-        self.designer_id = designer_id
+        self.designer_id = int(designer_id)
 
     @discord.ui.button(
         label="💳 결제 정보 보내기",
         style=discord.ButtonStyle.success
     )
     async def payment(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if interaction.user.id != self.designer_id:
+            return await interaction.response.send_message(
+                "❌ 담당 디자이너만 결제 정보를 보낼 수 있습니다.",
+                ephemeral=True
+            )
 
         async with aiosqlite.connect("data/dialian.db") as db:
 

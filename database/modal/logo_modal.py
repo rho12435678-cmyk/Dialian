@@ -1,5 +1,3 @@
-import discord
-
 from database.modal.simple_ticket_modal import SimpleTicketModal
 
 

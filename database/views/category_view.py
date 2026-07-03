@@ -1,9 +1,8 @@
 import discord
 
 from database.views.designer_select import DesignerView
-from config import DESIGNERS
-from database.modal.logo_modal import LogoModal
-from database.modal.uniform_modal import UniformModal
+from database.views.designer_select import get_designer_options
+from database.views.ticket_guard import block_if_ticket_exists
 
 
 class CategoryView(discord.ui.View):
@@ -16,31 +15,41 @@ class CategoryView(discord.ui.View):
         style=discord.ButtonStyle.primary
     )
     async def gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        await interaction.response.send_message(
-            "담당 GFX 디자이너를 선택해주세요.",
-            view=DesignerView(interaction.guild),
-            ephemeral=True
-        )
+        await self.send_designer_select(interaction, "gfx", "GFX")
 
     @discord.ui.button(
         label="🖼️ 로고",
         style=discord.ButtonStyle.success
     )
     async def logo(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        modal = LogoModal()
-        modal.selected_designer = list(DESIGNERS["logo"].keys())[0]
-
-        await interaction.response.send_modal(modal)
+        await self.send_designer_select(interaction, "logo", "로고")
 
     @discord.ui.button(
         label="👕 Roblox 복장",
         style=discord.ButtonStyle.secondary
     )
     async def uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_designer_select(interaction, "uniform", "Roblox 복장")
 
-        modal = UniformModal()
-        modal.selected_designer = list(DESIGNERS["uniform"].keys())[0]
+    async def send_designer_select(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        label: str
+    ):
+        if await block_if_ticket_exists(interaction):
+            return
 
-        await interaction.response.send_modal(modal)
+        options = get_designer_options(interaction.guild, category)
+
+        if not options:
+            return await interaction.response.send_message(
+                f"등록된 {label} 디자이너가 없습니다. 역할 설정을 확인해주세요.",
+                ephemeral=True
+            )
+
+        await interaction.response.send_message(
+            f"담당 {label} 디자이너를 선택해주세요.",
+            view=DesignerView(interaction.guild, category),
+            ephemeral=True
+        )

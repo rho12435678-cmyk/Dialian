@@ -5,6 +5,7 @@ from config import *
 from database.views.close_ticket import TicketCloseView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
+from database.views.ticket_guard import get_open_ticket_channel
 
 class PurchaseModal(discord.ui.Modal):
 
@@ -61,7 +62,7 @@ class PurchaseModal(discord.ui.Modal):
 
         ticket_channel_name = f"티켓-{user.id}"
 
-        if discord.utils.get(guild.text_channels, name=ticket_channel_name):
+        if get_open_ticket_channel(guild, user):
             return await interaction.response.send_message(
                 "이미 생성된 티켓이 있습니다.",
                 ephemeral=True
@@ -132,7 +133,10 @@ class PurchaseModal(discord.ui.Modal):
 
 
         await ticket_channel.send(
-            content=user.mention,
+            content=(
+                f"{user.mention}\n"
+                "신청이 접수되었습니다. 담당 디자이너가 확인 후 안내드릴 예정입니다."
+            ),
             embed=embed
         )
 
@@ -173,21 +177,45 @@ class PurchaseModal(discord.ui.Modal):
 
                     await developer.send(
                         "📊 진행률 관리",
-                        view=ProgressView(progress_message)
+                        view=ProgressView(progress_message, self.selected_designer)
                     )
 
                     await developer.send(
-                        "💳 결제 정보 전송",
+                        "💳 결제 및 티켓 관리",
                         view=PaymentView(ticket_channel, self.selected_designer)
                     )
-                    
+
                     await developer.send(
-                        "🔒 티켓 관리",
+                        "🔒 티켓 종료",
                         view=TicketCloseView(ticket_channel)
                     )
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(
+                        f"[DM 전송 실패] designer_id={self.selected_designer} "
+                        f"user={developer} error={e}"
+                    )
+                    await ticket_channel.send(
+                        f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
+                        allowed_mentions=discord.AllowedMentions(users=True)
+                    )
+                    await ticket_channel.send(
+                        "📊 진행률 관리",
+                        view=ProgressView(progress_message, self.selected_designer)
+                    )
+                    await ticket_channel.send(
+                        "💳 결제 및 티켓 관리",
+                        view=PaymentView(ticket_channel, self.selected_designer)
+                    )
+                    await ticket_channel.send(
+                        "🔒 티켓 종료",
+                        view=TicketCloseView(ticket_channel)
+                    )
+            else:
+                print(
+                    f"[DM 전송 실패] 서버에서 디자이너를 찾지 못했습니다: "
+                    f"{self.selected_designer}"
+                )
 
         await interaction.followup.send(
             f"✅ 신청 완료!\n{ticket_channel.mention}",
