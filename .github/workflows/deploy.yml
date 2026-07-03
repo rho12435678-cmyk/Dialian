@@ -23,12 +23,8 @@ jobs:
 
             git pull
 
-            pgrep -f "python3 dial.py" && pkill -f "python3 dial.py" || true
-
-            sleep 2
-
             source venv/bin/activate
 
             export TOKEN="${{ secrets.TOKEN }}"
 
-            nohup python3 /root/Dialian/dial.py > /root/Dialian/bot.log 2>&1 < /dev/null &
+            nohup python3 dial.py > bot.log 2>&1 < /dev/null &
