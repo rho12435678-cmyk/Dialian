@@ -4,7 +4,7 @@ import re
 import aiosqlite
 from datetime import datetime, timedelta
 from discord.ext import commands
-from database.database import create_tables
+from database.database import DATABASE, create_tables
 from config import *
 from database.views.ticket_view import TicketOpenView
 from database.views.close_ticket import TicketCloseView
@@ -23,6 +23,21 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 daily_notice = None
+
+
+async def claim_once(table_name, message_id):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
+            (message_id,)
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+@bot.check
+async def prevent_duplicate_command_processing(ctx):
+    return await claim_once("processed_commands", ctx.message.id)
 
 
 # ==================== [보안용 텍스트 정리 함수] ====================
@@ -567,7 +582,13 @@ def get_command_usage(ctx):
 async def on_command_error(ctx, error):
     error = getattr(error, "original", error)
 
+    if isinstance(error, commands.CheckFailure):
+        return
+
     if isinstance(error, commands.CommandNotFound):
+        if not await claim_once("processed_command_errors", ctx.message.id):
+            return
+
         return await send_private_command_notice(
             ctx,
             "❌ 존재하지 않는 명령어입니다.",

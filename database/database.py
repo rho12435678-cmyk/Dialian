@@ -88,4 +88,19 @@ holder TEXT
         )
         """)
 
+        # 같은 명령어 메시지를 여러 봇 프로세스가 중복 처리하지 않도록 기록
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS processed_commands (
+            message_id INTEGER PRIMARY KEY,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS processed_command_errors (
+            message_id INTEGER PRIMARY KEY,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
         await db.commit()
