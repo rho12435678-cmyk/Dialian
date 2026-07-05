@@ -1,6 +1,6 @@
 import discord
 
-VERIFY_ROLE = 1505074732700008531
+from config import CUSTOMER_ROLE_ID
 
 class VerifyView(discord.ui.View):
 
@@ -14,7 +14,7 @@ class VerifyView(discord.ui.View):
     )
     async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        role = interaction.guild.get_role(VERIFY_ROLE)
+        role = interaction.guild.get_role(CUSTOMER_ROLE_ID)
 
         if role is None:
             return await interaction.response.send_message(
@@ -22,8 +22,14 @@ class VerifyView(discord.ui.View):
                 ephemeral=True
             )
 
-        if role not in interaction.user.roles:
-            await interaction.user.add_roles(role)
+        try:
+            if role not in interaction.user.roles:
+                await interaction.user.add_roles(role)
+        except discord.Forbidden:
+            return await interaction.response.send_message(
+                "❌ 봇 역할 권한을 확인해주세요.",
+                ephemeral=True
+            )
 
         await interaction.response.send_message(
             "✅ 인증되었습니다.",

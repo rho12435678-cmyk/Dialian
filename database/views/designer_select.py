@@ -67,8 +67,20 @@ class DesignerSelect(discord.ui.Select):
         if await block_if_ticket_exists(interaction):
             return
 
+        selected_designer_id = int(self.values[0])
+        valid_designer_ids = {
+            member.id
+            for member in get_role_designers(interaction.guild, self.category)
+        }
+
+        if selected_designer_id not in valid_designer_ids:
+            return await interaction.response.send_message(
+                "❌ 선택한 디자이너 권한이 변경되었습니다. 다시 선택해주세요.",
+                ephemeral=True
+            )
+
         modal = MODALS[self.category]()
-        modal.selected_designer = int(self.values[0])
+        modal.selected_designer = selected_designer_id
 
         await interaction.response.send_modal(modal)
 

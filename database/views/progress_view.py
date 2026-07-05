@@ -89,12 +89,22 @@ class ProgressView(discord.ui.View):
                 interaction.user.id
             )
 
-        if (
-            interaction.user.id != self.designer_id
-            and not has_designer_role(guild_member)
-        ):
+        is_admin = (
+            guild_member is not None
+            and guild_member.guild_permissions.administrator
+        )
+        is_assigned_designer = (
+            self.designer_id is not None
+            and interaction.user.id == self.designer_id
+        )
+        is_designer_fallback = (
+            self.designer_id is None
+            and has_designer_role(guild_member)
+        )
+
+        if not (is_admin or is_assigned_designer or is_designer_fallback):
             return await interaction.response.send_message(
-                "❌ 디자이너만 사용할 수 있습니다.",
+                "❌ 담당 디자이너 또는 관리자만 사용할 수 있습니다.",
                 ephemeral=True
             )
 

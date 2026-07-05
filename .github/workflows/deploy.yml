@@ -27,4 +27,15 @@ jobs:
 
             export TOKEN="${{ secrets.TOKEN }}"
 
+            if [ -f bot.pid ]; then
+              OLD_PID="$(cat bot.pid)"
+              if ps -p "$OLD_PID" > /dev/null 2>&1; then
+                kill "$OLD_PID" || true
+                sleep 3
+              fi
+            fi
+
+            pkill -f "[p]ython3 dial.py" || true
+
             nohup python3 dial.py > bot.log 2>&1 < /dev/null &
+            echo $! > bot.pid

@@ -103,4 +103,14 @@ holder TEXT
         )
         """)
 
+        await db.execute("""
+        DELETE FROM processed_commands
+        WHERE created_at < datetime('now', '-7 days')
+        """)
+
+        await db.execute("""
+        DELETE FROM processed_command_errors
+        WHERE created_at < datetime('now', '-7 days')
+        """)
+
         await db.commit()

@@ -1,4 +1,37 @@
 import discord
+import asyncio
+
+
+_ticket_creation_locks = {}
+
+
+def get_ticket_creation_lock(user_id):
+    lock = _ticket_creation_locks.get(user_id)
+
+    if lock is None:
+        lock = asyncio.Lock()
+        _ticket_creation_locks[user_id] = lock
+
+    return lock
+
+
+async def acquire_ticket_creation_lock(interaction: discord.Interaction):
+    lock = get_ticket_creation_lock(interaction.user.id)
+
+    if lock.locked():
+        await interaction.response.send_message(
+            "티켓 생성이 처리 중입니다. 잠시만 기다려주세요.",
+            ephemeral=True
+        )
+        return None
+
+    await lock.acquire()
+    return lock
+
+
+def release_ticket_creation_lock(lock):
+    if lock and lock.locked():
+        lock.release()
 
 
 def get_open_ticket_channel(

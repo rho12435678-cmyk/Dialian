@@ -5,7 +5,11 @@ from config import *
 from database.views.close_ticket import TicketCloseView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
-from database.views.ticket_guard import get_open_ticket_channel
+from database.views.ticket_guard import (
+    acquire_ticket_creation_lock,
+    get_open_ticket_channel,
+    release_ticket_creation_lock,
+)
 
 class PurchaseModal(discord.ui.Modal):
 
@@ -50,6 +54,17 @@ class PurchaseModal(discord.ui.Modal):
         self.add_item(self.gfx_style)
 
     async def on_submit(self, interaction: discord.Interaction):
+        ticket_lock = await acquire_ticket_creation_lock(interaction)
+
+        if ticket_lock is None:
+            return
+
+        try:
+            await self.create_ticket(interaction)
+        finally:
+            release_ticket_creation_lock(ticket_lock)
+
+    async def create_ticket(self, interaction: discord.Interaction):
 
         guild = interaction.guild
         user = interaction.user

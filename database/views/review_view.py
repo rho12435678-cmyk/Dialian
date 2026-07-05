@@ -180,7 +180,7 @@ class StarRatingView(discord.ui.View):
                     text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏"
                 )
 
-                await review_channel.send(
+                sent_review = await review_channel.send(
                     embed=review_embed
                 )
 
@@ -223,23 +223,13 @@ class StarRatingView(discord.ui.View):
 
                 success_view = discord.ui.View()
 
-                try:
-
-                    invite = await review_channel.create_invite(
-                        max_age=300,
-                        max_uses=1
+                success_view.add_item(
+                    discord.ui.Button(
+                        label="😄 내가 쓴 후기 보러가기",
+                        url=sent_review.jump_url,
+                        style=discord.ButtonStyle.link
                     )
-
-                    success_view.add_item(
-                        discord.ui.Button(
-                            label="😄 내가 쓴 후기 보러가기",
-                            url=invite.url,
-                            style=discord.ButtonStyle.link
-                        )
-                    )
-
-                except Exception:
-                    pass
+                )
 
                 await interaction.followup.send(
                     f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!",

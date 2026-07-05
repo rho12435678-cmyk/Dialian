@@ -1,5 +1,8 @@
 .env
 .env.*
+!.env.example
 data/
+bot.pid
+bot.log
 __pycache__/
 *.py[cod]

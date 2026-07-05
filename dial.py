@@ -1,4 +1,5 @@
 import discord
+import asyncio
 import os
 import re
 import aiosqlite
@@ -7,7 +8,12 @@ from discord.ext import commands
 from database.database import DATABASE, create_tables
 from config import *
 from database.views.ticket_view import TicketOpenView
-from database.views.close_ticket import TicketCloseView
+from database.views.close_ticket import (
+    TicketCloseView,
+    archive_ticket_channel,
+    delete_ticket_dm_messages,
+    has_designer_role,
+)
 from database.views.review_view import StarRatingView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
@@ -23,9 +29,17 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 daily_notice = None
+persistent_views_registered = False
+PROCESSED_TABLES = {
+    "processed_commands",
+    "processed_command_errors",
+}
 
 
 async def claim_once(table_name, message_id):
+    if table_name not in PROCESSED_TABLES:
+        raise ValueError("허용되지 않은 처리 기록 테이블입니다.")
+
     async with aiosqlite.connect(DATABASE) as db:
         cursor = await db.execute(
             f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
@@ -71,6 +85,137 @@ def mask_account(account_number):
         return "****"
 
     return f"{digits[:3]}****{digits[-4:]}"
+
+
+def parse_mention_id(text):
+    match = re.search(r"<@!?(\d+)>", text or "")
+    return int(match.group(1)) if match else None
+
+
+def is_ticket_channel(channel):
+    return (
+        isinstance(channel, discord.TextChannel)
+        and channel.name.startswith("티켓-")
+    )
+
+
+async def find_ticket_owner(channel):
+    try:
+        if channel.topic:
+            return channel.guild.get_member(int(channel.topic))
+    except (TypeError, ValueError):
+        pass
+
+    async for msg in channel.history(limit=5, oldest_first=True):
+        if msg.mentions:
+            return msg.mentions[0]
+
+    return None
+
+
+async def find_ticket_designer_id(channel):
+    async for msg in channel.history(limit=50, oldest_first=True):
+        for embed in msg.embeds:
+            for field in embed.fields:
+                if field.name == "👨‍💻 담당 디자이너":
+                    designer_id = parse_mention_id(field.value)
+
+                    if designer_id:
+                        return designer_id
+
+            designer_id = parse_mention_id(embed.description)
+
+            if designer_id:
+                return designer_id
+
+    return None
+
+
+def can_manage_ticket(member, user_id, designer_id):
+    if member is None:
+        return False
+
+    if member.guild_permissions.administrator:
+        return True
+
+    if designer_id is not None:
+        return user_id == designer_id
+
+    return has_designer_role(member)
+
+
+async def fetch_member_or_none(guild, member_id):
+    if not member_id:
+        return None
+
+    member = guild.get_member(member_id)
+
+    if member:
+        return member
+
+    try:
+        return await guild.fetch_member(member_id)
+    except Exception:
+        return None
+
+
+async def build_ticket_summary(channel):
+    message_count = 0
+    attachment_count = 0
+    participants = set()
+
+    async for msg in channel.history(limit=100, oldest_first=False):
+        if msg.author.bot:
+            continue
+
+        message_count += 1
+        participants.add(msg.author.display_name)
+        attachment_count += len(msg.attachments)
+
+    created_at = channel.created_at
+    closed_at = datetime.now(created_at.tzinfo)
+    total_minutes = int((closed_at - created_at).total_seconds() // 60)
+
+    return {
+        "message_count": message_count,
+        "attachment_count": attachment_count,
+        "participants": ", ".join(sorted(participants)) or "없음",
+        "hours": total_minutes // 60,
+        "minutes": total_minutes % 60,
+    }
+
+
+async def send_payment_info(channel, designer_id):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(
+            """
+            SELECT bank_name, account_number, holder
+            FROM bank_accounts
+            WHERE developer_id = ?
+            """,
+            (designer_id,)
+        )
+
+        data = await cursor.fetchone()
+
+    if data is None:
+        return False
+
+    bank_name, account_number, holder = data
+
+    embed = discord.Embed(
+        title="💳 결제 정보",
+        description=(
+            f"🏦 {bank_name}\n"
+            f"계좌번호 : `{account_number}`\n"
+            f"예금주 : **{holder}**\n\n"
+            "✅ 입금 후 담당 디자이너에게 말씀해주세요."
+        ),
+        color=discord.Color.green()
+    )
+
+    await channel.send(embed=embed)
+    return True
 
 # ==================== [티켓 패널 명령어] ====================
 
@@ -302,6 +447,145 @@ async def bank_list(ctx):
 
     await ctx.send(embed=embed)
 
+
+@bot.command(name="계좌전송", aliases=["계좌번호", "계좌번호전송", "결제정보", "결제"])
+async def send_bank_to_ticket(ctx, member: discord.Member = None):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    author = ctx.guild.get_member(ctx.author.id)
+    is_admin = author and author.guild_permissions.administrator
+    designer_id = member.id if member else await find_ticket_designer_id(ctx.channel)
+
+    if designer_id is None and has_designer_role(author):
+        designer_id = ctx.author.id
+
+    if designer_id is None:
+        return await ctx.send(
+            "❌ 담당 디자이너를 찾지 못했습니다. 관리자라면 `!계좌전송 @디자이너`로 사용해주세요."
+        )
+
+    if not is_admin and ctx.author.id != designer_id:
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 계좌를 전송할 수 있습니다.")
+
+    if not await send_payment_info(ctx.channel, designer_id):
+        return await ctx.send("❌ 담당 디자이너의 계좌가 등록되어 있지 않습니다.")
+
+    await ctx.reply(
+        "✅ 결제 정보를 티켓에 전송했습니다.",
+        mention_author=False,
+        delete_after=3
+    )
+
+
+@bot.command(name="티켓닫기", aliases=["티켓종료", "닫기"])
+async def close_ticket_by_command(ctx):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    channel = ctx.channel
+    guild = ctx.guild
+    designer_id = await find_ticket_designer_id(channel)
+    closer = guild.get_member(ctx.author.id)
+
+    if not can_manage_ticket(closer, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.")
+
+    notice = await ctx.send("🔒 티켓 종료 처리 중입니다.")
+    ticket_owner = await find_ticket_owner(channel)
+    designer = await fetch_member_or_none(guild, designer_id)
+
+    if designer:
+        await delete_ticket_dm_messages(bot.user, designer, channel)
+
+    summary = await build_ticket_summary(channel)
+
+    log_channel = discord.utils.get(
+        guild.text_channels,
+        name=LOG_CHANNEL_NAME
+    )
+
+    if log_channel:
+        log_embed = discord.Embed(
+            title="🧾 구매 / 상담 로그",
+            color=0x5865F2,
+            timestamp=datetime.now()
+        )
+
+        log_embed.add_field(
+            name="👤 고객",
+            value=ticket_owner.mention if ticket_owner else "알 수 없음",
+            inline=True
+        )
+        log_embed.add_field(
+            name="🔒 종료자",
+            value=ctx.author.mention,
+            inline=True
+        )
+        log_embed.add_field(
+            name="💬 메시지 수",
+            value=str(summary["message_count"]),
+            inline=True
+        )
+        log_embed.add_field(
+            name="⏱ 상담 시간",
+            value=f"{summary['hours']}시간 {summary['minutes']}분",
+            inline=True
+        )
+        log_embed.add_field(
+            name="📎 첨부파일",
+            value=f"{summary['attachment_count']}개",
+            inline=True
+        )
+        log_embed.add_field(
+            name="👥 참여자",
+            value=summary["participants"],
+            inline=False
+        )
+        log_embed.set_footer(text="개인정보는 저장되지 않았습니다.")
+
+        await log_channel.send(
+            content=(
+                f"🔒 {ticket_owner.mention} 님의 티켓이 종료되었습니다."
+                if ticket_owner
+                else "🔒 티켓이 종료되었습니다."
+            ),
+            embed=log_embed
+        )
+
+    try:
+        buyer_role = guild.get_role(BUYER_ROLE_ID)
+
+        if ticket_owner and buyer_role and buyer_role not in ticket_owner.roles:
+            await ticket_owner.add_roles(
+                buyer_role,
+                reason="커미션 완료 자동 구매자 역할 지급"
+            )
+    except Exception as role_err:
+        print(f"[구매자 역할 지급 실패] {role_err}")
+
+    archive_notice = discord.Embed(
+        title="🔒 티켓이 종료되었습니다",
+        description="상담 기록 보관을 위해 이 채널은 잠시 후 아카이브로 이동합니다.",
+        color=discord.Color.dark_grey(),
+        timestamp=datetime.now()
+    )
+
+    archive_notice.add_field(
+        name="처리 내용",
+        value=(
+            "• 구매/상담 로그 저장\n"
+            "• 디자이너 관리 DM 정리\n"
+            "• 채널 보관함 이동"
+        ),
+        inline=False
+    )
+
+    await notice.edit(content="✅ 티켓 종료 처리 완료. 곧 보관함으로 이동합니다.")
+    await channel.send(embed=archive_notice)
+    await asyncio.sleep(5)
+    await archive_ticket_channel(channel)
+
 @bot.command(name="진행")
 @commands.has_permissions(administrator=True)
 async def progress(ctx, percent: int):
@@ -403,6 +687,8 @@ async def estimate(ctx, days: str):
 @bot.command(name="청소")
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
+    if amount < 1 or amount > 100:
+        return await ctx.send("사용법: `!청소 1~100`")
 
     await ctx.channel.purge(limit=amount + 1)
 
@@ -582,7 +868,16 @@ def get_command_usage(ctx):
 async def on_command_error(ctx, error):
     error = getattr(error, "original", error)
 
-    if isinstance(error, commands.CheckFailure):
+    if (
+        isinstance(error, commands.CheckFailure)
+        and not isinstance(
+            error,
+            (
+                commands.MissingPermissions,
+                commands.BotMissingPermissions,
+            )
+        )
+    ):
         return
 
     if isinstance(error, commands.CommandNotFound):
@@ -599,7 +894,9 @@ async def on_command_error(ctx, error):
                 "`!인증패널`\n"
                 "`!진행 0|25|50|75|100`\n"
                 "`!예상 1일|2일|3일`\n"
-                "`!완료`"
+                "`!완료`\n"
+                "`!계좌전송`\n"
+                "`!티켓닫기`"
             )
         )
 
@@ -647,7 +944,7 @@ async def on_command_error(ctx, error):
 
 @bot.event
 async def on_ready():
-    global daily_notice
+    global daily_notice, persistent_views_registered
 
     await create_tables()
 
@@ -655,10 +952,12 @@ async def on_ready():
 
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
 
-    bot.add_view(TicketOpenView())
-    bot.add_view(StarRatingView())
-    # bot.add_view(ProgressView())
-    bot.add_view(VerifyView())
+    if not persistent_views_registered:
+        bot.add_view(TicketOpenView())
+        bot.add_view(StarRatingView())
+        # bot.add_view(ProgressView())
+        bot.add_view(VerifyView())
+        persistent_views_registered = True
 
     if daily_notice is None:
         print("DailyNotice 생성 전")
@@ -667,7 +966,8 @@ async def on_ready():
 
     print("✨ 영속성 버튼 등록 완료!")
 
-if TOKEN:
-    bot.run(TOKEN)
-else:
-    print("❌ TOKEN 환경변수를 찾을 수 없습니다.")
+if __name__ == "__main__":
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("❌ TOKEN 환경변수를 찾을 수 없습니다.")

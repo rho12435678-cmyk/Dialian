@@ -200,7 +200,10 @@ class TicketCloseView(discord.ui.View):
                 designer_id is not None
                 and interaction.user.id == designer_id
             )
-            is_role_designer = has_designer_role(closer)
+            is_role_designer = (
+                designer_id is None
+                and has_designer_role(closer)
+            )
 
             if not (is_manager or is_assigned_designer or is_role_designer):
                 return await interaction.followup.send(
