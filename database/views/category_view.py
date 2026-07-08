@@ -18,13 +18,6 @@ class CategoryView(discord.ui.View):
         await self.send_designer_select(interaction, "gfx", "GFX")
 
     @discord.ui.button(
-        label="🖼️ 로고",
-        style=discord.ButtonStyle.success
-    )
-    async def logo(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.send_designer_select(interaction, "logo", "로고")
-
-    @discord.ui.button(
         label="👕 Roblox 복장",
         style=discord.ButtonStyle.secondary
     )
