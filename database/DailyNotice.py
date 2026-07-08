@@ -26,10 +26,9 @@ class DailyNotice:
             embed = discord.Embed(
                 description=(
                     f"<@&{CUSTOMER_ROLE_ID}>\n\n"
-                    "🎨 **Roblox GFX / 로고 / 복장 커미션 받습니다!**\n\n"
+                    "🎨 **Roblox GFX / 복장 커미션 받습니다!**\n\n"
                     "✨ **제작 가능**\n"
                     "• 🎨 Roblox GFX\n"
-                    "• 🖌️ 로고 디자인\n"
                     "• 👕 Roblox 복장 제작\n\n"
                     f"📸 예시작은 <#{EXAMPLE_CHANNEL_ID}> 에서 확인해주세요.\n"
                     f"💳 구매 및 문의는 <#{PURCHASE_CHANNEL_ID}> 를 이용해주세요.\n\n"
