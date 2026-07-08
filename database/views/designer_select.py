@@ -8,7 +8,6 @@ from database.views.ticket_guard import block_if_ticket_exists
 
 MODALS = {
     "gfx": PurchaseModal,
-    "logo": LogoModal,
     "uniform": UniformModal,
 }
 
