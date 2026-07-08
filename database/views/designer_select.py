@@ -2,7 +2,6 @@ import discord
 
 from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
-from database.modal.logo_modal import LogoModal
 from database.modal.uniform_modal import UniformModal
 from database.views.ticket_guard import block_if_ticket_exists
 
@@ -16,7 +15,6 @@ MODALS = {
 
 CATEGORY_LABELS = {
     "gfx": "GFX",
-    "logo": "로고",
     "uniform": "Roblox 복장",
 }
 
