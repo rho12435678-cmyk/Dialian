@@ -219,6 +219,10 @@ async def send_payment_info(channel, designer_id):
 
 # ==================== [티켓 패널 명령어] ====================
 
+@bot.check
+async def prevent_duplicate_command_processing(ctx):
+    return await claim_once("processed_commands", ctx.message.id)
+    
 @bot.command(name="티켓생성")
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
