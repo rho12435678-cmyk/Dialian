@@ -37,5 +37,5 @@ jobs:
 
             pkill -f "[p]ython3 dial.py" || true
 
-            nohup python3 dial.py > bot.log 2>&1 < /dev/null &
+            nohup /root/Dialian/venv/bin/python3 dial.py > bot.log 2>&1 < /dev/null &
             echo $! > bot.pid
