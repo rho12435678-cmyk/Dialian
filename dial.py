@@ -3,14 +3,20 @@ import asyncio
 import os
 import re
 import aiosqlite
-from datetime import datetime, timedelta
-from discord.ext import commands
+from datetime import datetime
+from discord.ext import commands, tasks
 from database.database import DATABASE, create_tables
+from database.monthly_stats import (
+    build_monthly_stats_embed,
+    save_monthly_stats_message,
+    update_monthly_stats_message,
+)
 from config import *
 from database.views.ticket_view import TicketOpenView
 from database.views.close_ticket import (
     TicketCloseView,
     archive_ticket_channel,
+    delete_ticket_channel,
     delete_ticket_dm_messages,
     has_designer_role,
 )
@@ -96,6 +102,16 @@ def is_ticket_channel(channel):
     return (
         isinstance(channel, discord.TextChannel)
         and channel.name.startswith("티켓-")
+    )
+
+
+def is_ticket_or_archive_channel(channel):
+    return (
+        isinstance(channel, discord.TextChannel)
+        and (
+            channel.name.startswith("티켓-")
+            or channel.name.startswith("보관-티켓-")
+        )
     )
 
 
@@ -185,6 +201,141 @@ async def build_ticket_summary(channel):
     }
 
 
+async def update_commission_progress(channel, progress):
+    now = datetime.now().isoformat()
+    status = "completed" if progress == 100 else "in_progress"
+
+    async with aiosqlite.connect(DATABASE) as db:
+        if progress == 100:
+            await db.execute(
+                """
+                UPDATE commissions
+                SET progress = ?,
+                    status = ?,
+                    completed_at = COALESCE(completed_at, ?),
+                    updated_at = ?
+                WHERE ticket_channel = ?
+                """,
+                (progress, status, now, now, channel.id)
+            )
+        else:
+            await db.execute(
+                """
+                UPDATE commissions
+                SET progress = ?,
+                    status = ?,
+                    updated_at = ?
+                WHERE ticket_channel = ?
+                """,
+                (progress, status, now, channel.id)
+            )
+
+        await db.commit()
+
+
+def get_commission_category_from_embed(embed):
+    title = embed.title or ""
+
+    if "GFX" in title:
+        return "GFX"
+
+    if "로고" in title:
+        return "로고"
+
+    if "복장" in title or "Roblox" in title:
+        return "Roblox 복장"
+
+    return "커미션"
+
+
+def get_progress_from_embed(embed):
+    text = embed.description or ""
+    match = re.search(r"진행률\s*:\s*(\d+)%", text)
+    return int(match.group(1)) if match else 0
+
+
+async def get_last_message_time(channel):
+    try:
+        async for msg in channel.history(limit=1):
+            return msg.created_at.replace(tzinfo=None).isoformat()
+    except Exception:
+        pass
+
+    return channel.created_at.replace(tzinfo=None).isoformat()
+
+
+async def read_commission_from_ticket(channel):
+    owner = await find_ticket_owner(channel)
+    designer_id = await find_ticket_designer_id(channel)
+    category = "커미션"
+    progress = 0
+
+    async for msg in channel.history(limit=50, oldest_first=True):
+        for embed in msg.embeds:
+            if embed.title and "신청서" in embed.title:
+                category = get_commission_category_from_embed(embed)
+
+            if embed.title == "📌 커미션 진행":
+                progress = get_progress_from_embed(embed)
+
+    is_archived = channel.name.startswith("보관-티켓-")
+    is_completed = is_archived or progress == 100
+    status = "completed" if is_completed else "in_progress"
+    completed_at = await get_last_message_time(channel) if is_completed else None
+
+    return {
+        "ticket_channel": channel.id,
+        "customer_id": owner.id if owner else None,
+        "designer_id": designer_id,
+        "category": category,
+        "status": status,
+        "progress": 100 if is_completed else progress,
+        "created_at": channel.created_at.replace(tzinfo=None).isoformat(),
+        "completed_at": completed_at,
+        "updated_at": datetime.now().isoformat(),
+    }
+
+
+async def upsert_commission_record(data):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            """
+            INSERT INTO commissions(
+                ticket_channel,
+                customer_id,
+                designer_id,
+                category,
+                status,
+                progress,
+                created_at,
+                completed_at,
+                updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticket_channel) DO UPDATE SET
+                customer_id = excluded.customer_id,
+                designer_id = excluded.designer_id,
+                category = excluded.category,
+                status = excluded.status,
+                progress = excluded.progress,
+                completed_at = COALESCE(commissions.completed_at, excluded.completed_at),
+                updated_at = excluded.updated_at
+            """,
+            (
+                data["ticket_channel"],
+                data["customer_id"],
+                data["designer_id"],
+                data["category"],
+                data["status"],
+                data["progress"],
+                data["created_at"],
+                data["completed_at"],
+                data["updated_at"],
+            )
+        )
+        await db.commit()
+
+
 async def send_payment_info(channel, designer_id):
     async with aiosqlite.connect(DATABASE) as db:
         cursor = await db.execute(
@@ -250,78 +401,48 @@ async def t_create_panel(ctx):
 @bot.command(name="통계")
 @commands.has_permissions(administrator=True)
 async def stats(ctx):
-
-    since = (datetime.now() - timedelta(days=14)).isoformat()
-
-    async with aiosqlite.connect("data/dialian.db") as db:
-
-        cursor = await db.execute(
-            """
-            SELECT
-                COUNT(*),
-                AVG(stars)
-            FROM reviews
-            WHERE created_at >= ?
-            """,
-            (since,)
-        )
-
-        total_reviews, avg_rating = await cursor.fetchone()
-
-        cursor = await db.execute(
-            """
-            SELECT
-                developer_id,
-                COUNT(*),
-                AVG(stars)
-            FROM reviews
-            WHERE created_at >= ?
-            GROUP BY developer_id
-            ORDER BY COUNT(*) DESC
-            """,
-            (since,)
-        )
-
-        developers = await cursor.fetchall()
-
-    embed = discord.Embed(
-        title="📊 최근 2주 통계",
-        color=discord.Color.blurple()
+    embed = await build_monthly_stats_embed(ctx.guild)
+    message = await ctx.send(embed=embed)
+    await save_monthly_stats_message(message)
+    await ctx.reply(
+        "✅ 월간 통계 패널을 등록했습니다. 앞으로 이 메시지를 자동 수정합니다.",
+        mention_author=False,
+        delete_after=5
     )
 
-    embed.add_field(
-        name="⭐ 전체 후기",
-        value=total_reviews or 0,
-        inline=True
-    )
 
-    embed.add_field(
-        name="⭐ 평균 평점",
-        value=f"{(avg_rating or 0):.2f}/5",
-        inline=True
-    )
+@bot.command(name="통계동기화", aliases=["이전티켓적용", "티켓통계동기화"])
+@commands.has_permissions(administrator=True)
+async def sync_existing_tickets(ctx):
+    notice = await ctx.send("🔄 기존 티켓을 통계 DB에 동기화하는 중입니다.")
+    synced = 0
+    skipped = 0
 
-    if developers:
+    for channel in ctx.guild.text_channels:
+        if not is_ticket_or_archive_channel(channel):
+            continue
 
-        text = ""
+        try:
+            data = await read_commission_from_ticket(channel)
+            await upsert_commission_record(data)
+            synced += 1
+        except Exception as e:
+            skipped += 1
+            print(f"[통계 동기화 실패] channel={channel.id} error={e}")
 
-        for dev_id, count, avg in developers:
-            member = ctx.guild.get_member(dev_id)
+    try:
+        await update_monthly_stats_message(bot)
+    except Exception as e:
+        print(f"[월간 통계 즉시 갱신 실패] {e}")
 
-            name = member.mention if member else str(dev_id)
-
-            text += (
-                f"{name}\n"
-                f"후기 {count}개 | 평균 {(avg or 0):.2f}⭐\n\n"
-            )
-
-        embed.add_field(
-            name="👨‍💻 디자이너 통계",
-            value=text,
-            inline=False
+    await notice.edit(
+        content=(
+            "✅ 기존 티켓 통계 동기화 완료\n"
+            f"적용: {synced}개\n"
+            f"실패: {skipped}개"
         )
+    )
 
-    await ctx.send(embed=embed)
 
 @bot.command(name="계좌등록")
 @commands.has_permissions(administrator=True)
@@ -557,17 +678,6 @@ async def close_ticket_by_command(ctx):
             embed=log_embed
         )
 
-    try:
-        buyer_role = guild.get_role(BUYER_ROLE_ID)
-
-        if ticket_owner and buyer_role and buyer_role not in ticket_owner.roles:
-            await ticket_owner.add_roles(
-                buyer_role,
-                reason="커미션 완료 자동 구매자 역할 지급"
-            )
-    except Exception as role_err:
-        print(f"[구매자 역할 지급 실패] {role_err}")
-
     archive_notice = discord.Embed(
         title="🔒 티켓이 종료되었습니다",
         description="상담 기록 보관을 위해 이 채널은 잠시 후 아카이브로 이동합니다.",
@@ -589,6 +699,25 @@ async def close_ticket_by_command(ctx):
     await channel.send(embed=archive_notice)
     await asyncio.sleep(5)
     await archive_ticket_channel(channel)
+
+
+@bot.command(name="티켓삭제", aliases=["티켓제거", "삭제"])
+async def delete_ticket_by_command(ctx):
+    if not is_ticket_or_archive_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    channel = ctx.channel
+    guild = ctx.guild
+    designer_id = await find_ticket_designer_id(channel)
+    deleter = guild.get_member(ctx.author.id)
+
+    if not can_manage_ticket(deleter, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.")
+
+    await ctx.send("🗑️ 티켓을 삭제합니다.")
+    await asyncio.sleep(3)
+    await delete_ticket_channel(channel, ctx.author)
+
 
 @bot.command(name="진행")
 @commands.has_permissions(administrator=True)
@@ -637,6 +766,7 @@ async def progress(ctx, percent: int):
         )
 
         await msg.edit(embed=embed)
+        await update_commission_progress(ctx.channel, percent)
         await ctx.send("✅ 진행률이 변경되었습니다.", delete_after=3)
         return
 
@@ -789,6 +919,7 @@ async def complete(ctx):
             )
 
             await msg.edit(embed=embed)
+            await update_commission_progress(ctx.channel, 100)
 
             break
 
@@ -802,30 +933,6 @@ async def complete(ctx):
         embed=review_embed,
         view=StarRatingView(designer_id)
     )
-
-    try:
-        channel_name = ctx.channel.name
-
-        if ctx.channel.topic:
-            member = ctx.guild.get_member(int(ctx.channel.topic))
-        elif channel_name.startswith("티켓-"):
-            nickname = channel_name.replace("티켓-", "")
-
-            member = discord.utils.find(
-                lambda m: m.display_name.lower().replace(" ", "-") == nickname,
-                ctx.guild.members
-            )
-        else:
-            member = None
-
-        if member:
-            role = ctx.guild.get_role(BUYER_ROLE_ID)
-
-            if role and role not in member.roles:
-                await member.add_roles(role)
-
-    except Exception as e:
-        print(e)
 
 
 async def send_private_command_notice(ctx, title, description):
@@ -868,6 +975,19 @@ def get_command_usage(ctx):
     return usage
 
 
+@tasks.loop(minutes=30)
+async def monthly_stats_updater():
+    try:
+        await update_monthly_stats_message(bot)
+    except Exception as e:
+        print(f"[월간 통계 갱신 실패] {e}")
+
+
+@monthly_stats_updater.before_loop
+async def before_monthly_stats_updater():
+    await bot.wait_until_ready()
+
+
 @bot.event
 async def on_command_error(ctx, error):
     error = getattr(error, "original", error)
@@ -900,7 +1020,8 @@ async def on_command_error(ctx, error):
                 "`!예상 1일|2일|3일`\n"
                 "`!완료`\n"
                 "`!계좌전송`\n"
-                "`!티켓닫기`"
+                "`!티켓닫기`\n"
+                "`!티켓삭제`"
             )
         )
 
@@ -967,6 +1088,9 @@ async def on_ready():
         print("DailyNotice 생성 전")
         daily_notice = DailyNotice(bot)
         print("DailyNotice 생성 완료")
+
+    if not monthly_stats_updater.is_running():
+        monthly_stats_updater.start()
 
     print("✨ 영속성 버튼 등록 완료!")
 

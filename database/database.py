@@ -32,10 +32,39 @@ progress INTEGER,
 
 estimate_day INTEGER,
 
-created_at TEXT
+created_at TEXT,
+
+completed_at TEXT,
+
+updated_at TEXT
 
 )
 """)
+
+        await db.execute("""
+        DELETE FROM commissions
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM commissions
+            WHERE ticket_channel IS NOT NULL
+            GROUP BY ticket_channel
+        )
+        AND ticket_channel IS NOT NULL
+        """)
+
+        await db.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_commissions_ticket_channel
+        ON commissions(ticket_channel)
+        """)
+
+        for column_sql in (
+            "ALTER TABLE commissions ADD COLUMN completed_at TEXT",
+            "ALTER TABLE commissions ADD COLUMN updated_at TEXT",
+        ):
+            try:
+                await db.execute(column_sql)
+            except aiosqlite.OperationalError:
+                pass
 
         #개발자 계좌
         await db.execute("""
@@ -100,6 +129,13 @@ holder TEXT
         CREATE TABLE IF NOT EXISTS processed_command_errors (
             message_id INTEGER PRIMARY KEY,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
         """)
 

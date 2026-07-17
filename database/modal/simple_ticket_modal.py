@@ -1,7 +1,9 @@
 import discord
+import aiosqlite
 
 from datetime import datetime
 from config import *
+from database.database import DATABASE
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
@@ -14,6 +16,7 @@ from database.views.ticket_guard import (
 
 class SimpleTicketModal(discord.ui.Modal):
 
+    COMMISSION_NAME = "로고"
     MODAL_TITLE = "커미션 신청서"
     FORM_TITLE = "📋 커미션 신청서"
     FIELD_NAME = "내용"
@@ -94,6 +97,34 @@ class SimpleTicketModal(discord.ui.Modal):
             topic=str(user.id)
         )
 
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute(
+                """
+                INSERT INTO commissions(
+                    ticket_channel,
+                    customer_id,
+                    designer_id,
+                    category,
+                    status,
+                    progress,
+                    created_at,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ticket_channel.id,
+                    user.id,
+                    self.selected_designer,
+                    self.COMMISSION_NAME,
+                    "in_progress",
+                    0,
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                )
+            )
+            await db.commit()
+
         embed = discord.Embed(
             title=self.FORM_TITLE,
             color=0x5865F2,
@@ -167,7 +198,7 @@ class SimpleTicketModal(discord.ui.Modal):
                     )
 
                     await developer.send(
-                        "🔒 티켓 종료",
+                        "🔒 티켓 종료 / 🗑️ 티켓 삭제",
                         view=TicketCloseView(ticket_channel)
                     )
 
@@ -189,7 +220,7 @@ class SimpleTicketModal(discord.ui.Modal):
                         view=PaymentView(ticket_channel, self.selected_designer)
                     )
                     await ticket_channel.send(
-                        "🔒 티켓 종료",
+                        "🔒 티켓 종료 / 🗑️ 티켓 삭제",
                         view=TicketCloseView(ticket_channel)
                     )
             else:

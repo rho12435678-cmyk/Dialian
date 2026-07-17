@@ -221,6 +221,26 @@ class StarRatingView(discord.ui.View):
                         await db.commit()
                         print("[REVIEW] DB 저장 완료")
 
+                role_notice = ""
+
+                try:
+                    buyer_role = guild.get_role(BUYER_ROLE_ID)
+                    buyer_member = guild.get_member(interaction.user.id)
+
+                    if (
+                        buyer_member
+                        and buyer_role
+                        and buyer_role not in buyer_member.roles
+                    ):
+                        await buyer_member.add_roles(
+                            buyer_role,
+                            reason="별점 후기 제출 후 구매자 역할 지급"
+                        )
+                        role_notice = "\n구매자 역할이 지급되었습니다."
+
+                except Exception as role_err:
+                    print(f"[구매자 역할 지급 실패] {role_err}")
+
                 success_view = discord.ui.View()
 
                 success_view.add_item(
@@ -232,7 +252,7 @@ class StarRatingView(discord.ui.View):
                 )
 
                 await interaction.followup.send(
-                    f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!",
+                    f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!{role_notice}",
                     view=success_view,
                     ephemeral=True
                 )

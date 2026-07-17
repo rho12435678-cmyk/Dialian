@@ -1,9 +1,11 @@
 import discord
 import asyncio
 import re
+import aiosqlite
 
 from datetime import datetime
 from config import *
+from database.database import DATABASE
 
 
 def has_designer_role(member):
@@ -114,6 +116,73 @@ async def archive_ticket_channel(channel):
         sync_permissions=False,
         reason="티켓 종료 후 아카이브"
     )
+
+
+def is_ticket_or_archive_channel(channel):
+    return (
+        isinstance(channel, discord.TextChannel)
+        and (
+            channel.name.startswith("티켓-")
+            or channel.name.startswith("보관-티켓-")
+        )
+    )
+
+
+def parse_mention_id(text):
+    match = re.search(r"<@!?(\d+)>", text or "")
+    return int(match.group(1)) if match else None
+
+
+async def find_ticket_designer_id(channel):
+    async for msg in channel.history(limit=50, oldest_first=True):
+        for embed in msg.embeds:
+            for field in embed.fields:
+                designer_id = parse_mention_id(field.value)
+
+                if designer_id:
+                    return designer_id
+
+            designer_id = parse_mention_id(embed.description)
+
+            if designer_id:
+                return designer_id
+
+    return None
+
+
+def can_manage_ticket(member, user_id, designer_id):
+    if member is None:
+        return False
+
+    if member.guild_permissions.administrator:
+        return True
+
+    if designer_id is not None:
+        return user_id == designer_id
+
+    return has_designer_role(member)
+
+
+async def delete_ticket_channel(channel, deleted_by=None):
+    reason = "티켓 삭제"
+
+    if deleted_by:
+        reason = f"티켓 삭제: {deleted_by} ({deleted_by.id})"
+
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            """
+            UPDATE commissions
+            SET status = 'cancelled',
+                updated_at = ?
+            WHERE ticket_channel = ?
+              AND status != 'completed'
+            """,
+            (datetime.now().isoformat(), channel.id)
+        )
+        await db.commit()
+
+    await channel.delete(reason=reason)
 
 
 class TicketCloseView(discord.ui.View):
@@ -342,46 +411,6 @@ class TicketCloseView(discord.ui.View):
                     embed=safe_log_embed
                 )
 
-            # ==============================
-            # 구매자 역할 자동 지급
-            # ==============================
-
-            try:
-
-                buyer_role = guild.get_role(BUYER_ROLE_ID)
-
-                if (
-                    ticket_owner
-                    and buyer_role
-                    and buyer_role not in ticket_owner.roles
-                ):
-
-                    await ticket_owner.add_roles(
-                        buyer_role,
-                        reason="커미션 완료 자동 구매자 역할 지급"
-                    )
-
-                    try:
-
-                        success_role_embed = discord.Embed(
-                            title="🎉 구매자 역할 지급 완료",
-                            description=(
-                                f"`{guild.name}` 서버에서\n"
-                                "구매자 역할이 지급되었습니다!"
-                            ),
-                            color=discord.Color.green()
-                        )
-
-                        await ticket_owner.send(
-                            embed=success_role_embed
-                        )
-
-                    except Exception:
-                        pass
-
-            except Exception as role_err:
-                print(f"[구매자 역할 지급 실패] {role_err}")
-
             archive_notice = discord.Embed(
                 title="🔒 티켓이 종료되었습니다",
                 description=(
@@ -412,3 +441,42 @@ class TicketCloseView(discord.ui.View):
 
         except Exception as e:
             print(f"[티켓 닫기 에러] {e}")
+
+    @discord.ui.button(
+        label="🗑️ 티켓 삭제",
+        style=discord.ButtonStyle.secondary,
+        custom_id="delete_ticket"
+    )
+    async def delete_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        try:
+            channel = self.ticket_channel
+            guild = channel.guild
+
+            if not is_ticket_or_archive_channel(channel):
+                return await interaction.response.send_message(
+                    "❌ 올바른 티켓 채널이 아닙니다.",
+                    ephemeral=True
+                )
+
+            designer_id = await find_ticket_designer_id(channel)
+            deleter = guild.get_member(interaction.user.id)
+
+            if not can_manage_ticket(deleter, interaction.user.id, designer_id):
+                return await interaction.response.send_message(
+                    "❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.",
+                    ephemeral=True
+                )
+
+            await interaction.response.send_message(
+                "🗑️ 티켓을 삭제합니다.",
+                ephemeral=True
+            )
+            await asyncio.sleep(3)
+            await delete_ticket_channel(channel, interaction.user)
+
+        except Exception as e:
+            print(f"[티켓 삭제 에러] {e}")

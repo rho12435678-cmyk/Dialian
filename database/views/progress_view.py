@@ -1,5 +1,8 @@
 import discord
+import aiosqlite
 
+from datetime import datetime
+from database.database import DATABASE
 from config import DESIGNER_ROLE_IDS
 
 
@@ -135,6 +138,48 @@ class ProgressView(discord.ui.View):
         await interaction.message.edit(
             view=ProgressView(self.progress_message, self.designer_id, progress)
         )
+
+        now = datetime.now().isoformat()
+        status_value = "completed" if progress == 100 else "in_progress"
+        completed_at = now if progress == 100 and not already_completed else None
+
+        async with aiosqlite.connect(DATABASE) as db:
+            if completed_at:
+                await db.execute(
+                    """
+                    UPDATE commissions
+                    SET progress = ?,
+                        status = ?,
+                        completed_at = ?,
+                        updated_at = ?
+                    WHERE ticket_channel = ?
+                    """,
+                    (
+                        progress,
+                        status_value,
+                        completed_at,
+                        now,
+                        self.progress_message.channel.id
+                    )
+                )
+            else:
+                await db.execute(
+                    """
+                    UPDATE commissions
+                    SET progress = ?,
+                        status = ?,
+                        updated_at = ?
+                    WHERE ticket_channel = ?
+                    """,
+                    (
+                        progress,
+                        status_value,
+                        now,
+                        self.progress_message.channel.id
+                    )
+                )
+
+            await db.commit()
 
         if progress == 100 and not already_completed:
 
