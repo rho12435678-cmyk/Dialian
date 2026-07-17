@@ -188,17 +188,17 @@ class SimpleTicketModal(discord.ui.Modal):
                     )
 
                     await developer.send(
-                        "📊 진행률 관리",
+                        f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                         view=ProgressView(progress_message, self.selected_designer)
                     )
 
                     await developer.send(
-                        "💳 결제 및 티켓 관리",
+                        f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                         view=PaymentView(ticket_channel, self.selected_designer)
                     )
 
                     await developer.send(
-                        "🔒 티켓 종료 / 🗑️ 티켓 삭제",
+                        f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                         view=TicketCloseView(ticket_channel)
                     )
 

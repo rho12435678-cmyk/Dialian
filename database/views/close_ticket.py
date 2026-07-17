@@ -39,6 +39,11 @@ async def delete_ticket_dm_messages(bot_user, designer, ticket_channel):
         return 0
 
     deleted = 0
+    markers = (
+        str(ticket_channel.id),
+        ticket_channel.mention,
+        ticket_channel.name,
+    )
 
     try:
         dm_channel = designer.dm_channel or await designer.create_dm()
@@ -48,6 +53,9 @@ async def delete_ticket_dm_messages(bot_user, designer, ticket_channel):
             after=ticket_channel.created_at
         ):
             if msg.author.id != bot_user.id:
+                continue
+
+            if not any(marker and marker in (msg.content or "") for marker in markers):
                 continue
 
             try:
