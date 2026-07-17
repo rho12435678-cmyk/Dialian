@@ -379,6 +379,7 @@ async def send_payment_info(channel, designer_id):
 async def t_create_panel(ctx):
 
     file = discord.File("price.png", filename="price.png")
+    file2 = discord.File("price2.png", filename="price2.png")
 
     embed = discord.Embed(
         title="💼 커미션 및 문의 상담 공간",
@@ -392,9 +393,14 @@ async def t_create_panel(ctx):
 
     embed.set_image(url="attachment://price.png")
 
+    embed2 = discord.Embed(
+        color=0x5865F2
+    )
+    embed2.set_image(url="attachment://price2.png")
+
     await ctx.send(
-        file=file,
-        embed=embed,
+        files=[file, file2],
+        embeds=[embed, embed2],
         view=TicketOpenView()
     )
 
