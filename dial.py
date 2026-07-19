@@ -1074,6 +1074,11 @@ async def on_command_error(ctx, error):
 # ==================== [봇 시작 시스템] ====================
 
 @bot.event
+async def setup_hook():
+    await bot.load_extension("database.services.auto_translator")
+    print("✅ 자동 번역 기능 로드 완료")
+    
+@bot.event
 async def on_ready():
     global daily_notice, persistent_views_registered
 
