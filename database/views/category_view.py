@@ -3,6 +3,7 @@ import discord
 from database.views.designer_select import DesignerView
 from database.views.designer_select import get_designer_options
 from database.views.ticket_guard import block_if_ticket_exists
+from database.modal.developer_apply_modal import DeveloperApplyModal
 
 
 class CategoryView(discord.ui.View):
@@ -23,6 +24,18 @@ class CategoryView(discord.ui.View):
     )
     async def uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.send_designer_select(interaction, "uniform", "Roblox 복장")
+
+    @discord.ui.button(
+        label="🛠️ 개발자 지원",
+        style=discord.ButtonStyle.secondary,
+        custom_id="developer_apply"
+    )
+    async def developer_apply(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(DeveloperApplyModal())
 
     async def send_designer_select(
         self,
