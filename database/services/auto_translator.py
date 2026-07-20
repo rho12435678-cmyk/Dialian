@@ -1727,7 +1727,7 @@ def run_bot() -> None:
     except discord.LoginFailure:
         logger.critical(
             "Discord login failed. "
-            "DISCORD_BOT_TOKEN을 확인하세요."
+            "TOKEN을 확인하세요."
         )
 
         raise
