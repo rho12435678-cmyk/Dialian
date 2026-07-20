@@ -1532,218 +1532,86 @@ async def inspect_message(
     return cleaned_content, "accepted"
 
 # =========================================================
-# Discord 봇 설정
+# Discord Extension
 # =========================================================
 
-DISCORD_BOT_TOKEN = os.getenv(
-    "TOKEN"
-)
+class AutoTranslator(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
 
-if not DISCORD_BOT_TOKEN:
-    raise RuntimeError(
-        "TOKEN 환경 변수가 설정되지 않았습니다."
-    )
-
-
-intents = discord.Intents.default()
-intents.guilds = True
-intents.messages = True
-intents.message_content = True
-
-
-class TranslationBot(commands.Bot):
-    async def setup_hook(self) -> None:
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
         logger.info(
-            "Bot setup completed | "
-            "translation_channels=%s model=%s "
-            "max_concurrent=%s",
-            sorted(TRANSLATION_CHANNEL_IDS),
+            "Auto translator ready | "
+            "bot=%s model=%s channels=%s",
+            self.bot.user,
             OPENAI_MODEL,
-            MAX_CONCURRENT_TRANSLATIONS,
+            sorted(TRANSLATION_CHANNEL_IDS),
         )
 
-    async def close(self) -> None:
-        logger.info(
-            "Closing Discord bot and OpenAI client"
-        )
-
+    @commands.Cog.listener()
+    async def on_message(
+        self,
+        message: discord.Message,
+    ) -> None:
         try:
-            await openai_client.close()
+            cleaned_content, reason = await inspect_message(
+                message
+            )
+
+            if cleaned_content is None:
+                if (
+                    message.guild is not None
+                    and message.channel.id
+                    in TRANSLATION_CHANNEL_IDS
+                ):
+                    logger.info(
+                        "Message ignored | "
+                        "message=%s channel=%s "
+                        "author=%s reason=%s",
+                        message.id,
+                        message.channel.id,
+                        message.author.id,
+                        reason,
+                    )
+
+                return
+
+            logger.info(
+                "Message accepted | "
+                "message=%s channel=%s "
+                "author=%s content_length=%s",
+                message.id,
+                message.channel.id,
+                message.author.id,
+                len(cleaned_content),
+            )
+
+            await process_translation_message(
+                message,
+                cleaned_content,
+            )
+
+            await store_message_for_context(
+                message,
+                cleaned_content,
+            )
 
         except Exception:
             logger.exception(
-                "Failed to close OpenAI client cleanly"
+                "Unexpected auto translator error | "
+                "message=%s channel=%s author=%s",
+                getattr(message, "id", None),
+                getattr(message.channel, "id", None),
+                getattr(message.author, "id", None),
             )
 
-        await super().close()
 
-
-bot = TranslationBot(
-    command_prefix="!",
-    intents=intents,
-    allowed_mentions=discord.AllowedMentions.none(),
-)
-
-
-# =========================================================
-# Discord 이벤트
-# =========================================================
-
-@bot.event
-async def on_ready() -> None:
-    if bot.user is None:
-        logger.warning(
-            "Bot connected, but user information is unavailable"
-        )
-
-        return
-
-    guild_count = len(bot.guilds)
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(
+        AutoTranslator(bot)
+    )
 
     logger.info(
-        "Discord bot is ready | "
-        "user=%s user_id=%s guilds=%s",
-        bot.user,
-        bot.user.id,
-        guild_count,
+        "Auto translator extension loaded"
     )
-
-
-@bot.event
-async def on_disconnect() -> None:
-    logger.warning(
-        "Discord bot disconnected"
-    )
-
-
-@bot.event
-async def on_resumed() -> None:
-    logger.info(
-        "Discord session resumed"
-    )
-
-
-@bot.event
-async def on_error(
-    event_method: str,
-    *args: object,
-    **kwargs: object,
-) -> None:
-    logger.exception(
-        "Unhandled Discord event error | event=%s",
-        event_method,
-    )
-
-
-@bot.event
-async def on_message(
-    message: discord.Message,
-) -> None:
-    try:
-        cleaned_content, reason = await inspect_message(
-            message
-        )
-
-        if cleaned_content is None:
-            if (
-                message.channel.id
-                in TRANSLATION_CHANNEL_IDS
-            ):
-                logger.info(
-                    "Message ignored | "
-                    "message=%s channel=%s "
-                    "author=%s reason=%s",
-                    message.id,
-                    message.channel.id,
-                    message.author.id,
-                    reason,
-                )
-
-            return
-
-        logger.info(
-            "Message accepted | "
-            "message=%s channel=%s "
-            "author=%s content_length=%s",
-            message.id,
-            message.channel.id,
-            message.author.id,
-            len(cleaned_content),
-        )
-
-        await process_translation_message(
-            message,
-            cleaned_content,
-        )
-
-        await store_message_for_context(
-            message,
-            cleaned_content,
-        )
-
-    except Exception:
-        logger.exception(
-            "Unexpected on_message error | "
-            "message=%s channel=%s author=%s",
-            getattr(message, "id", None),
-            getattr(
-                message.channel,
-                "id",
-                None,
-            ),
-            getattr(
-                message.author,
-                "id",
-                None,
-            ),
-        )
-
-    finally:
-        await bot.process_commands(
-            message
-        )
-
-
-# =========================================================
-# 봇 실행
-# =========================================================
-
-def run_bot() -> None:
-    logger.info(
-        "Starting Discord translation bot | "
-        "model=%s korean_channel=%s "
-        "english_channel=%s",
-        OPENAI_MODEL,
-        KOREAN_CHANNEL_ID,
-        ENGLISH_CHANNEL_ID,
-    )
-
-    try:
-        bot.run(
-            TOKEN,
-            log_handler=None,
-        )
-
-    except discord.LoginFailure:
-        logger.critical(
-            "Discord login failed. "
-            "TOKEN을 확인하세요."
-        )
-
-        raise
-
-    except KeyboardInterrupt:
-        logger.info(
-            "Bot stopped by keyboard interrupt"
-        )
-
-    except Exception:
-        logger.exception(
-            "Discord bot stopped unexpectedly"
-        )
-
-        raise
-
-
-if __name__ == "__main__":
-    run_bot()
