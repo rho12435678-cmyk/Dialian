@@ -20,11 +20,9 @@ from openai import AsyncOpenAI
 # 채널 설정
 # =========================================================
 
-KOREAN_CHANNEL_ID = 1505074223356317771
 ENGLISH_CHANNEL_ID = 1527725232864100362
 
 TRANSLATION_CHANNEL_IDS = {
-    KOREAN_CHANNEL_ID,
     ENGLISH_CHANNEL_ID,
 }
 
@@ -728,14 +726,6 @@ def create_translation_plan(
     channel_id: int,
     text: str,
 ) -> TranslationPlan:
-    if channel_id == KOREAN_CHANNEL_ID:
-        return TranslationPlan(
-            source_language="Korean",
-            target_language="English",
-            source_label="한국어",
-            target_label="영어",
-            should_summarize=should_summarize(text),
-        )
 
     if channel_id == ENGLISH_CHANNEL_ID:
         return TranslationPlan(
