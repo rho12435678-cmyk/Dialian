@@ -1,4 +1,14 @@
 import discord
+import aiosqlite
+
+from datetime import datetime
+
+from database.database import DATABASE
+from database.views.ticket_guard import (
+    acquire_ticket_creation_lock,
+    get_open_ticket_channel,
+    release_ticket_creation_lock,
+)
 
 
 class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
@@ -24,37 +34,18 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         max_length=100,
     )
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction):
 
-        embed = discord.Embed(
-            title="🛠️ 개발자 지원서",
-            color=discord.Color.blue()
-        )
+    ticket_lock = await acquire_ticket_creation_lock(interaction)
 
-        embed.add_field(
-            name="지원자",
-            value=interaction.user.mention,
-            inline=False
-        )
+    if ticket_lock is None:
+        return
 
-        embed.add_field(
-            name="지원 분야",
-            value=self.field.value,
-            inline=False
-        )
-
-        embed.add_field(
-            name="경력",
-            value=self.experience.value,
-            inline=False
-        )
-
-        embed.add_field(
-            name="사용 가능 프로그램",
-            value=self.program.value,
-            inline=False,
-        )
-
+    try:
+        await self.create_ticket(interaction)
+    finally:
+        release_ticket_creation_lock(ticket_lock)
+        
         await interaction.response.send_message(
             "✅ 지원서가 제출되었습니다. 관리자가 확인 후 연락드리겠습니다.",
             ephemeral=True
