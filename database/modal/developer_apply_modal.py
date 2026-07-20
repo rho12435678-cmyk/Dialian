@@ -17,12 +17,11 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         max_length=100
     )
 
-    portfolio = discord.ui.TextInput(
-        label="포트폴리오",
-        placeholder="작품 링크 또는 Discord 첨부 예정",
+    program = discord.ui.TextInput(
+        label="사용 가능 프로그램",
+        placeholder="예: Blender, Photoshop",
         required=True,
-        style=discord.TextStyle.paragraph,
-        max_length=1000
+        max_length=100,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -51,9 +50,9 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         )
 
         embed.add_field(
-            name="포트폴리오",
-            value=self.portfolio.value,
-            inline=False
+            name="사용 가능 프로그램",
+            value=self.program.value,
+            inline=False,
         )
 
         await interaction.response.send_message(
