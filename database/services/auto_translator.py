@@ -1536,12 +1536,12 @@ async def inspect_message(
 # =========================================================
 
 DISCORD_BOT_TOKEN = os.getenv(
-    "DISCORD_BOT_TOKEN"
+    "TOKEN"
 )
 
 if not DISCORD_BOT_TOKEN:
     raise RuntimeError(
-        "DISCORD_BOT_TOKEN 환경 변수가 설정되지 않았습니다."
+        "TOKEN 환경 변수가 설정되지 않았습니다."
     )
 
 
