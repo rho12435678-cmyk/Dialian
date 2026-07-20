@@ -45,4 +45,3 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
             await self.create_ticket(interaction)
         finally:
             release_ticket_creation_lock(ticket_lock)
-
