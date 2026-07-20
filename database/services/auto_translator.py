@@ -347,9 +347,6 @@ def is_valid_channel_language(
     if is_mixed_language_message(text):
         return False
 
-    if channel_id == KOREAN_CHANNEL_ID:
-        return has_korean(text)
-
     if channel_id == ENGLISH_CHANNEL_ID:
         return (
             has_english(text)
