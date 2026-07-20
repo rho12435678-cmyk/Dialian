@@ -33,9 +33,8 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         required=True,
         max_length=100,
     )
-
+    
     async def on_submit(self, interaction):
-
     ticket_lock = await acquire_ticket_creation_lock(interaction)
 
     if ticket_lock is None:
