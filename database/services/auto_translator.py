@@ -1720,7 +1720,7 @@ def run_bot() -> None:
 
     try:
         bot.run(
-            DISCORD_BOT_TOKEN,
+            TOKEN,
             log_handler=None,
         )
 
