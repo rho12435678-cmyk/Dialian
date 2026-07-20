@@ -46,9 +46,3 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         finally:
             release_ticket_creation_lock(ticket_lock)
 
-        await interaction.response.send_message(
-            "✅ 지원서가 제출되었습니다. 관리자가 확인 후 연락드리겠습니다.",
-            ephemeral=True
-        )
-
-        await interaction.channel.send(embed=embed)
