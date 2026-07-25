@@ -5,6 +5,15 @@ os.makedirs("data", exist_ok=True)
 
 DATABASE = "data/dialian.db"
 
+
+def secure_database_file():
+    try:
+        os.chmod("data", 0o700)
+        if os.path.exists(DATABASE):
+            os.chmod(DATABASE, 0o600)
+    except OSError:
+        pass
+
 async def connect():
     return await aiosqlite.connect(DATABASE)
 
@@ -150,3 +159,4 @@ holder TEXT
         """)
 
         await db.commit()
+    secure_database_file()

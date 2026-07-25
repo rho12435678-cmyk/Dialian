@@ -7,6 +7,7 @@ from database.database import DATABASE
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
+from database.ticket_notice import build_ticket_notice_embed
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
     get_open_ticket_channel,
@@ -150,6 +151,8 @@ class SimpleTicketModal(discord.ui.Modal):
             ),
             embed=embed
         )
+
+        await ticket_channel.send(embed=build_ticket_notice_embed())
 
         log_channel = discord.utils.get(
             guild.text_channels,

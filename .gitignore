@@ -4,5 +4,6 @@
 data/
 bot.pid
 bot.log
+deploy-backups/
 __pycache__/
 *.py[cod]

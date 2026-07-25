@@ -4,6 +4,7 @@ import aiosqlite
 from datetime import datetime
 from database.database import DATABASE
 from config import DESIGNER_ROLE_IDS
+from database.views.ticket_context import resolve_ticket_channel
 
 
 def has_designer_role(member):
@@ -84,6 +85,14 @@ class ProgressView(discord.ui.View):
         await self.update_progress(interaction, 100, "✅ 완료", "완료")
 
     async def update_progress(self, interaction, progress, status, estimate):
+
+        if self.progress_message is None:
+            ticket_channel = await resolve_ticket_channel(interaction)
+            if ticket_channel is not None:
+                async for message in ticket_channel.history(limit=50, oldest_first=True):
+                    if message.embeds and message.embeds[0].title == "📊 커미션 진행":
+                        self.progress_message = message
+                        break
 
         guild_member = None
 

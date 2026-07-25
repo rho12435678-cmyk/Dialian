@@ -6,6 +6,7 @@ import aiosqlite
 from datetime import datetime
 from discord.ext import commands, tasks
 from database.database import DATABASE, create_tables
+from database.backups import backup_database
 from database.monthly_stats import (
     build_monthly_stats_embed,
     save_monthly_stats_message,
@@ -33,7 +34,7 @@ TOKEN = os.getenv("TOKEN")
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 daily_notice = None
 persistent_views_registered = False
 PROCESSED_TABLES = {
@@ -58,6 +59,20 @@ async def claim_once(table_name, message_id):
 @bot.check
 async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
+
+
+@bot.command(name="\uba85\ub839\uc5b4", aliases=["help", "\ub3c4\uc6c0\ub9d0"])
+async def command_list(ctx):
+    embed = discord.Embed(
+        title="Dialian \uba85\ub839\uc5b4",
+        description=(
+            "`!\ud2f0\ucf13\uc0dd\uc131` `!\uacc4\uc88c\uc804\uc1a1` `!\ud2f0\ucf13\ub2eb\uae30` `!\ud2f0\ucf13\uc0ad\uc81c`\n"
+            "`!\uc9c4\ud589 0|25|50|75|100` `!\uc608\uc0c1 1\uc77c|2\uc77c|3\uc77c` `!\uc644\ub8cc`\n"
+            "`!\uacc4\uc88c\ub4f1\ub85d` `!\uacc4\uc88c\ubaa9\ub85d` `!\uacc4\uc88c\uc0ad\uc81c` `!\ud1b5\uacc4` `!\uccad\uc18c 1~100`"
+        ),
+        color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed)
 
 
 # ==================== [보안용 텍스트 정리 함수] ====================
@@ -994,6 +1009,21 @@ async def before_monthly_stats_updater():
     await bot.wait_until_ready()
 
 
+@tasks.loop(hours=24)
+async def database_backup_task():
+    try:
+        backup_path = await backup_database()
+        if backup_path:
+            print(f"[DB backup] {backup_path}")
+    except Exception as error:
+        print(f"[DB backup failed] {error}")
+
+
+@database_backup_task.before_loop
+async def before_database_backup_task():
+    await bot.wait_until_ready()
+
+
 @bot.event
 async def on_command_error(ctx, error):
     error = getattr(error, "original", error)
@@ -1075,6 +1105,10 @@ async def on_command_error(ctx, error):
 
 @bot.event
 async def setup_hook():
+    if not os.getenv("OPENAI_API_KEY"):
+        print("Auto translator disabled: OPENAI_API_KEY is missing")
+        return
+
     await bot.load_extension("database.services.auto_translator")
     print("✅ 자동 번역 기능 로드 완료")
     
@@ -1091,7 +1125,9 @@ async def on_ready():
     if not persistent_views_registered:
         bot.add_view(TicketOpenView())
         bot.add_view(StarRatingView())
-        # bot.add_view(ProgressView())
+        bot.add_view(ProgressView())
+        bot.add_view(PaymentView())
+        bot.add_view(TicketCloseView())
         bot.add_view(VerifyView())
         persistent_views_registered = True
 
@@ -1102,6 +1138,10 @@ async def on_ready():
 
     if not monthly_stats_updater.is_running():
         monthly_stats_updater.start()
+
+    await database_backup_task()
+    if not database_backup_task.is_running():
+        database_backup_task.start()
 
     print("✨ 영속성 버튼 등록 완료!")
 

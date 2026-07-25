@@ -21,11 +21,18 @@ jobs:
           script: |
             cd /root/Dialian
 
-            git pull
+            mkdir -p deploy-backups
+            if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+              BACKUP_FILE="deploy-backups/pre-deploy-$(date +%Y%m%d-%H%M%S).patch"
+              git diff --binary > "$BACKUP_FILE"
+              git stash push --include-untracked -m "pre-deploy backup $(date -Iseconds)"
+            fi
+            git pull --ff-only origin main
 
             source venv/bin/activate
 
             export TOKEN="${{ secrets.TOKEN }}"
+            export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
 
             if [ -f bot.pid ]; then
               OLD_PID="$(cat bot.pid)"

@@ -6,6 +6,7 @@ import aiosqlite
 from datetime import datetime
 from config import *
 from database.database import DATABASE
+from database.views.ticket_context import resolve_ticket_channel
 
 
 def has_designer_role(member):
@@ -195,7 +196,7 @@ async def delete_ticket_channel(channel, deleted_by=None):
 
 class TicketCloseView(discord.ui.View):
 
-    def __init__(self, ticket_channel):
+    def __init__(self, ticket_channel=None):
         super().__init__(timeout=None)
 
         self.ticket_channel = ticket_channel
@@ -214,7 +215,12 @@ class TicketCloseView(discord.ui.View):
 
             await interaction.response.defer()
 
-            channel = self.ticket_channel
+            channel = await resolve_ticket_channel(interaction, self.ticket_channel)
+            if channel is None:
+                return await interaction.followup.send(
+                    "Ticket channel was not found. Use !티켓닫기 in the ticket channel.",
+                    ephemeral=True
+                )
             guild = channel.guild
 
             if not channel.name.startswith("티켓-"):
@@ -461,7 +467,12 @@ class TicketCloseView(discord.ui.View):
         button: discord.ui.Button
     ):
         try:
-            channel = self.ticket_channel
+            channel = await resolve_ticket_channel(interaction, self.ticket_channel)
+            if channel is None:
+                return await interaction.response.send_message(
+                    "Ticket channel was not found. Use !티켓삭제 in the ticket channel.",
+                    ephemeral=True
+                )
             guild = channel.guild
 
             if not is_ticket_or_archive_channel(channel):

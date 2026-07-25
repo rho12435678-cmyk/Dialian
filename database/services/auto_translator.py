@@ -93,6 +93,9 @@ HANGUL_PATTERN = re.compile(r"[가-힣]")
 HANGUL_JAMO_PATTERN = re.compile(r"[ㄱ-ㅎㅏ-ㅣ]")
 LATIN_PATTERN = re.compile(r"[A-Za-z]")
 URL_PATTERN = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+EMAIL_PATTERN = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
+PHONE_PATTERN = re.compile(r"\b\d{2,3}[-. ]?\d{3,4}[-. ]?\d{4}\b")
+ACCOUNT_PATTERN = re.compile(r"\b\d{10,18}\b")
 MENTION_PATTERN = re.compile(r"<@!?\d+>|<@&\d+>|<#\d+>")
 CUSTOM_EMOJI_OR_MENTION_PATTERN = re.compile(
     r"<a?:[A-Za-z0-9_]+:\d+>|<@!?\d+>|<@&\d+>|<#\d+>"
@@ -191,6 +194,12 @@ def clean_message_text(text: str) -> str:
     text = MULTI_SPACE_PATTERN.sub(" ", text)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return "\n".join(lines).strip()
+
+
+def redact_sensitive_text(text: str) -> str:
+    text = EMAIL_PATTERN.sub("[EMAIL]", text)
+    text = PHONE_PATTERN.sub("[PHONE]", text)
+    return ACCOUNT_PATTERN.sub("[NUMBER]", text)
 
 
 def extract_meaningful_characters(text: str) -> str:
@@ -526,7 +535,7 @@ async def build_reply_context(message: discord.Message) -> str | None:
     if replied_message is None:
         return None
 
-    replied_content = clean_message_text(replied_message.content)
+    replied_content = redact_sensitive_text(clean_message_text(replied_message.content))
     if not replied_content:
         return None
 
@@ -578,6 +587,7 @@ async def prepare_translation(
     message: discord.Message,
     cleaned_content: str,
 ) -> PreparedTranslation:
+    cleaned_content = redact_sensitive_text(cleaned_content)
     plan = create_translation_plan(message.channel.id, cleaned_content)
     reply_context = await build_reply_context(message)
 
