@@ -9,6 +9,7 @@ from database.views.ticket_guard import (
     get_open_ticket_channel,
     release_ticket_creation_lock,
 )
+from database.purchase_log import send_purchase_log
 
 
 # 개발자 지원 티켓을 확인할 관리자 계정
@@ -234,6 +235,11 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         await ticket_channel.send(
             "📎 포트폴리오, 작업물, 증명 자료는 "
             "이 티켓에 첨부파일로 자유롭게 올려주세요."
+        )
+
+        await send_purchase_log(
+            guild,
+            content=f"개발자 지원 티켓 생성\n{ticket_channel.mention}\n신청자: {user.mention}",
         )
 
         await interaction.followup.send(

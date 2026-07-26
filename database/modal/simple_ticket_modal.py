@@ -8,6 +8,7 @@ from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
 from database.ticket_notice import build_ticket_notice_embed
+from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
     get_open_ticket_channel,
@@ -173,11 +174,11 @@ class SimpleTicketModal(discord.ui.Modal):
         )
 
         if log_channel:
-            await log_channel.send(
+            await send_purchase_log(guild, content=(
                 f"📩 새로운 로고 티켓 생성\n"
                 f"{ticket_channel.mention}\n"
                 f"신청자 : {user.mention}"
-            )
+            ))
 
         progress_message = await ticket_channel.send(
             embed=discord.Embed(

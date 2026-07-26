@@ -8,6 +8,7 @@ from database.views.close_ticket import TicketCloseView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.ticket_notice import build_ticket_notice_embed
+from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
     get_open_ticket_channel,
@@ -221,11 +222,11 @@ class PurchaseModal(discord.ui.Modal):
         )
 
         if log_channel:
-            await log_channel.send(
+            await send_purchase_log(guild, content=(
                 f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성"
                 f"{ticket_channel.mention}\n"
                 f"신청자 : {user.mention}"
-            )
+            ))
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
 
