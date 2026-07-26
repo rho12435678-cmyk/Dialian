@@ -45,6 +45,19 @@ class SimpleTicketModal(discord.ui.Modal):
 
         try:
             await self.create_ticket(interaction)
+        except discord.Forbidden:
+            message = "티켓을 생성할 권한이 없습니다. 봇 권한을 확인해주세요."
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except Exception as error:
+            print(f"[Simple ticket creation failed] {type(error).__name__}: {error}")
+            message = "문의 티켓을 생성하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
         finally:
             release_ticket_creation_lock(ticket_lock)
 
