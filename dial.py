@@ -14,6 +14,7 @@ from database.monthly_stats import (
 )
 from config import *
 from database.views.ticket_view import TicketOpenView
+from database.views.category_view import CategoryView
 from database.views.close_ticket import (
     TicketCloseView,
     archive_ticket_channel,
@@ -1173,6 +1174,7 @@ async def on_ready():
 
     if not persistent_views_registered:
         bot.add_view(TicketOpenView())
+        bot.add_view(CategoryView())
         bot.add_view(StarRatingView())
         bot.add_view(ProgressView())
         bot.add_view(PaymentView())
@@ -1187,6 +1189,11 @@ async def on_ready():
 
     if not monthly_stats_updater.is_running():
         monthly_stats_updater.start()
+
+    try:
+        await update_monthly_stats_message(bot)
+    except Exception as error:
+        print(f"[Monthly stats startup refresh failed] {error}")
 
     await database_backup_task()
     if not database_backup_task.is_running():

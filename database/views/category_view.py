@@ -9,18 +9,20 @@ from database.modal.developer_apply_modal import DeveloperApplyModal
 class CategoryView(discord.ui.View):
 
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
 
     @discord.ui.button(
         label="🎨 GFX",
-        style=discord.ButtonStyle.primary
+        style=discord.ButtonStyle.primary,
+        custom_id="category_gfx"
     )
     async def gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.send_designer_select(interaction, "gfx", "GFX")
 
     @discord.ui.button(
         label="👕 Roblox 복장",
-        style=discord.ButtonStyle.secondary
+        style=discord.ButtonStyle.secondary,
+        custom_id="category_uniform"
     )
     async def uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.send_designer_select(interaction, "uniform", "Roblox 복장")

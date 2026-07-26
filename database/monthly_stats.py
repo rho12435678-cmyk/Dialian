@@ -8,6 +8,7 @@ from database.database import DATABASE
 
 STATS_CHANNEL_KEY = "monthly_stats_channel_id"
 STATS_MESSAGE_KEY = "monthly_stats_message_id"
+STATS_FOOTER_MARKER = "\uc6d4\uac04 \ud1b5\uacc4"
 
 
 def month_range(now=None):
@@ -243,12 +244,47 @@ async def save_monthly_stats_message(message):
     await set_setting(STATS_MESSAGE_KEY, message.id)
 
 
+def is_monthly_stats_message(message, bot_user_id):
+    if message.author.id != bot_user_id or not message.embeds:
+        return False
+
+    embed = message.embeds[0]
+    footer = embed.footer.text or ""
+    description = embed.description or ""
+    return STATS_FOOTER_MARKER in footer or "\ucd1d \uc8fc\ubb38" in description
+
+
+async def find_existing_monthly_stats_message(bot):
+    candidates = []
+
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
+            try:
+                async for message in channel.history(limit=100, oldest_first=False):
+                    if is_monthly_stats_message(message, bot.user.id):
+                        candidates.append(message)
+                        break
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+
+    if not candidates:
+        return None
+
+    message = max(candidates, key=lambda item: item.created_at)
+    await save_monthly_stats_message(message)
+    return message
+
+
 async def update_monthly_stats_message(bot):
     channel_id = await get_setting(STATS_CHANNEL_KEY)
     message_id = await get_setting(STATS_MESSAGE_KEY)
 
     if not channel_id or not message_id:
-        return False
+        message = await find_existing_monthly_stats_message(bot)
+        if message is None:
+            return False
+        channel_id = message.channel.id
+        message_id = message.id
 
     channel = bot.get_channel(int(channel_id))
 
@@ -261,8 +297,11 @@ async def update_monthly_stats_message(bot):
     try:
         message = await channel.fetch_message(int(message_id))
     except Exception:
-        return False
+        message = await find_existing_monthly_stats_message(bot)
+        if message is None:
+            return False
 
-    embed = await build_monthly_stats_embed(channel.guild)
+    embed = await build_monthly_stats_embed(message.channel.guild)
     await message.edit(embed=embed)
+    await save_monthly_stats_message(message)
     return True
