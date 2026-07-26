@@ -1,6 +1,8 @@
 import discord
 import asyncio
 
+from config import ARCHIVE_CATEGORY_NAME
+
 
 _ticket_creation_locks = {}
 
@@ -34,6 +36,11 @@ def release_ticket_creation_lock(lock):
         lock.release()
 
 
+def is_archive_channel(channel):
+    category = getattr(channel, "category", None)
+    return category is not None and category.name == ARCHIVE_CATEGORY_NAME
+
+
 def get_open_ticket_channel(
     guild: discord.Guild,
     user
@@ -43,6 +50,9 @@ def get_open_ticket_channel(
 
     for channel in guild.text_channels:
         if not channel.name.startswith("티켓-"):
+            continue
+
+        if is_archive_channel(channel):
             continue
 
         if channel.topic == str(user.id):

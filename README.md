@@ -13,9 +13,10 @@ python -m pip install -r requirements.txt
 ```env
 TOKEN=디스코드_봇_토큰
 OPENAI_API_KEY=OpenAI_API_키
+TRANSLATION_CHANNEL_ID=번역을_실행할_채널_ID
 ```
 
-`OPENAI_API_KEY`는 선택 사항입니다. 설정하지 않아도 봇은 실행되며, 자동 번역 기능만 비활성화됩니다.
+`OPENAI_API_KEY`는 선택 사항입니다. 설정하지 않아도 봇은 실행되며, 자동 번역 기능만 비활성화됩니다. `TRANSLATION_CHANNEL_ID`를 설정하면 해당 채널에서만 자동 번역이 실행됩니다.
 
 ## 실행
 

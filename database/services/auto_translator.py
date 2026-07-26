@@ -30,7 +30,7 @@ except ImportError:
 # 채널 및 번역 설정
 # =========================================================
 
-ENGLISH_CHANNEL_ID = 1527725232864100362
+ENGLISH_CHANNEL_ID = int(os.getenv("TRANSLATION_CHANNEL_ID", "1527725232864100362"))
 TRANSLATION_CHANNEL_IDS = {ENGLISH_CHANNEL_ID}
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

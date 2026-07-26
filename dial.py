@@ -19,6 +19,7 @@ from database.views.close_ticket import (
     archive_ticket_channel,
     delete_ticket_channel,
     delete_ticket_dm_messages,
+    delete_all_bot_dm_messages,
     has_designer_role,
 )
 from database.views.review_view import StarRatingView
@@ -954,6 +955,54 @@ async def complete(ctx):
         embed=review_embed,
         view=StarRatingView(designer_id)
     )
+
+
+@bot.command(name="\uc0c1\ud0dc")
+async def change_ticket_status(ctx, *, status: str):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("티켓 채널에서만 사용할 수 있습니다.")
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    member = ctx.guild.get_member(ctx.author.id)
+    if not can_manage_ticket(member, ctx.author.id, designer_id):
+        return await ctx.send("담당 디자이너 또는 관리자만 상태를 변경할 수 있습니다.")
+    status = status.strip()
+    if not status or len(status) > 50:
+        return await ctx.send("상태는 1~50자로 입력해주세요.")
+    async for message in ctx.channel.history(limit=50):
+        if message.author != bot.user or not message.embeds:
+            continue
+        embed = message.embeds[0]
+        if embed.title != "📌 커미션 진행" or not embed.description:
+            continue
+        lines = embed.description.splitlines()
+        if len(lines) < 4:
+            continue
+        lines[2] = f"📌 상태 : {status}"
+        embed.description = "\n".join(lines)
+        await message.edit(embed=embed)
+        await ctx.send(f"📌 {ctx.author.mention}님이 상태를 변경했습니다.\n상태: {status}")
+        return
+    await ctx.send("진행률 메시지를 찾지 못했습니다.")
+
+
+@bot.command(name="DM\uc815\ub9ac", aliases=["dm\uc815\ub9ac"])
+async def clear_ticket_dm(ctx):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("티켓 채널에서만 사용할 수 있습니다.")
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    member = ctx.guild.get_member(ctx.author.id)
+    if not can_manage_ticket(member, ctx.author.id, designer_id):
+        return await ctx.send("담당 디자이너 또는 관리자만 DM을 정리할 수 있습니다.")
+    designer = await fetch_member_or_none(ctx.guild, designer_id)
+    deleted_count = await delete_ticket_dm_messages(bot.user, designer, ctx.channel)
+    await ctx.send(f"🧹 이 티켓의 관리 DM {deleted_count}개를 삭제했습니다.")
+
+
+@bot.command(name="DM\uc804\uccb4\uc815\ub9ac", aliases=["dm\uc804\uccb4\uc815\ub9ac"])
+@commands.has_permissions(administrator=True)
+async def clear_all_designer_dm(ctx, member: discord.Member):
+    deleted_count = await delete_all_bot_dm_messages(bot.user, member)
+    await ctx.send(f"🧹 {member.mention}님에게 보낸 봇 DM {deleted_count}개를 삭제했습니다.")
 
 
 async def send_private_command_notice(ctx, title, description):

@@ -84,6 +84,56 @@ class ProgressView(discord.ui.View):
     async def p100(self, interaction, button):
         await self.update_progress(interaction, 100, "✅ 완료", "완료")
 
+    @discord.ui.button(label="상담중", style=discord.ButtonStyle.secondary, custom_id="status_consulting", row=1)
+    async def status_consulting(self, interaction, button):
+        await self.update_status(interaction, "상담중")
+
+    @discord.ui.button(label="작업 시작", style=discord.ButtonStyle.primary, custom_id="status_started", row=1)
+    async def status_started(self, interaction, button):
+        await self.update_status(interaction, "작업 시작")
+
+    @discord.ui.button(label="작업 중", style=discord.ButtonStyle.primary, custom_id="status_working", row=1)
+    async def status_working(self, interaction, button):
+        await self.update_status(interaction, "작업 중")
+
+    @discord.ui.button(label="마무리", style=discord.ButtonStyle.success, custom_id="status_finishing", row=1)
+    async def status_finishing(self, interaction, button):
+        await self.update_status(interaction, "마무리")
+
+    @discord.ui.button(label="완료", style=discord.ButtonStyle.success, custom_id="status_completed", row=1)
+    async def status_completed(self, interaction, button):
+        await self.update_status(interaction, "완료")
+
+    async def update_status(self, interaction, status):
+        if self.progress_message is None:
+            ticket_channel = await resolve_ticket_channel(interaction)
+            if ticket_channel is not None:
+                async for message in ticket_channel.history(limit=50, oldest_first=True):
+                    if message.embeds and message.embeds[0].title == "📊 커미션 진행":
+                        self.progress_message = message
+                        break
+        if self.progress_message is None:
+            return await interaction.response.send_message("진행률 메시지를 찾지 못했습니다.", ephemeral=True)
+
+        member = self.progress_message.guild.get_member(interaction.user.id)
+        allowed = (
+            (member and member.guild_permissions.administrator)
+            or (self.designer_id is not None and interaction.user.id == self.designer_id)
+            or (self.designer_id is None and has_designer_role(member))
+        )
+        if not allowed:
+            return await interaction.response.send_message("담당 디자이너 또는 관리자만 사용할 수 있습니다.", ephemeral=True)
+
+        embed = self.progress_message.embeds[0]
+        lines = embed.description.splitlines() if embed.description else []
+        if len(lines) < 4:
+            return await interaction.response.send_message("진행률 메시지 형식이 올바르지 않습니다.", ephemeral=True)
+        lines[2] = f"📌 상태 : {status}"
+        embed.description = "\n".join(lines)
+        await self.progress_message.edit(embed=embed)
+        await self.progress_message.channel.send(f"📌 {interaction.user.mention}님이 상태를 변경했습니다.\n상태: {status}")
+        await interaction.response.send_message("상태를 변경했습니다.", ephemeral=True)
+
     async def update_progress(self, interaction, progress, status, estimate):
 
         if self.progress_message is None:
@@ -189,6 +239,11 @@ class ProgressView(discord.ui.View):
                 )
 
             await db.commit()
+
+        await self.progress_message.channel.send(
+            f"📊 {interaction.user.mention}님이 진행률을 {progress}%로 변경했습니다.\n"
+            f"상태: {status}"
+        )
 
         if progress == 100 and not already_completed:
 

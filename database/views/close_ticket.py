@@ -71,6 +71,27 @@ async def delete_ticket_dm_messages(bot_user, designer, ticket_channel):
     return deleted
 
 
+async def delete_all_bot_dm_messages(bot_user, designer):
+    if designer is None:
+        return 0
+
+    deleted = 0
+    try:
+        dm_channel = designer.dm_channel or await designer.create_dm()
+        async for message in dm_channel.history(limit=None):
+            if message.author.id != bot_user.id:
+                continue
+            try:
+                await message.delete()
+                deleted += 1
+            except discord.HTTPException:
+                continue
+    except discord.HTTPException:
+        return deleted
+
+    return deleted
+
+
 async def get_or_create_archive_category(guild):
     category = discord.utils.get(
         guild.categories,
