@@ -3,6 +3,7 @@ import asyncio
 import os
 import re
 import aiosqlite
+import subprocess
 from datetime import datetime
 from discord.ext import commands, tasks
 from database.database import DATABASE, create_tables
@@ -31,6 +32,20 @@ from database.views.verify_view import VerifyView
 
 TOKEN = os.getenv("TOKEN")
 
+
+def get_bot_version():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
 # 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 
 intents = discord.Intents.default()
@@ -39,6 +54,8 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 daily_notice = None
 persistent_views_registered = False
+update_notice_sent = False
+bot_started_at = datetime.now()
 PROCESSED_TABLES = {
     "processed_commands",
     "processed_command_errors",
@@ -73,6 +90,23 @@ async def command_list(ctx):
             "`!\uacc4\uc88c\ub4f1\ub85d` `!\uacc4\uc88c\ubaa9\ub85d` `!\uacc4\uc88c\uc0ad\uc81c` `!\ud1b5\uacc4` `!\uccad\uc18c 1~100`"
         ),
         color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="\uc5c5\ub370\uc774\ud2b8\ud655\uc778", aliases=["\ubd07\uc0c1\ud0dc"])
+@commands.has_permissions(administrator=True)
+async def update_check(ctx):
+    embed = discord.Embed(
+        title="봇 실행 정보",
+        color=discord.Color.green(),
+        timestamp=bot_started_at,
+    )
+    embed.add_field(name="버전", value=f"`{get_bot_version()}`", inline=True)
+    embed.add_field(
+        name="시작 시간",
+        value=discord.utils.format_dt(bot_started_at, style="F"),
+        inline=False,
     )
     await ctx.send(embed=embed)
 
@@ -1164,7 +1198,7 @@ async def setup_hook():
     
 @bot.event
 async def on_ready():
-    global daily_notice, persistent_views_registered
+    global daily_notice, persistent_views_registered, update_notice_sent
 
     await create_tables()
 
@@ -1198,6 +1232,15 @@ async def on_ready():
     await database_backup_task()
     if not database_backup_task.is_running():
         database_backup_task.start()
+
+    if not update_notice_sent:
+        log_channel = discord.utils.get(bot.get_all_channels(), name=LOG_CHANNEL_NAME)
+        if isinstance(log_channel, discord.TextChannel):
+            await log_channel.send(
+                f"✅ 봇 업데이트 완료\n버전: `{get_bot_version()}`\n"
+                f"시작: {discord.utils.format_dt(bot_started_at, style='F')}"
+            )
+        update_notice_sent = True
 
     print("✨ 영속성 버튼 등록 완료!")
 
