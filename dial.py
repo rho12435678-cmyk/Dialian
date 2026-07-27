@@ -29,6 +29,12 @@ from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.DailyNotice import DailyNotice
 from database.views.verify_view import VerifyView
+from database.services.points import (
+    get_user_points,
+    add_user_points,
+    check_and_add_share_points,
+    check_and_add_feedback_points,
+)
 
 TOKEN = os.getenv("TOKEN")
 
@@ -46,7 +52,6 @@ def get_bot_version():
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
 
-# 알림을 받을 개발자(관리자)들의 디스코드 고유 ID 리스트
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -80,21 +85,123 @@ async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
 
 
-@bot.command(name="\uba85\ub839\uc5b4", aliases=["help", "\ub3c4\uc6c0\ub9d0"])
+# ==================== [포인트 자동 감지 이벤트] ====================
+
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+
+    # 작품공유 채널 메시지 감지 (+15P)
+    if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
+        success = await check_and_add_share_points(message.guild, message.author, message)
+        if success:
+            try:
+                await message.add_reaction("🪙")
+            except Exception:
+                pass
+
+    await bot.process_commands(message)
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if not payload.guild_id or payload.user_id == bot.user.id:
+        return
+
+    # 피드백 채널 감지 (+10P)
+    if payload.channel_id != FEEDBACK_CHANNEL_ID:
+        return
+
+    emoji = str(payload.emoji)
+    if emoji not in ["❤️", "👍"]:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+
+    channel = guild.get_channel(payload.channel_id)
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except Exception:
+        return
+
+    # 피드백 작성자 본인이 단 반응이거나 봇 메시지면 무시
+    if message.author.id == payload.user_id or message.author.bot:
+        return
+
+    success = await check_and_add_feedback_points(guild, message.author, message)
+    if success:
+        try:
+            await message.add_reaction("🪙")
+        except Exception:
+            pass
+
+
+# ==================== [기본 / 포인트 명령어] ====================
+
+@bot.command(name="명령어", aliases=["help", "도움말"])
 async def command_list(ctx):
     embed = discord.Embed(
-        title="Dialian \uba85\ub839\uc5b4",
+        title="Dialian 명령어",
         description=(
-            "`!\ud2f0\ucf13\uc0dd\uc131` `!\uacc4\uc88c\uc804\uc1a1` `!\ud2f0\ucf13\ub2eb\uae30` `!\ud2f0\ucf13\uc0ad\uc81c`\n"
-            "`!\uc9c4\ud589 0|25|50|75|100` `!\uc608\uc0c1 1\uc77c|2\uc77c|3\uc77c` `!\uc644\ub8cc`\n"
-            "`!\uacc4\uc88c\ub4f1\ub85d` `!\uacc4\uc88c\ubaa9\ub85d` `!\uacc4\uc88c\uc0ad\uc81c` `!\ud1b5\uacc4` `!\uccad\uc18c 1~100`"
+            "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제`\n"
+            "`!진행 0|25|50|75|100` `!예상 1일|2일|3일` `!완료`\n"
+            "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!청소 1~100`\n"
+            "`!포인트` `!포인트지급 @유저 금액`"
         ),
         color=discord.Color.blurple(),
     )
     await ctx.send(embed=embed)
 
 
-@bot.command(name="\uc5c5\ub370\uc774\ud2b8\ud655\uc778", aliases=["\ubd07\uc0c1\ud0dc"])
+@bot.command(name="포인트", aliases=["마일리지", "p"])
+async def show_points(ctx, member: discord.Member = None):
+    target = member or ctx.author
+    points = await get_user_points(target.id)
+
+    role = ctx.guild.get_role(REGULAR_CUSTOMER_ROLE_ID)
+    is_regular = role in target.roles if role else False
+
+    embed = discord.Embed(
+        title=f"📊 {target.display_name} 님의 포인트 정보",
+        color=discord.Color.gold()
+    )
+    embed.add_field(
+        name="현재 포인트",
+        value=f"`{points} P` / `{TARGET_REGULAR_POINTS} P`",
+        inline=False
+    )
+
+    if is_regular:
+        embed.add_field(
+            name="단골 혜택",
+            value="✅ **단골 손님 (15% 자동 할인 적용 중)**",
+            inline=False
+        )
+    else:
+        remaining = max(0, TARGET_REGULAR_POINTS - points)
+        embed.add_field(
+            name="단골 승급까지",
+            value=f"**{remaining} P** 남음 (500P 달성 시 15% 할인 적용)",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="포인트지급")
+@commands.has_permissions(administrator=True)
+async def give_points(ctx, member: discord.Member, amount: int):
+    new_points = await add_user_points(ctx.guild, member, amount)
+    await ctx.send(f"✅ {member.mention} 님에게 `{amount} P`를 지급했습니다. (현재: `{new_points} P`)")
+
+
+@bot.command(name="업데이트확인", aliases=["봇상태"])
 @commands.has_permissions(administrator=True)
 async def update_check(ctx):
     embed = discord.Embed(
@@ -117,19 +224,10 @@ def sanitize_text(text):
     if not text:
         return "[내용 없음]"
 
-    # URL 제거
     text = re.sub(r'https?://\S+', '[LINK]', text)
-
-    # 디스코드 초대링크 제거
     text = re.sub(r'discord\.gg/\S+', '[INVITE]', text)
-
-    # 이메일 제거
     text = re.sub(r'\S+@\S+', '[EMAIL]', text)
-
-    # 전화번호 제거
     text = re.sub(r'\d{2,3}-\d{3,4}-\d{4}', '[PHONE]', text)
-
-    # 긴 숫자 제거 (계좌번호/주문번호 등)
     text = re.sub(r'\d{6,}', '[NUMBER]', text)
 
     return text[:80]
@@ -419,12 +517,8 @@ async def send_payment_info(channel, designer_id):
     await channel.send(embed=embed)
     return True
 
-# ==================== [티켓 패널 명령어] ====================
+# ==================== [티켓 패널 및 업무 명령어] ====================
 
-# @bot.check
-# async def prevent_duplicate_command_processing(ctx):
-#     return await claim_once("processed_commands", ctx.message.id)
-    
 @bot.command(name="티켓생성")
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
@@ -454,6 +548,7 @@ async def t_create_panel(ctx):
         embeds=[embed, embed2],
         view=TicketOpenView()
     )
+
 
 @bot.command(name="통계")
 @commands.has_permissions(administrator=True)
@@ -510,9 +605,7 @@ async def register_bank(
     account_number,
     holder
 ):
-
     async with aiosqlite.connect("data/dialian.db") as db:
-
         await db.execute(
             """
             INSERT OR REPLACE INTO bank_accounts(
@@ -530,37 +623,16 @@ async def register_bank(
                 holder
             )
         )
-
         await db.commit()
 
     embed = discord.Embed(
         title="✅ 계좌 등록 완료",
         color=discord.Color.green()
     )
-
-    embed.add_field(
-        name="대상 디자이너",
-        value=member.mention,
-        inline=False
-    )
-
-    embed.add_field(
-        name="은행",
-        value=bank_name,
-        inline=False
-    )
-
-    embed.add_field(
-        name="계좌번호",
-        value=f"`{mask_account(account_number)}`",
-        inline=False
-    )
-
-    embed.add_field(
-        name="예금주",
-        value=holder,
-        inline=False
-    )
+    embed.add_field(name="대상 디자이너", value=member.mention, inline=False)
+    embed.add_field(name="은행", value=bank_name, inline=False)
+    embed.add_field(name="계좌번호", value=f"`{mask_account(account_number)}`", inline=False)
+    embed.add_field(name="예금주", value=holder, inline=False)
 
     await ctx.send(embed=embed)
 
@@ -568,9 +640,7 @@ async def register_bank(
 @bot.command(name="계좌삭제")
 @commands.has_permissions(administrator=True)
 async def delete_bank(ctx):
-
     async with aiosqlite.connect("data/dialian.db") as db:
-
         await db.execute(
             """
             DELETE FROM bank_accounts
@@ -578,17 +648,15 @@ async def delete_bank(ctx):
             """,
             (ctx.author.id,)
         )
-
         await db.commit()
 
     await ctx.send("✅ 등록된 계좌가 삭제되었습니다.")
 
+
 @bot.command(name="계좌목록")
 @commands.has_permissions(administrator=True)
 async def bank_list(ctx):
-
     async with aiosqlite.connect("data/dialian.db") as db:
-
         cursor = await db.execute(
             """
             SELECT
@@ -600,7 +668,6 @@ async def bank_list(ctx):
             ORDER BY developer_id
             """
         )
-
         rows = await cursor.fetchall()
 
     if not rows:
@@ -612,9 +679,7 @@ async def bank_list(ctx):
     )
 
     for developer_id, bank, account, holder in rows:
-
         member = ctx.guild.get_member(developer_id)
-
         name = member.mention if member else f"`{developer_id}`"
 
         embed.add_field(
@@ -875,6 +940,7 @@ async def estimate(ctx, days: str):
 
     await ctx.send("진행 패널을 찾지 못했습니다.")
 
+
 @bot.command(name="청소")
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
@@ -882,15 +948,13 @@ async def clear(ctx, amount: int):
         return await ctx.send("사용법: `!청소 1~100`")
 
     await ctx.channel.purge(limit=amount + 1)
-
     msg = await ctx.send(f"✅ {amount}개의 메시지를 삭제했습니다.")
-
     await msg.delete(delay=3)
+
 
 @bot.command(name="인증패널")
 @commands.has_permissions(administrator=True)
 async def verify_panel(ctx):
-
     embed = discord.Embed(
         title="✅ 서버 인증",
         description="아래 버튼을 눌러 인증을 완료해주세요.",
@@ -992,7 +1056,7 @@ async def complete(ctx):
     )
 
 
-@bot.command(name="\uc0c1\ud0dc")
+@bot.command(name="상태")
 async def change_ticket_status(ctx, *, status: str):
     if not is_ticket_channel(ctx.channel):
         return await ctx.send("티켓 채널에서만 사용할 수 있습니다.")
@@ -1020,7 +1084,7 @@ async def change_ticket_status(ctx, *, status: str):
     await ctx.send("진행률 메시지를 찾지 못했습니다.")
 
 
-@bot.command(name="DM\uc815\ub9ac", aliases=["dm\uc815\ub9ac"])
+@bot.command(name="DM정리", aliases=["dm정리"])
 async def clear_ticket_dm(ctx):
     if not is_ticket_channel(ctx.channel):
         return await ctx.send("티켓 채널에서만 사용할 수 있습니다.")
@@ -1033,7 +1097,7 @@ async def clear_ticket_dm(ctx):
     await ctx.send(f"🧹 이 티켓의 관리 DM {deleted_count}개를 삭제했습니다.")
 
 
-@bot.command(name="DM\uc804\uccb4\uc815\ub9ac", aliases=["dm\uc804\uccb4\uc815\ub9ac"])
+@bot.command(name="DM전체정리", aliases=["dm전체정리"])
 @commands.has_permissions(administrator=True)
 async def clear_all_designer_dm(ctx, member: discord.Member):
     deleted_count = await delete_all_bot_dm_messages(bot.user, member)
@@ -1141,7 +1205,8 @@ async def on_command_error(ctx, error):
                 "`!완료`\n"
                 "`!계좌전송`\n"
                 "`!티켓닫기`\n"
-                "`!티켓삭제`"
+                "`!티켓삭제`\n"
+                "`!포인트`"
             )
         )
 
@@ -1195,7 +1260,8 @@ async def setup_hook():
 
     await bot.load_extension("database.services.auto_translator")
     print("✅ 자동 번역 기능 로드 완료")
-    
+
+
 @bot.event
 async def on_ready():
     global daily_notice, persistent_views_registered, update_notice_sent
@@ -1203,7 +1269,6 @@ async def on_ready():
     await create_tables()
 
     print("on_ready")
-
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
 
     if not persistent_views_registered:
@@ -1243,6 +1308,7 @@ async def on_ready():
         update_notice_sent = True
 
     print("✨ 영속성 버튼 등록 완료!")
+
 
 if __name__ == "__main__":
     if TOKEN:
