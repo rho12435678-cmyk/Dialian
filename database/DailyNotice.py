@@ -30,8 +30,10 @@ class DailyNotice:
                     "✨ **제작 가능**\n"
                     "• 🎨 Roblox GFX\n"
                     "• 👕 Roblox 복장 제작\n\n"
-                    f"📸 예시작은 <#{EXAMPLE_CHANNEL_ID}> 에서 확인해주세요.\n"
-                    f"💳 구매 및 문의는 <#{PURCHASE_CHANNEL_ID}> 를 이용해주세요.\n\n"
+                    f"📸 **예시작** : <#{EXAMPLE_CHANNEL_ID}> 에서 확인해주세요.\n"
+                    f"📊 **디자이너 통계** : <#{DESIGNER_STATS_CHANNEL_ID}> 에서 확인해주세요.\n"
+                    f"⭐ **구매 후기** : <#{REVIEWS_CHANNEL_ID}> 에서 확인해주세요.\n"
+                    f"💳 **구매 및 문의** : <#{PURCHASE_CHANNEL_ID}> 를 이용해주세요.\n\n"
                 ),
                 color=0xF4A300
             )
