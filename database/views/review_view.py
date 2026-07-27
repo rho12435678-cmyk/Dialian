@@ -4,8 +4,7 @@ import re
 
 from datetime import datetime
 from config import *
-
-DATABASE = "data/dialian.db"
+from database.services.points import add_user_points
 
 
 def parse_designer_id(text):
@@ -149,7 +148,6 @@ class StarRatingView(discord.ui.View):
                     None
                 )
 
-
             if review_channel:
 
                 star_emojis = "⭐" * stars
@@ -221,6 +219,10 @@ class StarRatingView(discord.ui.View):
                         await db.commit()
                         print("[REVIEW] DB 저장 완료")
 
+                # ==========================
+                # 역할 지급 처리
+                # ==========================
+
                 role_notice = ""
 
                 try:
@@ -236,10 +238,23 @@ class StarRatingView(discord.ui.View):
                             buyer_role,
                             reason="별점 후기 제출 후 구매자 역할 지급"
                         )
-                        role_notice = "\n구매자 역할이 지급되었습니다."
+                        role_notice = "\n✅ 구매자 역할이 지급되었습니다."
 
                 except Exception as role_err:
                     print(f"[구매자 역할 지급 실패] {role_err}")
+
+                # ==========================
+                # 후기 작성 포인트 적립
+                # ==========================
+
+                points_notice = ""
+                try:
+                    # config.py에 REVIEW_POINTS가 있으면 사용, 없으면 기본 20P 지정
+                    points_to_add = globals().get("REVIEW_POINTS", 20)
+                    new_total = await add_user_points(guild, interaction.user, points_to_add)
+                    points_notice = f"\n🪙 **{points_to_add} P**가 적립되었습니다! (현재: `{new_total} P`)"
+                except Exception as points_err:
+                    print(f"[후기 포인트 적립 실패] {points_err}")
 
                 success_view = discord.ui.View()
 
@@ -252,7 +267,7 @@ class StarRatingView(discord.ui.View):
                 )
 
                 await interaction.followup.send(
-                    f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!{role_notice}",
+                    f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!{points_notice}{role_notice}",
                     view=success_view,
                     ephemeral=True
                 )
