@@ -14,6 +14,7 @@ def secure_database_file():
     except OSError:
         pass
 
+
 async def connect():
     return await aiosqlite.connect(DATABASE)
 
@@ -21,34 +22,22 @@ async def connect():
 async def create_tables():
     async with aiosqlite.connect(DATABASE) as db:
 
-        # 개발자 정보
+        # 개발자 정보 (커미션)
         await db.execute("""
-CREATE TABLE IF NOT EXISTS commissions(
-
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-ticket_channel INTEGER,
-
-customer_id INTEGER,
-
-designer_id INTEGER,
-
-category TEXT,
-
-status TEXT,
-
-progress INTEGER,
-
-estimate_day INTEGER,
-
-created_at TEXT,
-
-completed_at TEXT,
-
-updated_at TEXT
-
-)
-""")
+        CREATE TABLE IF NOT EXISTS commissions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_channel INTEGER,
+            customer_id INTEGER,
+            designer_id INTEGER,
+            category TEXT,
+            status TEXT,
+            progress INTEGER,
+            estimate_day INTEGER,
+            created_at TEXT,
+            completed_at TEXT,
+            updated_at TEXT
+        )
+        """)
 
         await db.execute("""
         DELETE FROM commissions
@@ -75,20 +64,15 @@ updated_at TEXT
             except aiosqlite.OperationalError:
                 pass
 
-        #개발자 계좌
+        # 개발자 계좌
         await db.execute("""
-CREATE TABLE IF NOT EXISTS bank_accounts(
-
-developer_id INTEGER PRIMARY KEY,
-
-bank_name TEXT,
-
-account_number TEXT,
-
-holder TEXT
-
-)
-""")
+        CREATE TABLE IF NOT EXISTS bank_accounts(
+            developer_id INTEGER PRIMARY KEY,
+            bank_name TEXT,
+            account_number TEXT,
+            holder TEXT
+        )
+        """)
         
         # 고객 정보
         await db.execute("""
@@ -114,7 +98,7 @@ holder TEXT
         )
         """)
 
-                # 후기
+        # 후기
         await db.execute("""
         CREATE TABLE IF NOT EXISTS reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,6 +107,19 @@ holder TEXT
             stars INTEGER,
             review TEXT,
             created_at TEXT
+        )
+        """)
+
+        # =========================================================
+        # [신규 추가] 유저 포인트 및 어뷰징 방지 기록 테이블
+        # =========================================================
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS user_points (
+            user_id INTEGER PRIMARY KEY,
+            points INTEGER DEFAULT 0,
+            last_share_date TEXT,
+            last_feedback_date TEXT,
+            feedback_today_count INTEGER DEFAULT 0
         )
         """)
 
