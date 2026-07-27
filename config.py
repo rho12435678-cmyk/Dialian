@@ -35,3 +35,11 @@ DESIGNER_ROLE_IDS = {
     "gfx": 1518906536095776868,      # GFX 디자이너 역할 ID
     "uniform": 1522539025691312168,  # 복장 디자이너 역할 ID
 }
+
+# ==================== [포인트 및 단골 시스템 설정] ====================
+WORK_SHARE_CHANNEL_ID = 123456789012345678  # #작품공유 채널 ID
+FEEDBACK_CHANNEL_ID = 123456789012345678    # #피드백 채널 ID
+REGULAR_CUSTOMER_ROLE_ID = 123456789012345678 # 단골 손님 역할 ID
+
+TARGET_REGULAR_POINTS = 500  # 단골 승급 기준 포인트
+REGULAR_DISCOUNT_RATE = 0.15 # 15% 할인율
