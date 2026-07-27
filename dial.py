@@ -1249,6 +1249,23 @@ async def on_command_error(ctx, error):
         "입력 내용을 확인한 뒤 다시 시도해주세요."
     )
 
+@bot.command(name="포인트차감")
+@commands.has_permissions(administrator=True)
+async def remove_points(ctx, member: discord.Member, amount: int):
+    new_points = await add_user_points(ctx.guild, member, -amount)
+    await ctx.send(f"✅ {member.mention} 님의 포인트를 `{amount} P` 차감했습니다. (현재: `{new_points} P`)")
+
+
+@bot.command(name="포인트리셋")
+@commands.has_permissions(administrator=True)
+async def reset_points(ctx, member: discord.Member):
+    current_points = await get_user_points(member.id)
+    if current_points > 0:
+        new_points = await add_user_points(ctx.guild, member, -current_points)
+    else:
+        new_points = current_points
+    await ctx.send(f"🔄 {member.mention} 님의 포인트를 `0 P`로 초기화했습니다.")
+
 
 # ==================== [봇 시작 시스템] ====================
 
