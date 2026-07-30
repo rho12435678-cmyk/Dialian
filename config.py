@@ -41,5 +41,11 @@ WORK_SHARE_CHANNEL_ID = 1505111260595879986  # #작품공유 채널 ID
 FEEDBACK_CHANNEL_ID = 1505111362919989418  # #피드백 채널 ID
 REGULAR_CUSTOMER_ROLE_ID = 1510482073838686308 # 단골 손님 역할 ID
 
-TARGET_REGULAR_POINTS = 500  # 단골 승급 기준 포인트
+TARGET_REGULAR_POINTS = 500  # 골드(단골) 승급 기준 포인트
 REGULAR_DISCOUNT_RATE = 0.15 # 15% 할인율
+
+# ==================== [활동 및 미니게임 세부 설정] ====================
+DAILY_ACTION_LIMIT = 3       # 작품공유 및 피드백 일일 최대 적립 제한 횟수
+WORK_SHARE_POINTS = 15       # 작품공유 1회 적립 포인트
+FEEDBACK_POINTS = 10         # 피드백 반응 1회 적립 포인트
+GACHA_COST = 20              # 뽑기 1회 소모 포인트
