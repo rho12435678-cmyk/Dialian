@@ -213,9 +213,9 @@ async def command_list(ctx):
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
-            "`!뽑기` - 20P 소모 (엄격한 확률 + 꽝 위로포인트 지급!)\n"
-            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 2배! (패배 시 10% 위로포인트)\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 2.5배! (패배 시 15% 위로포인트)\n\n"
+            "`!뽑기` - 20P 소모 (꽝 확률 조정형)\n"
+            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 2배! (패배 시 5% 위로포인트)\n"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 2.5배! (패배 시 5% 위로포인트)\n\n"
             "**[명예 및 베스트]**\n"
             "`!주간베스트` (명예의 전당 집계)"
         ),
@@ -296,8 +296,9 @@ async def point_gacha(ctx):
     
     await add_user_points(ctx.guild, ctx.author, -cost)
     
+    # [수정된 밸런스] 꽝(5P) 확률 70%로 상향, 본전(20P) 15%로 하향
     prizes = [5, 20, 35, 75, 150, 400]
-    weights = [55, 25, 12, 6, 1.8, 0.2]
+    weights = [70, 15, 9, 4.5, 1.3, 0.2]
     result = random.choices(prizes, weights=weights, k=1)[0]
     
     await add_user_points(ctx.guild, ctx.author, result)
@@ -373,7 +374,8 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
             color=discord.Color.light_grey()
         )
     else:
-        consolation = max(1, int(bet * 0.1))
+        # [수정된 밸런스] 위로 포인트 환급을 10%에서 5%로 축소
+        consolation = max(1, int(bet * 0.05))
         await add_user_points(ctx.guild, ctx.author, -bet + consolation)
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
@@ -435,7 +437,8 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.gold()
         else:
-            consolation = max(1, int(bet * 0.15))
+            # [수정된 밸런스] 패배 시 위로 포인트를 15%에서 5%로 축소
+            consolation = max(1, int(bet * 0.05))
             await add_user_points(ctx.guild, ctx.author, -bet + consolation)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
@@ -457,7 +460,8 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.green()
         else:
-            consolation = max(1, int(bet * 0.15))
+            # [수정된 밸런스] 패배 시 위로 포인트를 15%에서 5%로 축소
+            consolation = max(1, int(bet * 0.05))
             await add_user_points(ctx.guild, ctx.author, -bet + consolation)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
