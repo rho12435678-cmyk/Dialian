@@ -212,10 +212,10 @@ async def command_list(ctx):
             "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
-            "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
-            "`!뽑기` - 20P 소모 (꽝 확률 조정형)\n"
-            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 2배! (패배 시 5% 위로포인트)\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 2.5배! (패배 시 5% 위로포인트)\n\n"
+            "**[🎰 오락실 & 미니게임 (매운맛)]** *(명령어 채널 전용)*\n"
+            "`!뽑기` - 20P 소모 (꽝 확률 대폭 상향)\n"
+            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 2배! (패배 시 위로포인트 1%)\n"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 2.5배! (패배 시 위로포인트 1%)\n\n"
             "**[명예 및 베스트]**\n"
             "`!주간베스트` (명예의 전당 집계)"
         ),
@@ -296,27 +296,27 @@ async def point_gacha(ctx):
     
     await add_user_points(ctx.guild, ctx.author, -cost)
     
-    # [수정된 밸런스] 꽝(5P) 확률 70%로 상향, 본전(20P) 15%로 하향
-    prizes = [5, 20, 35, 75, 150, 400]
-    weights = [70, 15, 9, 4.5, 1.3, 0.2]
+    # [매운맛 밸런스 적용] 꽝(2P) 확률 85%, 대박/잭팟 확률 대폭 하향
+    prizes = [2, 20, 30, 50, 100, 300]
+    weights = [85, 10, 4, 0.8, 0.18, 0.02]
     result = random.choices(prizes, weights=weights, k=1)[0]
     
     await add_user_points(ctx.guild, ctx.author, result)
     final_points = await get_user_points(ctx.author.id)
     
-    if result == 5:
+    if result == 2:
         color = discord.Color.dark_grey()
-        title = "😭 아쉽게 꽝!"
-        desc = "하지만 마음을 달래줄 **위로 포인트 5P**를 받으셨습니다!"
+        title = "😭 최악의 꽝!"
+        desc = "본전도 못 건지고 헐값인 **위로 포인트 2P**를 받으셨습니다..."
     elif result == 20:
         color = discord.Color.light_grey()
         title = "😐 본전치기!"
-        desc = "소모한 20P를 그대로 찾아왔습니다."
-    elif result == 400:
+        desc = "소모한 20P를 겨우 그대로 찾아왔습니다."
+    elif result == 300:
         color = discord.Color.magenta()
-        title = "🔥 전설의 400P 잭팟 터짐!!!"
-        desc = f"0.2%의 확률을 뚫고 무려 **{result}P**를 획득했습니다! 골드 등급이 코앞입니다!"
-    elif result >= 75:
+        title = "🔥 극악의 300P 잭팟 터짐!!!"
+        desc = f"0.02%의 기적을 뚫고 무려 **{result}P**를 획득했습니다!"
+    elif result >= 50:
         color = discord.Color.gold()
         title = "🎉 축하합니다! 대박 당첨!"
         desc = f"**+{result}P**를 얻으셨습니다!"
@@ -374,13 +374,13 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
             color=discord.Color.light_grey()
         )
     else:
-        # [수정된 밸런스] 위로 포인트 환급을 10%에서 5%로 축소
-        consolation = max(1, int(bet * 0.05))
+        # [매운맛 밸런스 적용] 패배 시 위로 포인트 환급을 1%로 대폭 축소
+        consolation = max(1, int(bet * 0.01))
         await add_user_points(ctx.guild, ctx.author, -bet + consolation)
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
             title="✌️🖐️✊ 가위바위보 패배...",
-            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n😭 패배하여 `{bet}P`를 잃었지만, 위로 포인트 **+{consolation}P**를 받았어요!",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n😭 패배하여 `{bet}P`를 대부분 잃고, 짜릿한 위로 포인트 **+{consolation}P**만 건졌습니다.",
             color=discord.Color.red()
         )
 
@@ -437,13 +437,13 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.gold()
         else:
-            # [수정된 밸런스] 패배 시 위로 포인트를 15%에서 5%로 축소
-            consolation = max(1, int(bet * 0.05))
+            # [매운맛 밸런스 적용] 패배 시 위로 포인트를 1%로 대폭 축소
+            consolation = max(1, int(bet * 0.01))
             await add_user_points(ctx.guild, ctx.author, -bet + consolation)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (묵찌빠 완료)",
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}** (일치!)\n\n💀 봇의 공격에 당했습니다... 위로 포인트 **+{consolation}P** 지급!",
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}** (일치!)\n\n💀 봇의 공격에 참패했습니다... 위로 포인트 **+{consolation}P** 지급",
                 inline=False
             )
             embed.color = discord.Color.dark_red()
@@ -460,13 +460,13 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.green()
         else:
-            # [수정된 밸런스] 패배 시 위로 포인트를 15%에서 5%로 축소
-            consolation = max(1, int(bet * 0.05))
+            # [매운맛 밸런스 적용] 패배 시 위로 포인트를 1%로 대폭 축소
+            consolation = max(1, int(bet * 0.01))
             await add_user_points(ctx.guild, ctx.author, -bet + consolation)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (치열한 난투)",
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 아쉬운 차이로 패배했습니다... 위로 포인트 **+{consolation}P** 환급!",
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 아쉬운 차이로 패배했습니다... 위로 포인트 **+{consolation}P** 환급",
                 inline=False
             )
             embed.color = discord.Color.red()
