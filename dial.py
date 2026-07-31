@@ -3,7 +3,7 @@ import os
 import random
 import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 import discord
@@ -212,12 +212,12 @@ async def command_list(ctx):
             "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
-            "**[🎰 오락실 & 미니게임 (매운맛)]** *(명령어 채널 전용)*\n"
-            "`!뽑기` - 20P 소모 (꽝 확률 대폭 상향)\n"
-            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 2배! (패배 시 위로포인트 1%)\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 2.5배! (패배 시 위로포인트 1%)\n\n"
+            "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
+            "`!뽑기` - 20P 소모 (밸런스 패치 완료)\n"
+            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 약 1.95배!\n"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 최대 1.3배!\n\n"
             "**[명예 및 베스트]**\n"
-            "`!주간베스트` (명예의 전당 집계)"
+            "`!주간베스트` (최근 7일간의 명예의 전당 집계)"
         ),
         color=discord.Color.blurple(),
     )
@@ -232,7 +232,6 @@ async def show_points(ctx, member: discord.Member = None):
     target = member or ctx.author
     points = await get_user_points(target.id)
 
-    # 1000P 목표에 맞춰 티어 세분화 적용
     if points >= 1000:
         tier_icon = "🥇"
         tier_name = "골드 (최상위 VVIP 단골)"
@@ -297,9 +296,9 @@ async def point_gacha(ctx):
     
     await add_user_points(ctx.guild, ctx.author, -cost)
     
-    # [매운맛 밸런스 적용] 꽝(2P) 확률 85%, 대박/잭팟 확률 대폭 하향
-    prizes = [2, 20, 30, 50, 100, 300]
-    weights = [85, 10, 4, 0.8, 0.18, 0.02]
+    # [밸런스 개선] 꽝(2P) 확률 85% -> 60% 하향, 10P 구간 추가
+    prizes = [2, 10, 20, 30, 50, 100, 300]
+    weights = [60, 15, 15, 6, 3, 0.9, 0.1]
     result = random.choices(prizes, weights=weights, k=1)[0]
     
     await add_user_points(ctx.guild, ctx.author, result)
@@ -307,16 +306,20 @@ async def point_gacha(ctx):
     
     if result == 2:
         color = discord.Color.dark_grey()
-        title = "😭 최악의 꽝!"
-        desc = "본전도 못 건지고 헐값인 **위로 포인트 2P**를 받으셨습니다..."
-    elif result == 20:
+        title = "😭 아쉬운 꽝!"
+        desc = "위로 포인트 **2P**를 받으셨습니다."
+    elif result == 10:
         color = discord.Color.light_grey()
+        title = "💧 절반 보전!"
+        desc = "소모한 포인트의 절반인 **10P**를 찾았습니다."
+    elif result == 20:
+        color = discord.Color.blue()
         title = "😐 본전치기!"
-        desc = "소모한 20P를 겨우 그대로 찾아왔습니다."
+        desc = "소모한 20P를 그대로 찾아왔습니다."
     elif result == 300:
         color = discord.Color.magenta()
         title = "🔥 극악의 300P 잭팟 터짐!!!"
-        desc = f"0.02%의 기적을 뚫고 무려 **{result}P**를 획득했습니다!"
+        desc = f"0.1%의 기적을 뚫고 무려 **{result}P**를 획득했습니다!"
     elif result >= 50:
         color = discord.Color.gold()
         title = "🎉 축하합니다! 대박 당첨!"
@@ -339,7 +342,7 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
 
     choices = ["가위", "바위", "보"]
     if choice not in choices:
-        return await ctx.send("❌ 올바른 선택을 해주세요: `!가위바위보 [가위/바위/보] [배팅금액]`")
+        return await ctx.send("❌ 올바른 선택을 해주세요: `!가위바위보 [가위/바위/보] [배팅포인트]`")
     
     if bet < 10:
         return await ctx.send("❌ 최소 배팅 금액은 `10 P` 이상이어야 합니다.")
@@ -360,11 +363,13 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
         result = "lose"
 
     if result == "win":
-        await add_user_points(ctx.guild, ctx.author, bet)
+        # 승리 시 수수료 5% 차감 후 1.95배 지급
+        win_profit = int(bet * 0.95)
+        await add_user_points(ctx.guild, ctx.author, win_profit)
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
             title="✌️🖐️✊ 가위바위보 승리!",
-            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n🎉 승리하여 **+{bet}P**를 획득했습니다!",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n🎉 승리하여 **+{win_profit}P** (수수료 5% 제외)를 획득했습니다!",
             color=discord.Color.green()
         )
     elif result == "draw":
@@ -375,13 +380,12 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
             color=discord.Color.light_grey()
         )
     else:
-        # [매운맛 밸런스 적용] 패배 시 위로 포인트 환급을 1%로 대폭 축소
-        consolation = max(1, int(bet * 0.01))
-        await add_user_points(ctx.guild, ctx.author, -bet + consolation)
+        # 패배 시 전액 손실 (포인트 무한 복사 방지)
+        await add_user_points(ctx.guild, ctx.author, -bet)
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
             title="✌️🖐️✊ 가위바위보 패배...",
-            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n😭 패배하여 `{bet}P`를 대부분 잃고, 짜릿한 위로 포인트 **+{consolation}P**만 건졌습니다.",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n😭 패배하여 `{bet}P`를 잃었습니다.",
             color=discord.Color.red()
         )
 
@@ -396,7 +400,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
 
     choices = ["가위", "바위", "보"]
     if choice not in choices:
-        return await ctx.send("❌ 올바른 선택을 해주세요: `!묵찌빠 [가위/바위/보] [배팅금액]`")
+        return await ctx.send("❌ 올바른 선택을 해주세요: `!묵찌빠 [가위/바위/보] [배팅포인트]`")
     
     if bet < 20:
         return await ctx.send("❌ 묵찌빠 최소 배팅 금액은 `20 P` 이상이어야 합니다.")
@@ -428,7 +432,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
 
     if user_choice2 == bot_choice2:
         if user_attacker:
-            win_amount = int(bet * 1.5)
+            win_amount = int(bet * 1.3)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
@@ -438,20 +442,18 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.gold()
         else:
-            # [매운맛 밸런스 적용] 패배 시 위로 포인트를 1%로 대폭 축소
-            consolation = max(1, int(bet * 0.01))
-            await add_user_points(ctx.guild, ctx.author, -bet + consolation)
+            await add_user_points(ctx.guild, ctx.author, -bet)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (묵찌빠 완료)",
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}** (일치!)\n\n💀 봇의 공격에 참패했습니다... 위로 포인트 **+{consolation}P** 지급",
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}** (일치!)\n\n💀 봇의 공격에 참패하여 `{bet}P`를 잃었습니다.",
                 inline=False
             )
             embed.color = discord.Color.dark_red()
     else:
-        bot_wins_final = random.choice([True, False])
+        bot_wins_final = random.choices([True, False], weights=[55, 45])[0]
         if not bot_wins_final:
-            win_amount = int(bet * 1.2)
+            win_amount = int(bet * 1.1)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
@@ -461,13 +463,11 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.green()
         else:
-            # [매운맛 밸런스 적용] 패배 시 위로 포인트를 1%로 대폭 축소
-            consolation = max(1, int(bet * 0.01))
-            await add_user_points(ctx.guild, ctx.author, -bet + consolation)
+            await add_user_points(ctx.guild, ctx.author, -bet)
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (치열한 난투)",
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 아쉬운 차이로 패배했습니다... 위로 포인트 **+{consolation}P** 환급",
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 아쉬운 차이로 패배하여 `{bet}P`를 잃었습니다.",
                 inline=False
             )
             embed.color = discord.Color.red()
@@ -504,7 +504,7 @@ async def reset_points(ctx, member: discord.Member):
 @bot.command(name="주간베스트", aliases=["명예의전당"])
 @commands.has_permissions(administrator=True)
 async def weekly_best(ctx):
-    await ctx.send("🔍 최근 작품들을 분석하며 반응을 집계 중입니다...")
+    await ctx.send("🔍 최근 7일간의 작품을 분석하며 반응을 집계 중입니다...")
     
     share_channel = ctx.guild.get_channel(WORK_SHARE_CHANNEL_ID)
     if not share_channel:
@@ -512,36 +512,57 @@ async def weekly_best(ctx):
 
     best_message = None
     max_reactions = 0
+    
+    # 최근 7일 기간 지정 (UTC 기준)
+    one_week_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
-    async for message in share_channel.history(limit=100):
-        if message.author.bot:
+    async for message in share_channel.history(limit=200):
+        # 봇 메시지 및 7일 이전 메시지 제외
+        if message.author.bot or message.created_at < one_week_ago:
             continue
             
-        total_reactions = sum(reaction.count for reaction in message.reactions)
-        
+        # 순수 유저 반응수 집계 (봇 반응 제외)
+        total_reactions = 0
+        for reaction in message.reactions:
+            count = reaction.count
+            async for user in reaction.users():
+                if user.bot:
+                    count -= 1
+            total_reactions += max(0, count)
+
         if total_reactions > max_reactions:
             max_reactions = total_reactions
             best_message = message
 
     if best_message is None or max_reactions == 0:
-        return await ctx.send("❌ 최근 올라온 작품 중 반응이 있는 게시글이 없습니다.")
+        return await ctx.send("❌ 최근 7일 내 작성된 작품 중 유저 반응이 있는 게시글이 없습니다.")
 
     embed = discord.Embed(
         title="🏆 이주의 베스트 작품 선정!",
         description=f"{best_message.author.mention} 님의 작품이 이번 주 명예의 전당에 올랐습니다!\n\n"
-                    f"**💬 받은 반응 수:** `{max_reactions}개`\n"
+                    f"**💬 순수 유저 반응 수:** `{max_reactions}개`\n"
                     f"[👉 원본 게시글 보러가기]({best_message.jump_url})",
         color=discord.Color.gold(),
         timestamp=datetime.now()
     )
     
+    # 이미지 첨부파일 판별
+    image_url = None
     if best_message.attachments:
-        embed.set_image(url=best_message.attachments[0].url)
+        for att in best_message.attachments:
+            if att.content_type and att.content_type.startswith("image/"):
+                image_url = att.url
+                break
+            elif att.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                image_url = att.url
+                break
+
+    if image_url:
+        embed.set_image(url=image_url)
     elif best_message.content:
         embed.add_field(name="작품 내용 요약", value=best_message.content[:100] + "...", inline=False)
 
     embed.set_footer(text="매주 최고의 퀄리티를 보여준 분께 영광을!")
-    
     await ctx.send(embed=embed)
 
 
