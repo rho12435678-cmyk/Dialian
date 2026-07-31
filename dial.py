@@ -232,15 +232,16 @@ async def show_points(ctx, member: discord.Member = None):
     target = member or ctx.author
     points = await get_user_points(target.id)
 
-    if points >= 500:
+    # 1000P 목표에 맞춰 티어 세분화 적용
+    if points >= 1000:
         tier_icon = "🥇"
         tier_name = "골드 (최상위 VVIP 단골)"
         color = discord.Color.gold()
-    elif points >= 300:
+    elif points >= 500:
         tier_icon = "🥈"
         tier_name = "실버 (단골 유망주)"
         color = discord.Color.light_grey()
-    elif points >= 100:
+    elif points >= 200:
         tier_icon = "🥉"
         tier_name = "브론즈"
         color = discord.Color.dark_orange()
@@ -262,18 +263,18 @@ async def show_points(ctx, member: discord.Member = None):
     
     embed.add_field(
         name="현재 포인트",
-        value=f"`{points} P` / (골드 기준: `500 P`)",
+        value=f"`{points} P` / (골드 기준: `1000 P`)",
         inline=False
     )
 
-    if points >= 500:
+    if points >= 1000:
         embed.add_field(
             name="🎁 해제된 최고 혜택",
             value="✅ **골드 단골 손님 (모든 커미션 15% 자동 할인 적용 중)**",
             inline=False
         )
     else:
-        remaining = 500 - points
+        remaining = 1000 - points
         embed.add_field(
             name="승급까지 남은 길",
             value=f"최고 등급 **골드(단골 15% 할인)**까지 **{remaining} P** 남았습니다!",
@@ -1132,7 +1133,7 @@ async def close_ticket_by_command(ctx):
             value=summary["participants"],
             inline=False
         )
-        log_embed.set_footer(text="개인정보는 저장되지 않았증니다.")
+        log_embed.set_footer(text="개인정보는 저장되지 않았습니다.")
 
         await log_channel.send(
             content=(
