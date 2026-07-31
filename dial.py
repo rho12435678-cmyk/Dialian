@@ -40,6 +40,7 @@ from database.views.ticket_view import TicketOpenView
 from database.views.verify_view import VerifyView
 
 TOKEN = os.getenv("TOKEN")
+POINT_RANKING_CHANNEL_ID = 1532599012316938321  # 랭킹 패널 전용 채널 ID
 
 
 def get_bot_version():
@@ -88,6 +89,90 @@ async def claim_once(table_name, message_id):
 @bot.check
 async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
+
+
+# ==================== [포인트 랭킹 전용 DB 및 헬퍼] ====================
+
+async def init_ranking_db():
+    """랭킹 패널 정보 및 월간 초기화 로그 DB 테이블 생성"""
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS point_ranking_panel (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                channel_id INTEGER,
+                message_id INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS point_reset_logs (
+                year_month TEXT PRIMARY KEY
+            )
+        """)
+        await db.commit()
+
+
+async def build_point_ranking_embed(guild):
+    """TOP 10 포인트 랭킹 임베드 생성"""
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("""
+            SELECT user_id, points 
+            FROM user_points 
+            ORDER BY points DESC 
+            LIMIT 10
+        """)
+        rows = await cursor.fetchall()
+
+    embed = discord.Embed(
+        title="🏆 Dialian 포인트 랭킹 (TOP 10)",
+        description="6시간마다 실시간으로 동기화되는 포인트 순위입니다! ✨\n*(매월 1일 00시에 포인트가 초기화됩니다)*",
+        color=discord.Color.gold(),
+        timestamp=datetime.now()
+    )
+
+    if not rows:
+        embed.add_field(name="📊 순위 정보", value="아직 적립된 포인트 데이터가 없습니다.", inline=False)
+    else:
+        medals = ["🥇 1위", "🥈 2위", "🥉 3위"]
+        ranking_list = []
+        
+        for idx, (user_id, points) in enumerate(rows, start=1):
+            member = guild.get_member(user_id) if guild else None
+            user_display = member.mention if member else f"알 수 없는 유저(`{user_id}`)"
+            rank_tag = medals[idx - 1] if idx <= 3 else f"**{idx}위**"
+            ranking_list.append(f"{rank_tag} | {user_display} — **`{points:,} P`**")
+
+        embed.add_field(
+            name="📊 실시간 TOP 10",
+            value="\n".join(ranking_list),
+            inline=False
+        )
+
+    embed.set_footer(text="자동 동기화: 6시간 주기 | 매월 1일 포인트 초기화")
+    return embed
+
+
+async def update_point_ranking_message(bot_instance):
+    """랭킹 패널 메시지 갱신"""
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("SELECT channel_id, message_id FROM point_ranking_panel WHERE id = 1")
+        row = await cursor.fetchone()
+
+    if not row:
+        return
+
+    channel_id, message_id = row
+    channel = bot_instance.get_channel(channel_id)
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(message_id)
+        embed = await build_point_ranking_embed(channel.guild)
+        await message.edit(embed=embed)
+    except discord.NotFound:
+        print("[랭킹 패널] 메시지를 찾을 수 없습니다.")
+    except Exception as e:
+        print(f"[랭킹 패널 갱신 오류] {e}")
 
 
 # ==================== [채널 유효성 검사 헬퍼] ====================
@@ -216,8 +301,8 @@ async def command_list(ctx):
             "`!뽑기` - 20P 소모 (밸런스 패치 완료)\n"
             "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 약 1.95배!\n"
             "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 최대 1.3배!\n\n"
-            "**[명예 및 베스트]**\n"
-            "`!주간베스트` (최근 7일간의 명예의 전당 집계)"
+            "**[명예 및 랭킹]**\n"
+            "`!포인트랭킹` (포인트 랭킹 채널에서 1회 입력 시 자동 갱신 패널 생성)"
         ),
         color=discord.Color.blurple(),
     )
@@ -296,7 +381,6 @@ async def point_gacha(ctx):
     
     await add_user_points(ctx.guild, ctx.author, -cost)
     
-    # [밸런스 개선] 꽝(2P) 확률 85% -> 60% 하향, 10P 구간 추가
     prizes = [2, 10, 20, 30, 50, 100, 300]
     weights = [60, 15, 15, 6, 3, 0.9, 0.1]
     result = random.choices(prizes, weights=weights, k=1)[0]
@@ -363,7 +447,6 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
         result = "lose"
 
     if result == "win":
-        # 승리 시 수수료 5% 차감 후 1.95배 지급
         win_profit = int(bet * 0.95)
         await add_user_points(ctx.guild, ctx.author, win_profit)
         final_points = await get_user_points(ctx.author.id)
@@ -380,7 +463,6 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
             color=discord.Color.light_grey()
         )
     else:
-        # 패배 시 전액 손실 (포인트 무한 복사 방지)
         await add_user_points(ctx.guild, ctx.author, -bet)
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
@@ -501,69 +583,35 @@ async def reset_points(ctx, member: discord.Member):
     await ctx.send(f"🔄 {member.mention} 님의 포인트를 `0 P`로 초기화했습니다.")
 
 
-@bot.command(name="주간베스트", aliases=["명예의전당"])
+# ==================== [포인트 랭킹 패널 생성 명령어] ====================
+
+@bot.command(name="포인트랭킹", aliases=["랭킹패널", "주간베스트", "명예의전당"])
 @commands.has_permissions(administrator=True)
-async def weekly_best(ctx):
-    await ctx.send("🔍 최근 7일간의 작품을 분석하며 반응을 집계 중입니다...")
-    
-    share_channel = ctx.guild.get_channel(WORK_SHARE_CHANNEL_ID)
-    if not share_channel:
-        return await ctx.send("❌ 작품 공유 채널을 찾을 수 없습니다.")
+async def setup_point_ranking(ctx):
+    """지정된 포인트 랭킹 채널에서 1회 실행하여 고정 패널 생성"""
+    if ctx.channel.id != POINT_RANKING_CHANNEL_ID:
+        return await ctx.send(
+            f"❌ 이 명령어는 <#{POINT_RANKING_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.",
+            delete_after=5
+        )
 
-    best_message = None
-    max_reactions = 0
-    
-    # 최근 7일 기간 지정 (UTC 기준)
-    one_week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    embed = await build_point_ranking_embed(ctx.guild)
+    msg = await ctx.send(embed=embed)
 
-    async for message in share_channel.history(limit=200):
-        # 봇 메시지 및 7일 이전 메시지 제외
-        if message.author.bot or message.created_at < one_week_ago:
-            continue
-            
-        # 순수 유저 반응수 집계 (봇 반응 제외)
-        total_reactions = 0
-        for reaction in message.reactions:
-            count = reaction.count
-            async for user in reaction.users():
-                if user.bot:
-                    count -= 1
-            total_reactions += max(0, count)
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            INSERT INTO point_ranking_panel (id, channel_id, message_id)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                message_id = excluded.message_id
+        """, (ctx.channel.id, msg.id))
+        await db.commit()
 
-        if total_reactions > max_reactions:
-            max_reactions = total_reactions
-            best_message = message
-
-    if best_message is None or max_reactions == 0:
-        return await ctx.send("❌ 최근 7일 내 작성된 작품 중 유저 반응이 있는 게시글이 없습니다.")
-
-    embed = discord.Embed(
-        title="🏆 이주의 베스트 작품 선정!",
-        description=f"{best_message.author.mention} 님의 작품이 이번 주 명예의 전당에 올랐습니다!\n\n"
-                    f"**💬 순수 유저 반응 수:** `{max_reactions}개`\n"
-                    f"[👉 원본 게시글 보러가기]({best_message.jump_url})",
-        color=discord.Color.gold(),
-        timestamp=datetime.now()
-    )
-    
-    # 이미지 첨부파일 판별
-    image_url = None
-    if best_message.attachments:
-        for att in best_message.attachments:
-            if att.content_type and att.content_type.startswith("image/"):
-                image_url = att.url
-                break
-            elif att.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                image_url = att.url
-                break
-
-    if image_url:
-        embed.set_image(url=image_url)
-    elif best_message.content:
-        embed.add_field(name="작품 내용 요약", value=best_message.content[:100] + "...", inline=False)
-
-    embed.set_footer(text="매주 최고의 퀄리티를 보여준 분께 영광을!")
-    await ctx.send(embed=embed)
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
 
 
 @bot.command(name="업데이트확인", aliases=["봇상태"])
@@ -1473,6 +1521,8 @@ def get_command_usage(ctx):
     return usage
 
 
+# ==================== [자동 반복 태스크 (6시간 동기화 & 매월 초기화)] ====================
+
 @tasks.loop(minutes=30)
 async def monthly_stats_updater():
     try:
@@ -1483,6 +1533,43 @@ async def monthly_stats_updater():
 
 @monthly_stats_updater.before_loop
 async def before_monthly_stats_updater():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(hours=6)
+async def point_ranking_updater():
+    """6시간마다 포인트 TOP 10 랭킹 패널 자동 수정"""
+    await update_point_ranking_message(bot)
+
+
+@point_ranking_updater.before_loop
+async def before_point_ranking_updater():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(hours=1)
+async def monthly_point_reset_task():
+    """매월 1일 포인트 0P 초기화 및 패널 갱신 태스크"""
+    now = datetime.now()
+    if now.day == 1:
+        current_ym = now.strftime("%Y-%m")
+        async with aiosqlite.connect(DATABASE) as db:
+            cursor = await db.execute("SELECT year_month FROM point_reset_logs WHERE year_month = ?", (current_ym,))
+            already_reset = await cursor.fetchone()
+
+            if not already_reset:
+                await db.execute("UPDATE user_points SET points = 0")
+                await db.execute("INSERT INTO point_reset_logs (year_month) VALUES (?)", (current_ym,))
+                await db.commit()
+
+                print(f"[{current_ym}] 🔄 매월 1일 포인트가 성공적으로 초기화되었습니다.")
+
+                # 초기화된 데이터로 랭킹 패널 즉시 새로고침
+                await update_point_ranking_message(bot)
+
+
+@monthly_point_reset_task.before_loop
+async def before_monthly_point_reset_task():
     await bot.wait_until_ready()
 
 
@@ -1590,6 +1677,7 @@ async def on_ready():
     global daily_notice, persistent_views_registered, update_notice_sent
 
     await create_tables()
+    await init_ranking_db()  # 포인트 랭킹 DB 테이블 생성
 
     print("on_ready")
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
@@ -1611,6 +1699,12 @@ async def on_ready():
 
     if not monthly_stats_updater.is_running():
         monthly_stats_updater.start()
+
+    if not point_ranking_updater.is_running():
+        point_ranking_updater.start()
+
+    if not monthly_point_reset_task.is_running():
+        monthly_point_reset_task.start()
 
     try:
         await update_monthly_stats_message(bot)
