@@ -159,43 +159,49 @@ class StarRatingView(discord.ui.View):
             text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏"
         )
 
-        sent_review = await review_channel.send(embed=review_embed)
-
         designer_id = self.designer_id or await find_designer_id_from_ticket(
             channel
         )
         print(f"[REVIEW] designer_id = {designer_id}")
 
-        # ==========================
-        # SQLite 저장
-        # ==========================
+        if not isinstance(channel, discord.TextChannel):
+          return await interaction.followup.send(
+              "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
+          )
 
-        if designer_id:
+        async with aiosqlite.connect(DATABASE) as db:
+          cursor = await db.execute(
+              """
+              INSERT OR IGNORE INTO reviews(
+                  ticket_channel, developer_id, customer_id, stars, review, created_at
+              )
+              VALUES(?,?,?,?,?,?)
+              """,
+              (
+                  channel.id,
+                  designer_id,
+                  interaction.user.id,
+                  stars,
+                  "",
+                  datetime.now().isoformat(),
+              ),
+          )
+          await db.commit()
 
+        if cursor.rowcount != 1:
+          return await interaction.followup.send(
+              "이 티켓에는 이미 후기가 등록되었습니다.", ephemeral=True
+          )
+
+        try:
+          sent_review = await review_channel.send(embed=review_embed)
+        except discord.HTTPException:
           async with aiosqlite.connect(DATABASE) as db:
-
             await db.execute(
-                """
-                            INSERT INTO reviews(
-                                developer_id,
-                                customer_id,
-                                stars,
-                                review,
-                                created_at
-                            )
-                            VALUES(?,?,?,?,?)
-                            """,
-                (
-                    designer_id,
-                    interaction.user.id,
-                    stars,
-                    "",
-                    datetime.now().isoformat(),
-                ),
+                "DELETE FROM reviews WHERE ticket_channel = ?", (channel.id,)
             )
-
             await db.commit()
-            print("[REVIEW] DB 저장 완료")
+          raise
 
         # ==========================
         # 역할 지급 처리

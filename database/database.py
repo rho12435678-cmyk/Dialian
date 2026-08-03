@@ -102,12 +102,33 @@ async def create_tables():
         await db.execute("""
         CREATE TABLE IF NOT EXISTS reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_channel INTEGER,
             developer_id INTEGER,
             customer_id INTEGER,
             stars INTEGER,
             review TEXT,
             created_at TEXT
         )
+        """)
+
+        try:
+            await db.execute("ALTER TABLE reviews ADD COLUMN ticket_channel INTEGER")
+        except aiosqlite.OperationalError:
+            pass
+
+        await db.execute("""
+        DELETE FROM reviews
+        WHERE ticket_channel IS NOT NULL
+          AND id NOT IN (
+              SELECT MIN(id)
+              FROM reviews
+              WHERE ticket_channel IS NOT NULL
+              GROUP BY ticket_channel
+          )
+        """)
+        await db.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_ticket_channel
+        ON reviews(ticket_channel)
         """)
 
         # =========================================================

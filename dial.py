@@ -294,7 +294,9 @@ async def command_list(ctx):
             "**[티켓 및 일반 서비스]**\n"
             "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널`\n"
             "`!진행 0|25|50|75|100` `!예상 1일|2일|3일` `!완료` `!청소 1~100`\n"
-            "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n\n"
+            "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n"
+            "`!진행티켓` `!통계수정 티켓ID 진행중|완료|취소 [진행률]`\n"
+            "`!진행티켓종료 티켓ID` `!진행티켓삭제 티켓ID`\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
@@ -1007,6 +1009,138 @@ async def sync_existing_tickets(ctx):
             f"실패: {skipped}개"
         )
     )
+
+
+@bot.command(name="진행티켓", aliases=["진행목록", "티켓목록"])
+async def list_active_tickets(ctx):
+    member = ctx.guild.get_member(ctx.author.id) if ctx.guild else None
+    is_admin = bool(member and member.guild_permissions.administrator)
+
+    if not member or (not is_admin and not has_designer_role(member)):
+        return await ctx.send("❌ 관리자 또는 디자이너만 사용할 수 있습니다.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        query = """
+            SELECT ticket_channel, customer_id, designer_id, category, progress, updated_at
+            FROM commissions
+            WHERE status NOT IN ('completed', 'cancelled')
+        """
+        params = []
+
+        if not is_admin:
+            query += " AND designer_id = ?"
+            params.append(ctx.author.id)
+
+        query += " ORDER BY updated_at DESC LIMIT 25"
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+
+    if not rows:
+        return await ctx.send("📭 진행 중인 티켓이 없습니다.")
+
+    lines = []
+    for ticket_id, customer_id, designer_id, category, progress, updated_at in rows:
+        channel = ctx.guild.get_channel(ticket_id)
+        channel_text = channel.mention if channel else f"삭제됨 (`{ticket_id}`)"
+        customer_text = f"<@{customer_id}>" if customer_id else "알 수 없음"
+        designer_text = f"<@{designer_id}>" if designer_id else "미배정"
+        lines.append(
+            f"• {channel_text} | {category} | {progress or 0}%\n"
+            f"  고객: {customer_text} / 담당: {designer_text} / ID: `{ticket_id}`"
+        )
+
+    embed = discord.Embed(
+        title=f"📋 진행 중 티켓 ({len(rows)}개)",
+        description="\n".join(lines),
+        color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="통계수정")
+@commands.has_permissions(administrator=True)
+async def edit_commission_stats(ctx, ticket_id: int, status: str, progress: int = None):
+    status_map = {
+        "진행": "in_progress",
+        "진행중": "in_progress",
+        "완료": "completed",
+        "취소": "cancelled",
+    }
+    normalized_status = status_map.get(status.strip())
+
+    if normalized_status is None:
+        return await ctx.send("사용법: `!통계수정 <티켓ID> 진행중|완료|취소 [진행률]`")
+
+    if progress is not None and not 0 <= progress <= 100:
+        return await ctx.send("진행률은 0~100 사이의 숫자로 입력해주세요.")
+
+    if progress is None:
+        progress = 100 if normalized_status == "completed" else 0
+
+    now = datetime.now().isoformat()
+    completed_at = now if normalized_status == "completed" else None
+
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM commissions WHERE ticket_channel = ?", (ticket_id,)
+        )
+        if await cursor.fetchone() is None:
+            return await ctx.send("❌ 해당 티켓의 통계 기록을 찾지 못했습니다.")
+
+        await db.execute(
+            """
+            UPDATE commissions
+            SET status = ?, progress = ?, completed_at = ?, updated_at = ?
+            WHERE ticket_channel = ?
+            """,
+            (normalized_status, progress, completed_at, now, ticket_id),
+        )
+        await db.commit()
+
+    await update_monthly_stats_message(bot)
+    await ctx.send(
+        f"✅ 통계를 수정했습니다. ID: `{ticket_id}` / 상태: {status} / 진행률: {progress}%"
+    )
+
+
+async def manage_active_ticket_by_id(ctx, ticket_id: int, action: str):
+    channel = ctx.guild.get_channel(ticket_id) if ctx.guild else None
+
+    if not is_ticket_channel(channel):
+        return await ctx.send("❌ 진행 중인 티켓 채널을 찾지 못했습니다.")
+
+    designer_id = await find_ticket_designer_id(channel)
+    member = ctx.guild.get_member(ctx.author.id)
+
+    if not can_manage_ticket(member, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 처리할 수 있습니다.")
+
+    if action == "close":
+        designer = await fetch_member_or_none(ctx.guild, designer_id)
+        if designer:
+            await delete_ticket_dm_messages(bot.user, designer, channel)
+
+        await update_commission_progress(channel, 100)
+        await channel.send(f"🔒 {ctx.author.mention}님이 관리 명령으로 티켓을 종료했습니다.")
+        await archive_ticket_channel(channel)
+        result = "종료하고 보관함으로 이동했습니다."
+    else:
+        await channel.send(f"🗑️ {ctx.author.mention}님이 관리 명령으로 티켓을 삭제합니다.")
+        await delete_ticket_channel(channel, ctx.author)
+        result = "삭제하고 통계를 취소 처리했습니다."
+
+    await update_monthly_stats_message(bot)
+    await ctx.send(f"✅ 티켓 `{ticket_id}`을(를) {result}")
+
+
+@bot.command(name="진행티켓종료", aliases=["목록티켓종료"])
+async def close_active_ticket_by_id(ctx, ticket_id: int):
+    await manage_active_ticket_by_id(ctx, ticket_id, "close")
+
+
+@bot.command(name="진행티켓삭제", aliases=["목록티켓삭제"])
+async def delete_active_ticket_by_id(ctx, ticket_id: int):
+    await manage_active_ticket_by_id(ctx, ticket_id, "delete")
 
 
 @bot.command(name="계좌등록")
