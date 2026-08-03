@@ -285,9 +285,6 @@ async def on_raw_reaction_add(payload):
 
 @bot.command(name="명령어", aliases=["help", "도움말"])
 async def command_list(ctx):
-    if not await check_command_channel(ctx):
-        return
-
     embed = discord.Embed(
         title="Dialian 명령어 목록",
         description=(
