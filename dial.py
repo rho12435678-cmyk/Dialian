@@ -78,6 +78,11 @@ async def claim_once(table_name, message_id):
         raise ValueError("허용되지 않은 처리 기록 테이블입니다.")
 
     async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                message_id INTEGER PRIMARY KEY
+            )
+        """)
         cursor = await db.execute(
             f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
             (message_id,)
@@ -1149,7 +1154,17 @@ async def register_bank(
     account_number,
     holder
 ):
-    async with aiosqlite.connect("data/dialian.db") as db:
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bank_accounts (
+                developer_id INTEGER PRIMARY KEY,
+                bank_name TEXT,
+                account_number TEXT,
+                holder TEXT
+            )
+            """
+        )
         await db.execute(
             """
             INSERT OR REPLACE INTO bank_accounts(
@@ -1183,24 +1198,25 @@ async def register_bank(
 
 @bot.command(name="계좌삭제")
 @commands.has_permissions(administrator=True)
-async def delete_bank(ctx):
-    async with aiosqlite.connect("data/dialian.db") as db:
+async def delete_bank(ctx, member: discord.Member = None):
+    target = member or ctx.author
+    async with aiosqlite.connect(DATABASE) as db:
         await db.execute(
             """
             DELETE FROM bank_accounts
             WHERE developer_id = ?
             """,
-            (ctx.author.id,)
+            (target.id,)
         )
         await db.commit()
 
-    await ctx.send("✅ 등록된 계좌가 삭제되었습니다.")
+    await ctx.send(f"✅ {target.mention} 님의 등록된 계좌가 삭제되었습니다.")
 
 
 @bot.command(name="계좌목록")
 @commands.has_permissions(administrator=True)
 async def bank_list(ctx):
-    async with aiosqlite.connect("data/dialian.db") as db:
+    async with aiosqlite.connect(DATABASE) as db:
         cursor = await db.execute(
             """
             SELECT
