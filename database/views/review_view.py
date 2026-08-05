@@ -1,10 +1,16 @@
 from datetime import datetime
-import re  # 필수 모듈 추가
+import re  # 정규식 모듈
 import aiosqlite
 import discord
 
+import config
 from config import *
 from database.services.points import add_user_points
+
+# DB 경로 변수 설정 (config에 없을 경우 기본값 적용)
+DATABASE = getattr(
+    config, 'DATABASE', getattr(config, 'DB_PATH', 'database/database.db')
+)
 
 
 def parse_designer_id(text):
