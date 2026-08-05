@@ -1,5 +1,5 @@
 from datetime import datetime
-import re  # 정규식 모듈
+import re
 import aiosqlite
 import discord
 
@@ -7,7 +7,6 @@ import config
 from config import *
 from database.services.points import add_user_points
 
-# DB 경로 변수 설정 (config에 없을 경우 기본값 적용)
 DATABASE = getattr(
     config, 'DATABASE', getattr(config, 'DB_PATH', 'database/database.db')
 )
@@ -91,7 +90,6 @@ class StarRatingView(discord.ui.View):
       ticket_owner = interaction.user
       channel = interaction.channel
 
-      # 티켓 생성자 확인
       if isinstance(channel, discord.TextChannel) and channel.topic:
         try:
           owner_id = int(channel.topic)
@@ -112,7 +110,6 @@ class StarRatingView(discord.ui.View):
             "연동된 서버를 찾을 수 없습니다.", ephemeral=True
         )
 
-      # 후기 채널 검색
       review_channel = discord.utils.get(
           guild.text_channels, name=REVIEW_CHANNEL_NAME
       )
@@ -135,15 +132,25 @@ class StarRatingView(discord.ui.View):
           channel
       )
 
-      # DB 중복 등록 확인
+      # DB 테이블 자동 생성 및 중복 확인
       async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+                    CREATE TABLE IF NOT EXISTS reviews (
+                        ticket_channel INTEGER PRIMARY KEY,
+                        developer_id INTEGER,
+                        customer_id INTEGER,
+                        stars INTEGER,
+                        review TEXT,
+                        created_at TEXT
+                    )
+                """)
         cursor = await db.execute(
             """
-            INSERT OR IGNORE INTO reviews(
-                ticket_channel, developer_id, customer_id, stars, review, created_at
-            )
-            VALUES(?,?,?,?,?,?)
-            """,
+                    INSERT OR IGNORE INTO reviews(
+                        ticket_channel, developer_id, customer_id, stars, review, created_at
+                    )
+                    VALUES(?,?,?,?,?,?)
+                    """,
             (
                 channel.id,
                 designer_id,
@@ -160,7 +167,7 @@ class StarRatingView(discord.ui.View):
             "이 티켓에는 이미 후기가 등록되었습니다.", ephemeral=True
         )
 
-      # 후기 임베드 전송
+      # 후기 임베드 생성 및 전송
       star_emojis = "⭐" * stars
       review_embed = discord.Embed(
           title="✨ 소중한 커미션 후기가 도착했습니다!",
@@ -223,7 +230,6 @@ class StarRatingView(discord.ui.View):
       except Exception as points_err:
         print(f"[후기 포인트 적립 실패] {points_err}")
 
-      # 성공 완료 메시지
       success_view = discord.ui.View()
       success_view.add_item(
           discord.ui.Button(
@@ -240,7 +246,6 @@ class StarRatingView(discord.ui.View):
           ephemeral=True,
       )
 
-      # 버튼 비활성화 처리
       disabled_view = discord.ui.View()
       for i in range(1, 6):
         style = (
