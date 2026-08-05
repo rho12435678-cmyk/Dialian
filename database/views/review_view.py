@@ -1,4 +1,5 @@
 from datetime import datetime
+import re  # 필수 모듈 추가
 import aiosqlite
 import discord
 
@@ -8,10 +9,8 @@ from database.services.points import add_user_points
 
 def parse_designer_id(text):
   match = re.search(r"<@!?(\d+)>", text or "")
-
   if match:
     return int(match.group(1))
-
   return None
 
 
@@ -23,12 +22,10 @@ async def find_designer_id_from_ticket(channel):
     for embed in msg.embeds:
       for field in embed.fields:
         designer_id = parse_designer_id(field.value)
-
         if designer_id:
           return designer_id
 
       designer_id = parse_designer_id(embed.description)
-
       if designer_id:
         return designer_id
 
@@ -82,14 +79,13 @@ class StarRatingView(discord.ui.View):
     await self.process_rating(interaction, 5)
 
   async def process_rating(self, interaction: discord.Interaction, stars: int):
-
     try:
-
       await interaction.response.defer(ephemeral=True)
 
       ticket_owner = interaction.user
       channel = interaction.channel
 
+      # 티켓 생성자 확인
       if isinstance(channel, discord.TextChannel) and channel.topic:
         try:
           owner_id = int(channel.topic)
@@ -102,190 +98,166 @@ class StarRatingView(discord.ui.View):
               ephemeral=True,
           )
 
-      guild = None
-
-      for g in interaction.client.guilds:
-
-        if discord.utils.get(g.text_channels, name=REVIEW_CHANNEL_NAME):
-          guild = g
-          break
-
-      if guild is None:
-
-        guild = (
-            interaction.client.guilds[0] if interaction.client.guilds else None
-        )
-
+      guild = interaction.guild or (
+          interaction.client.guilds[0] if interaction.client.guilds else None
+      )
       if guild is None:
         return await interaction.followup.send(
             "연동된 서버를 찾을 수 없습니다.", ephemeral=True
         )
 
+      # 후기 채널 검색
       review_channel = discord.utils.get(
           guild.text_channels, name=REVIEW_CHANNEL_NAME
       )
-
       if review_channel is None:
-
         review_channel = next(
             (ch for ch in guild.text_channels if "후기" in ch.name), None
         )
 
-      if review_channel:
-
-        star_emojis = "⭐" * stars
-
-        review_embed = discord.Embed(
-            title="✨ 소중한 커미션 후기가 도착했습니다!",
-            color=0xFEE75C,
-            timestamp=datetime.now(),
-        )
-
-        review_embed.set_thumbnail(url=ticket_owner.display_avatar.url)
-
-        review_embed.add_field(
-            name="👤 작성자(오너)",
-            value=f"{ticket_owner.mention} ({ticket_owner.name})",
-            inline=True,
-        )
-
-        review_embed.add_field(
-            name="📊 만족도 별점",
-            value=f"**{star_emojis} ({stars} / 5점)**",
-            inline=True,
-        )
-
-        review_embed.set_footer(
-            text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏"
-        )
-
-        designer_id = self.designer_id or await find_designer_id_from_ticket(
-            channel
-        )
-        print(f"[REVIEW] designer_id = {designer_id}")
-
-        if not isinstance(channel, discord.TextChannel):
-          return await interaction.followup.send(
-              "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
-          )
-
-        async with aiosqlite.connect(DATABASE) as db:
-          cursor = await db.execute(
-              """
-              INSERT OR IGNORE INTO reviews(
-                  ticket_channel, developer_id, customer_id, stars, review, created_at
-              )
-              VALUES(?,?,?,?,?,?)
-              """,
-              (
-                  channel.id,
-                  designer_id,
-                  interaction.user.id,
-                  stars,
-                  "",
-                  datetime.now().isoformat(),
-              ),
-          )
-          await db.commit()
-
-        if cursor.rowcount != 1:
-          return await interaction.followup.send(
-              "이 티켓에는 이미 후기가 등록되었습니다.", ephemeral=True
-          )
-
-        try:
-          sent_review = await review_channel.send(embed=review_embed)
-        except discord.HTTPException:
-          async with aiosqlite.connect(DATABASE) as db:
-            await db.execute(
-                "DELETE FROM reviews WHERE ticket_channel = ?", (channel.id,)
-            )
-            await db.commit()
-          raise
-
-        # ==========================
-        # 역할 지급 처리
-        # ==========================
-
-        role_notice = ""
-
-        try:
-          buyer_role = guild.get_role(BUYER_ROLE_ID)
-          buyer_member = guild.get_member(interaction.user.id)
-
-          if (
-              buyer_member
-              and buyer_role
-              and buyer_role not in buyer_member.roles
-          ):
-            await buyer_member.add_roles(
-                buyer_role, reason="별점 후기 제출 후 구매자 역할 지급"
-            )
-            role_notice = "\n✅ 구매자 역할이 지급되었습니다."
-
-        except Exception as role_err:
-          print(f"[구매자 역할 지급 실패] {role_err}")
-
-        # ==========================
-        # 후기 작성 포인트 적립 (1~5점 모두 동일하게 30P 지급)
-        # ==========================
-
-        points_notice = ""
-        try:
-          points_to_add = 30  # 1점부터 5점까지 모두 고정 30포인트 지급
-          new_total = await add_user_points(
-              guild, interaction.user, points_to_add
-          )
-          points_notice = (
-              f"\n🪙 **{points_to_add} P**가 적립되었습니다! (현재:"
-              f" `{new_total} P`)"
-          )
-        except Exception as points_err:
-          print(f"[후기 포인트 적립 실패] {points_err}")
-
-        success_view = discord.ui.View()
-
-        success_view.add_item(
-            discord.ui.Button(
-                label="😄 내가 쓴 후기 보러가기",
-                url=sent_review.jump_url,
-                style=discord.ButtonStyle.link,
-            )
-        )
-
-        await interaction.followup.send(
-            f"🎉 성공적으로 **{stars}점** 별점이"
-            f" 제출되었습니다!{points_notice}{role_notice}",
-            view=success_view,
-            ephemeral=True,
-        )
-
-        disabled_view = discord.ui.View()
-
-        for i in range(1, 6):
-
-          style = (
-              discord.ButtonStyle.success
-              if i == 5
-              else discord.ButtonStyle.secondary
-          )
-
-          disabled_view.add_item(
-              discord.ui.Button(
-                  label=f"⭐ {i}점",
-                  style=style,
-                  custom_id=f"star_{i}",
-                  disabled=True,
-              )
-          )
-
-        await interaction.message.edit(view=disabled_view)
-
-      else:
-
-        await interaction.followup.send(
+      if not review_channel:
+        return await interaction.followup.send(
             "후기 채널을 찾을 수 없습니다.", ephemeral=True
         )
 
+      if not isinstance(channel, discord.TextChannel):
+        return await interaction.followup.send(
+            "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
+        )
+
+      designer_id = self.designer_id or await find_designer_id_from_ticket(
+          channel
+      )
+
+      # DB 중복 등록 확인
+      async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(
+            """
+            INSERT OR IGNORE INTO reviews(
+                ticket_channel, developer_id, customer_id, stars, review, created_at
+            )
+            VALUES(?,?,?,?,?,?)
+            """,
+            (
+                channel.id,
+                designer_id,
+                interaction.user.id,
+                stars,
+                "",
+                datetime.now().isoformat(),
+            ),
+        )
+        await db.commit()
+
+      if cursor.rowcount != 1:
+        return await interaction.followup.send(
+            "이 티켓에는 이미 후기가 등록되었습니다.", ephemeral=True
+        )
+
+      # 후기 임베드 전송
+      star_emojis = "⭐" * stars
+      review_embed = discord.Embed(
+          title="✨ 소중한 커미션 후기가 도착했습니다!",
+          color=0xFEE75C,
+          timestamp=datetime.now(),
+      )
+      review_embed.set_thumbnail(url=ticket_owner.display_avatar.url)
+      review_embed.add_field(
+          name="👤 작성자(오너)",
+          value=f"{ticket_owner.mention} ({ticket_owner.name})",
+          inline=True,
+      )
+      review_embed.add_field(
+          name="📊 만족도 별점",
+          value=f"**{star_emojis} ({stars} / 5점)**",
+          inline=True,
+      )
+      review_embed.set_footer(
+          text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏"
+      )
+
+      try:
+        sent_review = await review_channel.send(embed=review_embed)
+      except discord.HTTPException:
+        async with aiosqlite.connect(DATABASE) as db:
+          await db.execute(
+              "DELETE FROM reviews WHERE ticket_channel = ?", (channel.id,)
+          )
+          await db.commit()
+        raise
+
+      # 역할 지급
+      role_notice = ""
+      try:
+        buyer_role = guild.get_role(BUYER_ROLE_ID)
+        buyer_member = guild.get_member(interaction.user.id)
+        if (
+            buyer_member
+            and buyer_role
+            and buyer_role not in buyer_member.roles
+        ):
+          await buyer_member.add_roles(
+              buyer_role, reason="별점 후기 제출 후 구매자 역할 지급"
+          )
+          role_notice = "\n✅ 구매자 역할이 지급되었습니다."
+      except Exception as role_err:
+        print(f"[구매자 역할 지급 실패] {role_err}")
+
+      # 포인트 적립
+      points_notice = ""
+      try:
+        points_to_add = 30
+        new_total = await add_user_points(
+            guild, interaction.user, points_to_add
+        )
+        points_notice = (
+            f"\n🪙 **{points_to_add} P**가 적립되었습니다! (현재: `{new_total}`"
+            " P)"
+        )
+      except Exception as points_err:
+        print(f"[후기 포인트 적립 실패] {points_err}")
+
+      # 성공 완료 메시지
+      success_view = discord.ui.View()
+      success_view.add_item(
+          discord.ui.Button(
+              label="😄 내가 쓴 후기 보러가기",
+              url=sent_review.jump_url,
+              style=discord.ButtonStyle.link,
+          )
+      )
+
+      await interaction.followup.send(
+          f"🎉 성공적으로 **{stars}점** 별점이"
+          f" 제출되었습니다!{points_notice}{role_notice}",
+          view=success_view,
+          ephemeral=True,
+      )
+
+      # 버튼 비활성화 처리
+      disabled_view = discord.ui.View()
+      for i in range(1, 6):
+        style = (
+            discord.ButtonStyle.success
+            if i == 5
+            else discord.ButtonStyle.secondary
+        )
+        disabled_view.add_item(
+            discord.ui.Button(
+                label=f"⭐ {i}점",
+                style=style,
+                custom_id=f"star_{i}",
+                disabled=True,
+            )
+        )
+
+      await interaction.message.edit(view=disabled_view)
+
     except Exception as e:
       print(f"[별점 등록 에러] {e}")
+      try:
+        await interaction.followup.send(
+            f"❌ 후기 처리 중 오류가 발생했습니다: {e}", ephemeral=True
+        )
+      except Exception:
+        pass
