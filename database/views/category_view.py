@@ -3,9 +3,42 @@ from discord import ui
 import aiosqlite
 from database.database import DATABASE
 
-# ==================== [참고자료 안내 헬퍼 함수] ====================
-async def send_reference_guide(channel: discord.TextChannel, user: discord.User):
-    embed = discord.Embed(
+# ==================== [티켓 오픈 시 안내/진행/참고자료 임베드 동시 전송 함수] ====================
+async def send_ticket_guides(channel: discord.TextChannel, user: discord.User):
+    # 1. 안내 사항 임베드
+    guide_embed = discord.Embed(
+        title="📌 커미션 안내 사항",
+        description=(
+            "**기본 안내**\n"
+            "1. 가격 협상(네고) 안됨\n"
+            "2. 작업 중 과도한 수정요청 삼가\n"
+            "3. 모든 커미션은 선 결제 후 작업을 원칙으로 함\n"
+            "4. 커미션 중 철회 시 수수료 부담\n\n"
+            "**철회 수수료**\n"
+            "작업 전 철회 : 전액 환불\n\n"
+            "작업 후 철회 :\n"
+            "상급 : 3,000원\n"
+            "중급 : 2,000원\n"
+            "초급 : 1,500원\n\n"
+            "복장 커미션 : 1,500원"
+        ),
+        color=0xFEE75C
+    )
+
+    # 2. 커미션 진행 임베드
+    progress_embed = discord.Embed(
+        title="📌 커미션 진행",
+        description=(
+            "👨‍💻 담당 디자이너 : 미배정\n\n"
+            "📌 상태 : 🟢 상담중\n"
+            "📊 진행률 : 0%\n"
+            "⏰ 예상 완료 : 작업 시작 전"
+        ),
+        color=0x5865F2
+    )
+
+    # 3. 참고 자료 안내 임베드
+    ref_embed = discord.Embed(
         title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
         description=(
             f"{user.mention}님, 디자이너가 원하시는 스타일을 명확히 파악할 수 있도록\n"
@@ -13,8 +46,10 @@ async def send_reference_guide(channel: discord.TextChannel, user: discord.User)
         ),
         color=0x5865F2
     )
-    embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
-    await channel.send(embed=embed)
+    ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
+
+    # 세 개의 임베드를 한 번에 전송
+    await channel.send(embeds=[guide_embed, progress_embed, ref_embed])
 
 
 # ==================== [커미션 신청 모달] ====================
@@ -44,6 +79,8 @@ class CustomCommissionModal(ui.Modal):
             )
             self.add_item(self.gfx_genre)
 
+        # 묶음 타입별 상세 요구사항 입력란 분기
+        self.fourth_details = None
         if bundle_type == "단품 (1개)":
             self.details = ui.TextInput(
                 label="🖌️ 원하는 스타일 및 설명",
@@ -52,19 +89,40 @@ class CustomCommissionModal(ui.Modal):
                 required=True,
                 max_length=1000
             )
-        else:
+            self.add_item(self.details)
+        elif bundle_type == "2+1 묶음":
             self.details = ui.TextInput(
-                label="📝 제작 순서별 상세 요구사항",
+                label="📝 제작 순서별 상세 요구사항 (총 3개)",
                 style=discord.TextStyle.paragraph,
                 placeholder=(
                     "우선적으로 제작되길 원하는 순서대로 작성해주세요:\n"
                     "1번째 작품: (의상/구도/콘셉트)\n"
-                    "2번째 작품: (의상/구도/콘셉트)"
+                    "2번째 작품: (의상/구도/콘셉트)\n"
+                    "3번째 작품: (의상/구도/콘셉트)"
                 ),
                 required=True,
                 max_length=1000
             )
-        self.add_item(self.details)
+            self.add_item(self.details)
+        else: # 3+1 묶음
+            self.details = ui.TextInput(
+                label="📝 1~3번째 작품 상세 요구사항",
+                style=discord.TextStyle.paragraph,
+                placeholder="1, 2, 3번째 작품에 대한 상세 요구사항을 적어주세요.",
+                required=True,
+                max_length=1000
+            )
+            self.add_item(self.details)
+
+            # 3+1 묶음일 때 4번째 작품 입력란 분리 추가
+            self.fourth_details = ui.TextInput(
+                label="🎁 4번째 작품 요구사항 (3+1 보너스)",
+                style=discord.TextStyle.paragraph,
+                placeholder="4번째 작품에 대한 요구사항이나 추가 설명을 적어주세요.",
+                required=True,
+                max_length=1000
+            )
+            self.add_item(self.fourth_details)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -72,6 +130,7 @@ class CustomCommissionModal(ui.Modal):
         guild = interaction.guild
         channel_name = f"티켓-{interaction.user.name}"
         
+        # 권한 설정: 일반 유저 차단, 유저/봇/디자이너 허용
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -103,8 +162,15 @@ class CustomCommissionModal(ui.Modal):
             
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
 
+        # 3+1 묶음일 경우 4번째 작품 내용 추가 표시
+        if self.fourth_details:
+            embed.add_field(name="🎁 4번째 작품 요구사항", value=self.fourth_details.value, inline=False)
+
+        # 티켓 채널에 유저 멘션과 함께 신청서 임베드 전송
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
-        await send_reference_guide(ticket_channel, interaction.user)
+        
+        # 안내/진행/참고자료 임베드 3종 동시 전송 함수 실행
+        await send_ticket_guides(ticket_channel, interaction.user)
 
         now_iso = discord.utils.utcnow().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
@@ -144,6 +210,7 @@ class BundleSelectView(ui.View):
 class CategorySelectView(ui.View):
     def __init__(self, designer_id: int = None):
         super().__init__(timeout=120)
+        self.category = category if 'category' in locals() else None # 안전장치
         self.designer_id = designer_id
 
     @ui.button(label="🎨 GFX", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
