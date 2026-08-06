@@ -22,6 +22,7 @@ class PurchaseModal(discord.ui.Modal):
         self.bundle_type = bundle_type
         self.selected_designer = selected_designer
 
+        # 1. Roblox 닉네임
         self.roblox_nickname = discord.ui.TextInput(
             label="🎮 Roblox 닉네임",
             placeholder="작품에 반영될 로블록스 닉네임을 작성해주세요.",
@@ -30,7 +31,7 @@ class PurchaseModal(discord.ui.Modal):
         )
         self.add_item(self.roblox_nickname)
 
-        # 문제점 3: GFX 장르 입력칸 추가
+        # 2. GFX 장르
         self.gfx_genre = discord.ui.TextInput(
             label="🎬 원하는 GFX 장르",
             placeholder="예: 밀리터리, 판타지, 일상, SF 등",
@@ -39,42 +40,42 @@ class PurchaseModal(discord.ui.Modal):
         )
         self.add_item(self.gfx_genre)
 
-        self.gfx_type = discord.ui.TextInput(
-            label="🖼 GFX 종류",
-            placeholder="예: 초급, 중급, 상급 등",
-            required=True,
-            max_length=50
-        )
-        self.add_item(self.gfx_type)
-
-        # 문제점 2: 작품 수에 맞춘 동적 입력칸 구성 (최대 5개 제한 준수)
-        if self.bundle_type == "3+1 묶음":
+        # 3. 묶음 종류에 따른 본품/보너스 요구사항 입력칸 분리
+        if self.bundle_type == "2+1 묶음":
             self.gfx_style = discord.ui.TextInput(
-                label="🎨 1~3번째 작품 상세 요구사항",
+                label="📝 1~2번째 작품 상세 요구사항",
+                placeholder="1, 2번째 작품에 대한 요구사항을 적어주세요.",
+                required=True, style=discord.TextStyle.paragraph, max_length=1000
+            )
+            self.add_item(self.gfx_style)
+
+            self.fourth_style = discord.ui.TextInput(
+                label="🎁 3번째 작품 요구사항 (2+1 보너스)",
+                placeholder="3번째(보너스) 작품에 대한 요구사항을 적어주세요.",
+                required=True, style=discord.TextStyle.paragraph, max_length=1000
+            )
+            self.add_item(self.fourth_style)
+
+        elif self.bundle_type == "3+1 묶음":
+            self.gfx_style = discord.ui.TextInput(
+                label="📝 1~3번째 작품 상세 요구사항",
                 placeholder="1, 2, 3번째 작품에 대한 요구사항을 적어주세요.",
-                required=True, style=discord.TextStyle.paragraph, max_length=500
+                required=True, style=discord.TextStyle.paragraph, max_length=1000
             )
             self.add_item(self.gfx_style)
 
             self.fourth_style = discord.ui.TextInput(
                 label="🎁 4번째 작품 요구사항 (3+1 보너스)",
-                placeholder="4번째 작품에 대한 요구사항을 적어주세요.",
-                required=True, style=discord.TextStyle.paragraph, max_length=500
-            )
-            self.add_item(self.fourth_style)
-        elif self.bundle_type == "2+1 묶음":
-            self.gfx_style = discord.ui.TextInput(
-                label="🎨 제작 순서별 상세 요구사항 (총 3개)",
-                placeholder="1번, 2번, 3번 작품에 대한 요구사항을 작성해주세요.",
+                placeholder="4번째(보너스) 작품에 대한 요구사항을 적어주세요.",
                 required=True, style=discord.TextStyle.paragraph, max_length=1000
             )
-            self.add_item(self.gfx_style)
-            self.fourth_style = None
-        else: # 단품
+            self.add_item(self.fourth_style)
+
+        else: # 단품 (1개)
             self.gfx_style = discord.ui.TextInput(
-                label="🎨 원하는 스타일",
+                label="📝 원하는 스타일 및 설명",
                 placeholder="원하시는 콘셉트, 구도, 색감, 의상 등을 적어주세요.",
-                required=True, style=discord.TextStyle.paragraph, max_length=500
+                required=True, style=discord.TextStyle.paragraph, max_length=1000
             )
             self.add_item(self.gfx_style)
             self.fourth_style = None
@@ -106,7 +107,7 @@ class PurchaseModal(discord.ui.Modal):
 
         await interaction.response.defer(ephemeral=True)
 
-        # 문제점 1: 티켓 채널 권한 철저히 제어 (@everyone 차단)
+        # 티켓 채널 권한 제어
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False, view_channel=False),
             user: discord.PermissionOverwrite(read_messages=True, view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
@@ -124,7 +125,7 @@ class PurchaseModal(discord.ui.Modal):
             topic=str(user.id)
         )
 
-        # DB 저장 로직 (기존과 동일하므로 생략 없이 유지)
+        # DB 저장 로직
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
                 INSERT INTO commissions(ticket_channel, customer_id, designer_id, category, status, progress, created_at, updated_at)
@@ -137,15 +138,16 @@ class PurchaseModal(discord.ui.Modal):
         embed.add_field(name="👨‍💻 담당 디자이너", value=designer_name, inline=False)
         embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_nickname.value, inline=False)
         embed.add_field(name="🎬 GFX 장르", value=self.gfx_genre.value, inline=False)
-        embed.add_field(name="🖼 GFX 종류", value=self.gfx_type.value, inline=False)
         embed.add_field(name="🎨 요구사항", value=self.gfx_style.value, inline=False)
         
+        # 보너스 요구사항이 있는 경우 (2+1 또는 3+1)
         if self.fourth_style:
-            embed.add_field(name="🎁 4번째 작품 요구사항 (3+1 보너스)", value=self.fourth_style.value, inline=False)
+            bonus_title = "🎁 3번째 작품 요구사항 (2+1 보너스)" if self.bundle_type == "2+1 묶음" else "🎁 4번째 작품 요구사항 (3+1 보너스)"
+            embed.add_field(name=bonus_title, value=self.fourth_style.value, inline=False)
 
         await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다.", embed=embed)
 
-        # 문제점 4: 안내, 참고자료, 진행 임베드 3종 동시 전송 복구
+        # 안내, 참고자료, 진행 임베드 3종 동시 전송
         guide_embed = build_ticket_notice_embed() 
         
         ref_embed = discord.Embed(
@@ -163,7 +165,5 @@ class PurchaseModal(discord.ui.Modal):
         )
 
         await ticket_channel.send(embeds=[guide_embed, ref_embed, progress_embed])
-        
-        # 관리 뷰 추가, DM 전송 등 기존 후속 처리 코드는 유지...
         
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
