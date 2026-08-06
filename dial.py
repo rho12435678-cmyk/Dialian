@@ -7,24 +7,19 @@ from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 import discord
+from discord import ui
 from discord.ext import commands, tasks
 
 from config import *
 from database.backups import backup_database
 from database.database import DATABASE, create_tables
 from database.DailyNotice import DailyNotice
-from database.monthly_stats import (
-    build_monthly_stats_embed,
-    save_monthly_stats_message,
-    update_monthly_stats_message,
-)
 from database.services.points import (
     add_user_points,
     check_and_add_feedback_points,
     check_and_add_share_points,
     get_user_points,
 )
-from database.views.category_view import CategoryView
 from database.views.close_ticket import (
     TicketCloseView,
     archive_ticket_channel,
@@ -84,7 +79,7 @@ async def claim_once(table_name, message_id):
             )
         """)
         cursor = await db.execute(
-            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)"
             (message_id,)
         )
         await db.commit()
@@ -94,6 +89,233 @@ async def claim_once(table_name, message_id):
 @bot.check
 async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
+
+
+# ==================== [통계 평점 0.00 수정 및 월간 통계 함수] ====================
+
+async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
+    current_month = datetime.now().strftime("%Y-%m")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        # 평점 CAST 연산 및 포맷 대응으로 0.00 버그 수정
+        async with db.execute(
+            """
+            SELECT 
+                COALESCE(AVG(CAST(stars AS FLOAT)), 0.0),
+                COUNT(stars)
+            FROM reviews
+            WHERE created_at LIKE ? OR strftime('%Y-%m', created_at) = ?
+            """,
+            (f"{current_month}%", current_month)
+        ) as cursor:
+            row = await cursor.fetchone()
+            avg_stars = round(row[0], 2) if row and row[0] else 0.00
+            review_count = row[1] if row else 0
+
+        async with db.execute(
+            """
+            SELECT status, COUNT(*) 
+            FROM commissions 
+            WHERE created_at LIKE ?
+            GROUP BY status
+            """,
+            (f"{current_month}%",)
+        ) as cursor:
+            status_data = dict(await cursor.fetchall())
+
+    total = sum(status_data.values())
+    completed = status_data.get("completed", 0)
+    in_progress = status_data.get("in_progress", 0)
+    cancelled = status_data.get("cancelled", 0)
+
+    embed = discord.Embed(
+        title=f"📅 {datetime.now().strftime('%Y년 %m월')} Dial Design Studio 통계",
+        color=0x5865F2,
+        timestamp=datetime.now()
+    )
+
+    embed.description = (
+        f"📦 **총 주문** : {total}\n"
+        f"✅ **완료** : {completed}\n"
+        f"⏳ **진행 중** : {in_progress}\n"
+        f"❌ **취소** : {cancelled}\n"
+        f"⭐ **평균 평점** : {avg_stars:.2f}\n"
+        f"📝 **후기** : {review_count}"
+    )
+
+    embed.set_footer(text="월간 통계는 주기적으로 자동 갱신됩니다.")
+    return embed
+
+
+async def save_monthly_stats_message(message: discord.Message):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS monthly_stats_panel (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                channel_id INTEGER,
+                message_id INTEGER
+            )
+        """)
+        await db.execute("""
+            INSERT INTO monthly_stats_panel (id, channel_id, message_id)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                message_id = excluded.message_id
+        """, (message.channel.id, message.id))
+        await db.commit()
+
+
+async def update_monthly_stats_message(bot_instance):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("SELECT channel_id, message_id FROM monthly_stats_panel WHERE id = 1")
+        row = await cursor.fetchone()
+
+    if not row:
+        return
+
+    channel_id, message_id = row
+    channel = bot_instance.get_channel(channel_id)
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(message_id)
+        embed = await build_monthly_stats_embed(channel.guild)
+        await message.edit(embed=embed)
+    except Exception as e:
+        print(f"[통계 패널 갱신 오류] {e}")
+
+
+# ==================== [카테고리 / 묶음 선택 / 참고자료 안내 UI] ====================
+
+async def send_reference_guide(channel: discord.TextChannel, user: discord.User):
+    """티켓 생성 시 참고자료 첨부 안내 전송"""
+    embed = discord.Embed(
+        title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
+        description=(
+            f"{user.mention}님, 디자이너가 원하시는 스타일을 명확히 파악할 수 있도록\n"
+            "**원하시는 구도, 분위기, 색감, 참고용 이미지/파일**을 이 채널에 구체적으로 올려주세요!"
+        ),
+        color=0x5865F2
+    )
+    embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
+    await channel.send(embed=embed)
+
+
+class CustomCommissionModal(ui.Modal):
+    def __init__(self, category: str, bundle_type: str):
+        super().__init__(title=f"🎨 {category} [{bundle_type}] 신청서")
+        self.category = category
+        self.bundle_type = bundle_type
+
+        # Roblox 닉네임 입력란
+        self.roblox_name = ui.TextInput(
+            label="🎮 Roblox 닉네임",
+            placeholder="작품에 반영될 로블록스 닉네임을 작성해주세요.",
+            required=True
+        )
+        self.add_item(self.roblox_name)
+
+        # 단품 vs 묶음 세부 양식 구분
+        if bundle_type == "단품 (1개)":
+            self.details = ui.TextInput(
+                label="🖌️ 원하는 스타일 및 설명",
+                style=discord.TextStyle.paragraph,
+                placeholder="원하시는 콘셉트, 구도, 색감, 의상 등을 적어주세요.",
+                required=True,
+                max_length=1000
+            )
+        else:
+            count = 3 if "2+1" in bundle_type else 4
+            self.details = ui.TextInput(
+                label=f"📝 제작 순서별 상세 요구사항 (총 {count}개)",
+                style=discord.TextStyle.paragraph,
+                placeholder=(
+                    "우선적으로 제작되길 원하는 순서대로 작성해주세요:\n"
+                    "1번째 작품: (의상/구도/콘셉트)\n"
+                    "2번째 작품: (의상/구도/콘셉트)\n"
+                    "3번째 작품: (의상/구도/콘셉트)"
+                ),
+                required=True,
+                max_length=1000
+            )
+        self.add_item(self.details)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        channel_name = f"티켓-{interaction.user.name}"
+        ticket_channel = await guild.create_text_channel(
+            name=channel_name,
+            topic=str(interaction.user.id)
+        )
+
+        embed = discord.Embed(
+            title=f"📋 {self.category} 커미션 신청서 ({self.bundle_type})",
+            color=0x57F287
+        )
+        embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_name.value, inline=False)
+        embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
+
+        await ticket_channel.send(content=interaction.user.mention, embed=embed)
+        
+        # 참고자료 안내 메시지 자동 전송
+        await send_reference_guide(ticket_channel, interaction.user)
+
+        # 통계 DB 등록
+        now = datetime.now().isoformat()
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute("""
+                INSERT INTO commissions (ticket_channel, customer_id, category, status, progress, created_at, updated_at)
+                VALUES (?, ?, ?, 'in_progress', 0, ?, ?)
+            """, (ticket_channel.id, interaction.user.id, self.category, now, now))
+            await db.commit()
+
+        await interaction.followup.send(
+            f"✅ 티켓 채널이 생성되었습니다: {ticket_channel.mention}",
+            ephemeral=True
+        )
+
+
+class BundleSelectView(ui.View):
+    def __init__(self, category: str):
+        super().__init__(timeout=120)
+        self.category = category
+
+    @ui.button(label="1개 (단품)", style=discord.ButtonStyle.secondary, custom_id="bundle_single_btn")
+    async def select_single(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(CustomCommissionModal(self.category, "단품 (1개)"))
+
+    @ui.button(label="🎁 2+1 묶음 (총 3개)", style=discord.ButtonStyle.primary, custom_id="bundle_21_btn")
+    async def select_21(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(CustomCommissionModal(self.category, "2+1 묶음"))
+
+    @ui.button(label="🎁 3+1 묶음 (총 4개)", style=discord.ButtonStyle.success, custom_id="bundle_31_btn")
+    async def select_31(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음"))
+
+
+class CustomCategoryView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="🎨 GFX", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
+    async def click_gfx(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_message(
+            "🎨 **GFX 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
+            view=BundleSelectView("GFX"),
+            ephemeral=True
+        )
+
+    @ui.button(label="👕 Roblox 복장", style=discord.ButtonStyle.primary, custom_id="cat_clothes_btn")
+    async def click_clothes(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_message(
+            "👕 **Roblox 복장 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
+            view=BundleSelectView("Roblox 복장"),
+            ephemeral=True
+        )
 
 
 # ==================== [포인트 랭킹 전용 DB 및 헬퍼] ====================
@@ -234,7 +456,6 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    # 작품공유 채널 메시지 감지 (+15P, 1일 최대 3회)
     if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
         can_earn, count = await check_and_increment_daily_limit(message.author.id, "work_share")
         if can_earn:
@@ -253,7 +474,6 @@ async def on_raw_reaction_add(payload):
     if not payload.guild_id or payload.user_id == bot.user.id:
         return
 
-    # 피드백 채널 감지 (+10P, 모든 반응 허용, 1일 최대 3회)
     if payload.channel_id != FEEDBACK_CHANNEL_ID:
         return
 
@@ -270,7 +490,6 @@ async def on_raw_reaction_add(payload):
     except Exception:
         return
 
-    # 피드백 작성자 본인이 단 반응이거나 봇 메시지면 무시
     if message.author.id == payload.user_id or message.author.bot:
         return
 
@@ -592,7 +811,6 @@ async def reset_points(ctx, member: discord.Member):
 @bot.command(name="포인트랭킹", aliases=["랭킹패널", "주간베스트", "명예의전당"])
 @commands.has_permissions(administrator=True)
 async def setup_point_ranking(ctx):
-    """지정된 포인트 랭킹 채널에서 1회 실행하여 고정 패널 생성"""
     if ctx.channel.id != POINT_RANKING_CHANNEL_ID:
         return await ctx.send(
             f"❌ 이 명령어는 <#{POINT_RANKING_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.",
@@ -963,7 +1181,7 @@ async def t_create_panel(ctx):
     await ctx.send(
         files=[file, file2],
         embeds=[embed, embed2],
-        view=TicketOpenView()
+        view=CustomCategoryView()
     )
 
 
@@ -1710,8 +1928,6 @@ async def monthly_point_reset_task():
                 await db.commit()
 
                 print(f"[{current_ym}] 🔄 매월 1일 포인트가 성공적으로 초기화되었습니다.")
-
-                # 초기화된 데이터로 랭킹 패널 즉시 새로고침
                 await update_point_ranking_message(bot)
 
 
@@ -1824,14 +2040,14 @@ async def on_ready():
     global daily_notice, persistent_views_registered, update_notice_sent
 
     await create_tables()
-    await init_ranking_db()  # 포인트 랭킹 DB 테이블 생성
+    await init_ranking_db()
 
     print("on_ready")
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
 
     if not persistent_views_registered:
         bot.add_view(TicketOpenView())
-        bot.add_view(CategoryView())
+        bot.add_view(CustomCategoryView())
         bot.add_view(StarRatingView())
         bot.add_view(ProgressView())
         bot.add_view(PaymentView())
