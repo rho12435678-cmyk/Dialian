@@ -83,15 +83,21 @@ class SimpleTicketModal(discord.ui.Modal):
 
         await interaction.response.defer(ephemeral=True)
 
+        # 보안 설정: 일반 유저 채널 열람 권한 원천 차단
         overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            guild.default_role: discord.PermissionOverwrite(
+                read_messages=False,
+                view_channel=False
+            ),
             user: discord.PermissionOverwrite(
                 read_messages=True,
+                view_channel=True,
                 send_messages=True,
                 attach_files=True
             ),
             guild.me: discord.PermissionOverwrite(
                 read_messages=True,
+                view_channel=True,
                 send_messages=True
             )
         }
@@ -102,6 +108,7 @@ class SimpleTicketModal(discord.ui.Modal):
             if developer:
                 overwrites[developer] = discord.PermissionOverwrite(
                     read_messages=True,
+                    view_channel=True,
                     send_messages=True,
                     attach_files=True
                 )
@@ -158,6 +165,7 @@ class SimpleTicketModal(discord.ui.Modal):
             inline=False
         )
 
+        # 신청서 및 멘션 전송
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
@@ -166,7 +174,36 @@ class SimpleTicketModal(discord.ui.Modal):
             embed=embed
         )
 
-        await ticket_channel.send(embed=build_ticket_notice_embed())
+        # 안내/참고자료/진행 임베드 3종 동시 전송 구성
+        guide_embed = build_ticket_notice_embed()
+        
+        ref_embed = discord.Embed(
+            title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
+            description=(
+                f"{user.mention}님, 디자이너가 원하시는 스타일을 명확히 파악할 수 있도록\n"
+                "**원하시는 구도, 분위기, 색감, 참고용 이미지/파일**을 이 채널에 구체적으로 올려주세요!"
+            ),
+            color=0x5865F2
+        )
+        ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
+
+        progress_embed = discord.Embed(
+            title="📌 커미션 진행",
+            description=(
+                f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
+                "📌 상태 : 🟢 상담중\n"
+                "📊 진행률 : 0%\n"
+                "⏰ 예상 완료 : 미설정"
+            ),
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+
+        # 세 개의 임베드를 한 번에 전송
+        await ticket_channel.send(embeds=[guide_embed, ref_embed, progress_embed])
+
+        # progress_message 변수 지정을 위한 참조용 진행 메시지 저장
+        progress_message = await ticket_channel.send(embed=progress_embed)
 
         log_channel = discord.utils.get(
             guild.text_channels,
@@ -179,20 +216,6 @@ class SimpleTicketModal(discord.ui.Modal):
                 f"{ticket_channel.mention}\n"
                 f"신청자 : {user.mention}"
             ))
-
-        progress_message = await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 커미션 진행",
-                description=(
-                    f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
-                    "📌 상태 : 🟢 상담중\n"
-                    "📊 진행률 : 0%\n"
-                    "⏰ 예상 완료 : 미설정"
-                ),
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            )
-        )
 
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
