@@ -29,6 +29,7 @@ async def create_tables():
             ticket_channel INTEGER,
             customer_id INTEGER,
             designer_id INTEGER,
+            designer_name TEXT,
             category TEXT,
             status TEXT,
             progress INTEGER,
@@ -55,14 +56,25 @@ async def create_tables():
         ON commissions(ticket_channel)
         """)
 
+        # 신규 컬럼 하위 호환 마이그레이션
         for column_sql in (
             "ALTER TABLE commissions ADD COLUMN completed_at TEXT",
             "ALTER TABLE commissions ADD COLUMN updated_at TEXT",
+            "ALTER TABLE commissions ADD COLUMN designer_name TEXT",
         ):
             try:
                 await db.execute(column_sql)
             except aiosqlite.OperationalError:
                 pass
+
+        # 월간 통계 패널 테이블 (Startup Refresh 에러 해결용)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS monthly_stats_panel (
+            guild_id INTEGER PRIMARY KEY,
+            channel_id INTEGER,
+            message_id INTEGER
+        )
+        """)
 
         # 개발자 계좌
         await db.execute("""
@@ -131,9 +143,7 @@ async def create_tables():
         ON reviews(ticket_channel)
         """)
 
-        # =========================================================
-        # [신규 추가] 유저 포인트 및 어뷰징 방지 기록 테이블
-        # =========================================================
+        # 유저 포인트 및 어뷰징 방지 기록 테이블
         await db.execute("""
         CREATE TABLE IF NOT EXISTS user_points (
             user_id INTEGER PRIMARY KEY,
@@ -144,7 +154,7 @@ async def create_tables():
         )
         """)
 
-        # 같은 명령어 메시지를 여러 봇 프로세스가 중복 처리하지 않도록 기록
+        # 중복 명령어 처리 방지 기록
         await db.execute("""
         CREATE TABLE IF NOT EXISTS processed_commands (
             message_id INTEGER PRIMARY KEY,
