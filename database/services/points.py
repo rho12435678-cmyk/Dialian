@@ -4,15 +4,26 @@ from database.database import DATABASE
 from config import REGULAR_CUSTOMER_ROLE_ID, TARGET_REGULAR_POINTS
 
 async def get_user_points(user_id: int) -> int:
+    """유저의 현재 포인트 조회"""
     async with aiosqlite.connect(DATABASE) as db:
         cursor = await db.execute("SELECT points FROM user_points WHERE user_id = ?", (user_id,))
         row = await cursor.fetchone()
         return row[0] if row else 0
 
 async def add_user_points(guild, member, amount: int) -> int:
-    """포인트를 적립하고 500P 달성 시 단골 역할 자동 부여"""
+    """포인트를 적립하고 기준 달성 시 단골 역할 자동 부여"""
     user_id = member.id
     async with aiosqlite.connect(DATABASE) as db:
+        # 테이블 자동 생성 (없을 경우 대비)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_points (
+                user_id INTEGER PRIMARY KEY,
+                points INTEGER DEFAULT 0,
+                last_share_date TEXT,
+                last_feedback_date TEXT,
+                feedback_today_count INTEGER DEFAULT 0
+            )
+        """)
         await db.execute("""
             INSERT INTO user_points (user_id, points) VALUES (?, ?)
             ON CONFLICT(user_id) DO UPDATE SET points = points + ?
@@ -20,15 +31,19 @@ async def add_user_points(guild, member, amount: int) -> int:
         await db.commit()
         
         cursor = await db.execute("SELECT points FROM user_points WHERE user_id = ?", (user_id,))
-        new_points = (await cursor.fetchone())[0]
+        row = await cursor.fetchone()
+        new_points = row[0] if row else 0
 
-    # 500P 달성 시 단골 역할 부여
+    # 단골 역할 부여 체킹 (TARGET_REGULAR_POINTS 달성 시)
     if new_points >= TARGET_REGULAR_POINTS:
         role = guild.get_role(REGULAR_CUSTOMER_ROLE_ID)
         if role and role not in member.roles:
             try:
-                await member.add_roles(role)
-                await member.send(f"🎉 축하합니다! **500 P**를 달성하여 **@{role.name}** 등급으로 승급하셨습니다!\n앞으로 모든 커미션 이용 시 **15% 할인** 혜택이 자동 적용됩니다.")
+                await member.add_roles(role, reason="단골 기준 포인트 달성")
+                await member.send(
+                    f"🎉 축하합니다! **{TARGET_REGULAR_POINTS} P**를 달성하여 **@{role.name}** 등급으로 승급하셨습니다!\n"
+                    "앞으로 모든 커미션 이용 시 **혜택**이 자동 적용됩니다."
+                )
             except Exception as e:
                 print(f"[단골 역할 부여 실패] {e}")
 
