@@ -5,7 +5,7 @@ from datetime import datetime
 from database.database import DATABASE
 
 
-# 1. 참고 자료 안내 함수
+# 1. 참고 자료 안내 전송
 async def send_reference_guide(channel: discord.TextChannel, user: discord.User):
     """티켓 생성 시 참고자료 첨부 안내 전송"""
     embed = discord.Embed(
@@ -20,15 +20,13 @@ async def send_reference_guide(channel: discord.TextChannel, user: discord.User)
     await channel.send(embed=embed)
 
 
-# 2. 진행 현황 & 수수료/계좌 안내 임베드 전송 함수
+# 2. 진행 현황 및 수수료/계좌 안내 임베드 전송
 async def send_ticket_info_embeds(channel: discord.TextChannel):
     """진행 현황 및 수수료/계좌 안내 임베드 전송"""
-    # 진행 현황 임베드
     status_embed = discord.Embed(title="⚙️ 커미션 진행 현황", color=0x3498DB)
     status_embed.add_field(name="현재 상태", value="🟡 작업 대기 중", inline=True)
     status_embed.add_field(name="진행률", value="[▒▒▒▒▒▒▒▒▒▒] 0%", inline=True)
 
-    # 결제 및 수수료 안내 임베드
     payment_embed = discord.Embed(
         title="💳 결제 및 수수료 안내",
         description=(
@@ -43,7 +41,7 @@ async def send_ticket_info_embeds(channel: discord.TextChannel):
     await channel.send(embed=payment_embed)
 
 
-# 3. 담당 디자이너 선택 드롭다운 UI
+# 3. 담당 디자이너 선택 드롭다운 (DB 연동 반영)
 class DesignerSelect(ui.Select):
     def __init__(self):
         options = [
@@ -55,6 +53,16 @@ class DesignerSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         selected_designer = self.values[0]
+
+        # 해당 티켓 DB 레코드에 선택된 디자이너 기록
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute("""
+                UPDATE commissions 
+                SET designer_name = ? 
+                WHERE ticket_channel = ?
+            """, (selected_designer, interaction.channel.id))
+            await db.commit()
+
         embed = discord.Embed(
             title="👨‍🎨 담당 디자이너 배정 완료",
             description=f"본 커미션의 담당 디자이너가 **{selected_designer}** 님으로 지정되었습니다.",
@@ -119,7 +127,7 @@ class CustomCommissionModal(ui.Modal):
             topic=str(interaction.user.id)
         )
 
-        # [1] 신청서 내용 임베드 전송
+        # [1] 신청서 내용 전송
         embed = discord.Embed(
             title=f"📋 {self.category} 커미션 신청서 ({self.bundle_type})",
             color=0x57F287
@@ -131,13 +139,13 @@ class CustomCommissionModal(ui.Modal):
         # [2] 참고 자료 안내 전송
         await send_reference_guide(ticket_channel, interaction.user)
 
-        # [3] 진행 현황 & 수수료 안내 임베드 전송
+        # [3] 진행 현황 & 수수료 안내 전송
         await send_ticket_info_embeds(ticket_channel)
 
         # [4] 담당 디자이너 선택 드롭다운 전송
         await ticket_channel.send("👨‍🎨 **담당 디자이너를 선택해 주세요:**", view=DesignerSelectView())
 
-        # DB 저장
+        # DB 기록
         now = datetime.now().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
@@ -171,7 +179,7 @@ class BundleSelectView(ui.View):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음"))
 
 
-# 6. 메인 카테고리 선택 뷰 (개발자 지원 버튼 포함)
+# 6. 메인 카테고리 선택 뷰
 class CustomCategoryView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -200,5 +208,5 @@ class CustomCategoryView(ui.View):
         )
 
 
-# ImportError 방지를 위한 클래스 별칭 추가
+# ImportError 방지용 별칭
 CategoryView = CustomCategoryView
