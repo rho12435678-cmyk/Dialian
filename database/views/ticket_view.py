@@ -1,5 +1,6 @@
 import discord
 
+# category_view.py 파일 안에 정의된 클래스 이름과 정확히 일치해야 합니다.
 from database.views.category_view import CategoryView
 from database.views.ticket_guard import block_if_ticket_exists
 
