@@ -20,7 +20,8 @@ async def send_reference_guide(channel: discord.TextChannel, user: discord.User)
 # ==================== [커미션 신청 모달] ====================
 class CustomCommissionModal(ui.Modal):
     def __init__(self, category: str, bundle_type: str, designer_id: int = None):
-        super().__init__(title=f"🎨 {category} [{bundle_type}] 신청서")
+        title_prefix = f"🎨 {category}" if category == "GFX" else f"👕 {category}"
+        super().__init__(title=f"{title_prefix} [{bundle_type}] 신청서")
         self.category = category
         self.bundle_type = bundle_type
         self.designer_id = designer_id
@@ -31,6 +32,17 @@ class CustomCommissionModal(ui.Modal):
             required=True
         )
         self.add_item(self.roblox_name)
+
+        # GFX 카테고리일 경우에만 장르(종류) 입력 칸 추가
+        self.gfx_genre = None
+        if category == "GFX":
+            self.gfx_genre = ui.TextInput(
+                label="🏷️ GFX 장르 / 종류",
+                placeholder="예: 초급, 중급, 상급 등 원하시는 장르나 스타일을 적어주세요.",
+                required=True,
+                max_length=100
+            )
+            self.add_item(self.gfx_genre)
 
         if bundle_type == "단품 (1개)":
             self.details = ui.TextInput(
@@ -60,7 +72,6 @@ class CustomCommissionModal(ui.Modal):
         guild = interaction.guild
         channel_name = f"티켓-{interaction.user.name}"
         
-        # 권한 설정 (고객, 디자이너, 관리자만 접근 가능)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -83,14 +94,19 @@ class CustomCommissionModal(ui.Modal):
             color=0x57F287
         )
         embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_name.value, inline=False)
+        
+        if self.gfx_genre:
+            embed.add_field(name="🏷️ GFX 장르", value=self.gfx_genre.value, inline=False)
+            
         if self.designer_id:
             embed.add_field(name="👨‍💻 담당 디자이너", value=f"<@{self.designer_id}>", inline=False)
+            
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
 
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
         await send_reference_guide(ticket_channel, interaction.user)
 
-        now = datetime_now_iso = discord.utils.utcnow().isoformat()
+        now_iso = discord.utils.utcnow().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
                 INSERT INTO commissions (ticket_channel, customer_id, designer_id, category, status, progress, created_at, updated_at)
@@ -124,7 +140,7 @@ class BundleSelectView(ui.View):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음", self.designer_id))
 
 
-# ==================== [카테고리 선택 뷰 (버튼형)] ====================
+# ==================== [카테고리 선택 뷰] ====================
 class CategorySelectView(ui.View):
     def __init__(self, designer_id: int = None):
         super().__init__(timeout=120)
@@ -147,13 +163,11 @@ class CategorySelectView(ui.View):
         )
 
 
-# ==================== [디자이너 선택 드롭다운 뷰 (메인)] ====================
+# ==================== [디자이너 선택 드롭다운 (메인)] ====================
 class DesignerSelect(ui.Select):
     def __init__(self):
-        # 봇이 실행되는 서버 내의 디자이너(또는 관리자) 목록을 구성하거나 동적으로 옵션을 넣습니다.
         options = [
             discord.SelectOption(label="랜덤 / 지정 안 함", value="random", description="가장 빠른 디자이너에게 배정됩니다."),
-            # 필요에 따라 디자이너 추가 가능
         ]
         super().__init__(placeholder="👨‍💻 원하는 담당 디자이너를 선택해주세요!", min_values=1, max_values=1, options=options)
 
