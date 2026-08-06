@@ -208,8 +208,6 @@ async def update_monthly_stats_message(bot_instance):
 # ==================== [티켓 채널 안내 임베드 및 신청서 UI] ====================
 
 async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, designer_id: int = None):
-    designer_mention = f"<@{designer_id}>" if designer_id else "미배정"
-    
     guide_embed = discord.Embed(
         title="📌 커미션 안내 사항",
         description=(
@@ -239,16 +237,10 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
     )
     ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
 
-    # 1. 일반 티켓 채널에는 안내 및 참고 자료 임베드만 전송 (진행 버튼 제외)
+    # 1. 일반 티켓 채널에는 안내 및 참고 자료 임베드만 전송 (버튼 일체 제외)
     await channel.send(embeds=[guide_embed, ref_embed])
 
-    # 2. 계좌 전송 버튼(PaymentView) 전송
-    await channel.send("💳 **결제 안내**\n아래 버튼을 눌러 담당 디자이너의 계좌 정보를 확인하실 수 있습니다.", view=PaymentView())
-
-    # 3. 티켓 관리/닫기 버튼(TicketCloseView) 전송
-    await channel.send("🔒 **티켓 관리**\n상담 완료 후 아래 버튼을 눌러 티켓을 종료하실 수 있습니다.", view=TicketCloseView())
-
-    # 4. 담당 디자이너가 지정되어 있는 경우, 디자이너의 DM으로만 진행 제어 패널 전송
+    # 2. 담당 디자이너가 지정되어 있는 경우, 디자이너의 DM으로만 진행 패널 및 관리 버튼 전송
     if designer_id:
         try:
             guild = channel.guild
@@ -269,6 +261,8 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
                     embed=progress_embed, 
                     view=ProgressView(ticket_channel_id=channel.id)
                 )
+                await designer.send("💳 **계좌 정보 전송**", view=PaymentView())
+                await designer.send("🔒 **티켓 관리 및 종료**", view=TicketCloseView())
         except Exception as e:
             print(f"[디자이너 DM 전송 실패] {e}")
 
