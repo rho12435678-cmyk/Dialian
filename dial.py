@@ -250,7 +250,17 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
     )
     ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
 
-    await channel.send(embeds=[guide_embed, progress_embed, ref_embed])
+    # 1. 커미션 안내 및 참고 자료 임베드 전송
+    await channel.send(embeds=[guide_embed, ref_embed])
+
+    # 2. 진행 상황 임베드 + 진행률 컨트롤 버튼(ProgressView)
+    await channel.send(embed=progress_embed, view=ProgressView())
+
+    # 3. 계좌 전송 버튼(PaymentView)
+    await channel.send("💳 **결제 안내**\n아래 버튼을 눌러 담당 디자이너의 계좌 정보를 확인하실 수 있습니다.", view=PaymentView())
+
+    # 4. 티켓 관리/닫기 버튼(TicketCloseView)
+    await channel.send("🔒 **티켓 관리**\n상담 완료 후 아래 버튼을 눌러 티켓을 종료하실 수 있습니다.", view=TicketCloseView())
 
 
 class CustomCommissionModal(ui.Modal):
