@@ -1,24 +1,50 @@
 import discord
+from config import DESIGNER_ROLE_IDS  # config.py에서 역할 ID 불러오기
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
 
 class DesignerSelect(discord.ui.Select):
-    def __init__(self, category: str, bundle_type: str):
+    def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
         self.category = category
         self.bundle_type = bundle_type
-        
-        # 실제 서버의 디자이너 목록이나 역할에 맞춰 수정해주세요.
+
+        # 기본 옵션: 미지정
         options = [
-            discord.SelectOption(label="미지정 (추후 배정)", value="none", description="담당자를 나중에 배정받습니다."),
-            discord.SelectOption(label="ParkSun", value="123456789012345678", description="GFX / 3D 전문"), 
-            discord.SelectOption(label="Dial", value="987654321098765432", description="복장 / 2D 전문")
+            discord.SelectOption(
+                label="미지정 (추후 배정)", 
+                value="none", 
+                description="담당자를 나중에 배정받습니다."
+            )
         ]
-        super().__init__(placeholder="👨‍💻 담당 디자이너를 선택해주세요", options=options, min_values=1, max_values=1)
+
+        # 카테고리에 맞는 역할 ID 추출 ("GFX" -> "gfx", "복장" -> "uniform")
+        role_key = "gfx" if category == "GFX" else "uniform"
+        role_id = DESIGNER_ROLE_IDS.get(role_key)
+
+        # 서버에서 해당 역할을 가진 멤버들을 찾아서 드롭다운 옵션에 동적 추가
+        if guild and role_id:
+            role = guild.get_role(role_id)
+            if role:
+                for member in role.members:
+                    options.append(
+                        discord.SelectOption(
+                            label=member.display_name,  # 서버 닉네임
+                            value=str(member.id),       # 유저 ID
+                            description=f"{category} 담당 디자이너"
+                        )
+                    )
+
+        # Discord UI Select는 최대 25개까지 지원
+        super().__init__(
+            placeholder="👨‍💻 담당 디자이너를 선택해주세요", 
+            options=options[:25], 
+            min_values=1, 
+            max_values=1
+        )
 
     async def callback(self, interaction: discord.Interaction):
         designer_id = None if self.values[0] == "none" else int(self.values[0])
         
-        # 선택된 카테고리에 맞춰 올바른 모달을 호출합니다. (Discord API 제약상 모달은 여기서 띄워야 합니다)
         if self.category == "GFX":
             modal = PurchaseModal(bundle_type=self.bundle_type, selected_designer=designer_id)
         else:
@@ -26,10 +52,13 @@ class DesignerSelect(discord.ui.Select):
             
         await interaction.response.send_modal(modal)
 
+
 class DesignerSelectView(discord.ui.View):
-    def __init__(self, category: str, bundle_type: str):
+    def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
         super().__init__(timeout=120)
-        self.add_item(DesignerSelect(category, bundle_type))
+        # guild 정보 전달
+        self.add_item(DesignerSelect(category, bundle_type, guild))
+
 
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
@@ -37,8 +66,8 @@ class BundleSelectView(discord.ui.View):
         self.category = category
 
     async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
-        # 묶음을 선택하면, 디자이너 선택 드롭다운이 포함된 View로 메시지를 업데이트합니다.
-        view = DesignerSelectView(self.category, bundle_type)
+        # interaction.guild를 전달하여 서버 멤버 데이터를 실시간으로 가져옵니다.
+        view = DesignerSelectView(self.category, bundle_type, interaction.guild)
         await interaction.response.edit_message(
             content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
             view=view
