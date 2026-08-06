@@ -1,6 +1,7 @@
 import discord
 from discord import ui
 import aiosqlite
+from datetime import datetime
 from database.database import DATABASE
 
 # ==================== [티켓 오픈 시 안내/진행/참고자료 임베드 동시 전송 함수] ====================
@@ -54,12 +55,11 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User):
 
 # ==================== [커미션 신청 모달] ====================
 class CustomCommissionModal(ui.Modal):
-    def __init__(self, category: str, bundle_type: str, designer_id: int = None):
+    def __init__(self, category: str, bundle_type: str):
         title_prefix = f"🎨 {category}" if category == "GFX" else f"👕 {category}"
         super().__init__(title=f"{title_prefix} [{bundle_type}] 신청서")
         self.category = category
         self.bundle_type = bundle_type
-        self.designer_id = designer_id
 
         self.roblox_name = ui.TextInput(
             label="🎮 Roblox 닉네임",
@@ -130,17 +130,12 @@ class CustomCommissionModal(ui.Modal):
         guild = interaction.guild
         channel_name = f"티켓-{interaction.user.name}"
         
-        # 권한 설정: 일반 유저 차단, 유저/봇/디자이너 허용
+        # 권한 설정: 일반 유저 차단, 유저/봇 허용
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         }
-        
-        if self.designer_id:
-            designer_member = guild.get_member(self.designer_id)
-            if designer_member:
-                overwrites[designer_member] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
         ticket_channel = await guild.create_text_channel(
             name=channel_name,
@@ -157,9 +152,6 @@ class CustomCommissionModal(ui.Modal):
         if self.gfx_genre:
             embed.add_field(name="🏷️ GFX 장르", value=self.gfx_genre.value, inline=False)
             
-        if self.designer_id:
-            embed.add_field(name="👨‍💻 담당 디자이너", value=f"<@{self.designer_id}>", inline=False)
-            
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
 
         # 3+1 묶음일 경우 4번째 작품 내용 추가 표시
@@ -172,12 +164,12 @@ class CustomCommissionModal(ui.Modal):
         # 안내/진행/참고자료 임베드 3종 동시 전송 함수 실행
         await send_ticket_guides(ticket_channel, interaction.user)
 
-        now_iso = discord.utils.utcnow().isoformat()
+        now_iso = datetime.now().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
                 INSERT INTO commissions (ticket_channel, customer_id, designer_id, category, status, progress, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 'in_progress', 0, ?, ?)
-            """, (ticket_channel.id, interaction.user.id, self.designer_id, self.category, now_iso, now_iso))
+            """, (ticket_channel.id, interaction.user.id, None, self.category, now_iso, now_iso))
             await db.commit()
 
         await interaction.followup.send(
@@ -188,36 +180,33 @@ class CustomCommissionModal(ui.Modal):
 
 # ==================== [수량/묶음 선택 뷰] ====================
 class BundleSelectView(ui.View):
-    def __init__(self, category: str, designer_id: int = None):
+    def __init__(self, category: str):
         super().__init__(timeout=120)
         self.category = category
-        self.designer_id = designer_id
 
     @ui.button(label="1개 (단품)", style=discord.ButtonStyle.secondary, custom_id="bundle_single_btn")
     async def select_single(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(CustomCommissionModal(self.category, "단품 (1개)", self.designer_id))
+        await interaction.response.send_modal(CustomCommissionModal(self.category, "단품 (1개)"))
 
     @ui.button(label="🎁 2+1 묶음 (총 3개)", style=discord.ButtonStyle.primary, custom_id="bundle_21_btn")
     async def select_21(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(CustomCommissionModal(self.category, "2+1 묶음", self.designer_id))
+        await interaction.response.send_modal(CustomCommissionModal(self.category, "2+1 묶음"))
 
     @ui.button(label="🎁 3+1 묶음 (총 4개)", style=discord.ButtonStyle.success, custom_id="bundle_31_btn")
     async def select_31(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음", self.designer_id))
+        await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음"))
 
 
-# ==================== [카테고리 선택 뷰] ====================
-class CategorySelectView(ui.View):
-    def __init__(self, designer_id: int = None):
-        super().__init__(timeout=120)
-        self.category = category if 'category' in locals() else None # 안전장치
-        self.designer_id = designer_id
+# ==================== [카테고리 선택 뷰 (메인)] ====================
+class CategoryView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
     @ui.button(label="🎨 GFX", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def click_gfx(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message(
             "🎨 **GFX 구매 수량을 선택해주세요.**",
-            view=BundleSelectView("GFX", self.designer_id),
+            view=BundleSelectView("GFX"),
             ephemeral=True
         )
 
@@ -225,30 +214,6 @@ class CategorySelectView(ui.View):
     async def click_clothes(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message(
             "👕 **Roblox 복장 구매 수량을 선택해주세요.**",
-            view=BundleSelectView("Roblox 복장", self.designer_id),
+            view=BundleSelectView("Roblox 복장"),
             ephemeral=True
         )
-
-
-# ==================== [디자이너 선택 드롭다운 (메인)] ====================
-class DesignerSelect(ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="랜덤 / 지정 안 함", value="random", description="가장 빠른 디자이너에게 배정됩니다."),
-        ]
-        super().__init__(placeholder="👨‍💻 원하는 담당 디자이너를 선택해주세요!", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        designer_id = None if self.values[0] == "random" else int(self.values[0])
-        
-        await interaction.response.send_message(
-            "✨ 원하시는 **커미션 카테고리**를 선택해주세요.",
-            view=CategorySelectView(designer_id),
-            ephemeral=True
-        )
-
-
-class CategoryView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(DesignerSelect())
