@@ -18,44 +18,59 @@ from database.views.ticket_guard import (
 class PurchaseModal(discord.ui.Modal):
 
     COMMISSION_NAME = "GFX"
-
     MODAL_TITLE = "🎨 GFX 커미션 신청서"
-
     FORM_TITLE = "📋 GFX 커미션 신청서"
-    FIELD1 = "🎮 Roblox 닉네임"
-    FIELD2 = "🖼 GFX 종류"
-    FIELD3 = "🎨 원하는 스타일"
 
-    def __init__(self):
+    def __init__(self, bundle_type: str = "단품 (1개)"):
         super().__init__(title=self.MODAL_TITLE)
-
+        self.bundle_type = bundle_type
         self.selected_designer = None
 
         self.roblox_nickname = discord.ui.TextInput(
-            label=self.FIELD1,
+            label="🎮 Roblox 닉네임",
             placeholder="입력해주세요.",
             required=True,
             max_length=30
         )
+        self.add_item(self.roblox_nickname)
 
         self.gfx_type = discord.ui.TextInput(
-            label=self.FIELD2,
-            placeholder="입력해주세요.",
+            label="🖼 GFX 종류",
+            placeholder="예: 초급, 중급, 상급 등",
             required=True,
             max_length=50
         )
-
-        self.gfx_style = discord.ui.TextInput(
-            label=self.FIELD3,
-            placeholder="입력해주세요.",
-            required=True,
-            style=discord.TextStyle.paragraph,
-            max_length=300
-        )
-
-        self.add_item(self.roblox_nickname)
         self.add_item(self.gfx_type)
-        self.add_item(self.gfx_style)
+
+        # 묶음 종류에 따른 입력란 분기 (3+1 묶음일 경우 4번째 작품 입력란 추가)
+        self.fourth_style = None
+        if self.bundle_type == "3+1 묶음":
+            self.gfx_style = discord.ui.TextInput(
+                label="🎨 1~3번째 작품 상세 요구사항",
+                placeholder="1, 2, 3번째 작품에 대한 요구사항을 적어주세요.",
+                required=True,
+                style=discord.TextStyle.paragraph,
+                max_length=500
+            )
+            self.add_item(self.gfx_style)
+
+            self.fourth_style = discord.ui.TextInput(
+                label="🎁 4번째 작품 요구사항 (3+1 보너스)",
+                placeholder="4번째 작품에 대한 요구사항을 적어주세요.",
+                required=True,
+                style=discord.TextStyle.paragraph,
+                max_length=500
+            )
+            self.add_item(self.fourth_style)
+        else:
+            self.gfx_style = discord.ui.TextInput(
+                label="🎨 원하는 스타일",
+                placeholder="입력해주세요.",
+                required=True,
+                style=discord.TextStyle.paragraph,
+                max_length=300
+            )
+            self.add_item(self.gfx_style)
 
     async def on_submit(self, interaction: discord.Interaction):
         ticket_lock = await acquire_ticket_creation_lock(interaction)
@@ -102,17 +117,21 @@ class PurchaseModal(discord.ui.Modal):
 
         await interaction.response.defer(ephemeral=True)
 
+        # 1번 요구사항: 일반 유저 채널 열람 권한 차단 보안 설정
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(
-                read_messages=False
+                read_messages=False,
+                view_channel=False
             ),
             user: discord.PermissionOverwrite(
                 read_messages=True,
+                view_channel=True,
                 send_messages=True,
                 attach_files=True
             ),
             guild.me: discord.PermissionOverwrite(
                 read_messages=True,
+                view_channel=True,
                 send_messages=True
             )
         }
@@ -123,14 +142,15 @@ class PurchaseModal(discord.ui.Modal):
             if developer:
                 overwrites[developer] = discord.PermissionOverwrite(
                     read_messages=True,
+                    view_channel=True,
                     send_messages=True,
                     attach_files=True
                 )
 
         ticket_channel = await guild.create_text_channel(
-    name=ticket_channel_name,
-    overwrites=overwrites,
-    topic=str(user.id)
+            name=ticket_channel_name,
+            overwrites=overwrites,
+            topic=str(user.id)
         )
 
         async with aiosqlite.connect(DATABASE) as db:
@@ -162,7 +182,7 @@ class PurchaseModal(discord.ui.Modal):
             await db.commit()
 
         embed = discord.Embed(
-            title=self.FORM_TITLE,
+            title=f"{self.FORM_TITLE} ({self.bundle_type})",
             color=0x5865F2,
             timestamp=datetime.now()
         )
@@ -174,24 +194,31 @@ class PurchaseModal(discord.ui.Modal):
         )
 
         embed.add_field(
-            name=self.FIELD1,
+            name="🎮 Roblox 닉네임",
             value=self.roblox_nickname.value,
             inline=False
         )
 
         embed.add_field(
-            name=self.FIELD2,
+            name="🖼 GFX 종류",
             value=self.gfx_type.value,
             inline=False
         )
 
         embed.add_field(
-            name=self.FIELD3,
+            name="🎨 원하는 스타일",
             value=self.gfx_style.value,
             inline=False
         )
 
+        if self.fourth_style:
+            embed.add_field(
+                name="🎁 4번째 작품 요구사항 (3+1 보너스)",
+                value=self.fourth_style.value,
+                inline=False
+            )
 
+        # 4번 요구사항: 티켓 채널에 멘션과 신청서 전송
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
@@ -200,20 +227,37 @@ class PurchaseModal(discord.ui.Modal):
             embed=embed
         )
 
-        await ticket_channel.send(embed=build_ticket_notice_embed())
+        # 4번 요구사항: 안내 사항, 참고자료, 진행 임베드 동시 전송
+        guide_embed = build_ticket_notice_embed()
+        
+        ref_embed = discord.Embed(
+            title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
+            description=(
+                f"{user.mention}님, 디자이너가 원하시는 스타일을 명확히 파악할 수 있도록\n"
+                "**원하시는 구도, 분위기, 색감, 참고용 이미지/파일**을 이 채널에 구체적으로 올려주세요!"
+            ),
+            color=0x5865F2
+        )
+        ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
 
+        progress_embed = discord.Embed(
+            title="📌 커미션 진행",
+            description=(
+                f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
+                "📌 상태 : 🟢 상담중\n"
+                "📊 진행률 : 0%\n"
+                "⏰ 예상 완료 : 미설정"
+            ),
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+
+        # 임베드 3종류를 동시에 전송
+        await ticket_channel.send(embeds=[guide_embed, ref_embed, progress_embed])
+
+        # 이후 진행률 관리 메시지는 기존처럼 따로 보내거나 위 progress_embed와 연동 관리 가능
         progress_message = await ticket_channel.send(
-            embed=discord.Embed(
-                title="📌 커미션 진행",
-                description=(
-                    f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
-                    "📌 상태 : 🟢 상담중\n"
-                    "📊 진행률 : 0%\n"
-                    "⏰ 예상 완료 : 미설정"
-                ),
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            )
+            embed=progress_embed
         )
 
         log_channel = discord.utils.get(
@@ -223,10 +267,11 @@ class PurchaseModal(discord.ui.Modal):
 
         if log_channel:
             await send_purchase_log(guild, content=(
-                f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성"
+                f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성 "
                 f"{ticket_channel.mention}\n"
                 f"신청자 : {user.mention}"
             ))
+
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
 
