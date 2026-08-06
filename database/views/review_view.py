@@ -26,10 +26,15 @@ async def find_designer_id_from_ticket(channel):
   async for msg in channel.history(limit=50, oldest_first=True):
     for embed in msg.embeds:
       for field in embed.fields:
-        designer_id = parse_designer_id(field.value)
-        if designer_id:
-          return designer_id
+        # 필드명에 디자이너 관련 키워드가 포함된 경우에만 ID 추출
+        if any(
+            kw in field.name for kw in ["담당", "디자이너", "작업자", "개발자"]
+        ):
+          designer_id = parse_designer_id(field.value)
+          if designer_id:
+            return designer_id
 
+      # 임베드 설명란(description)에 적힌 멘션 검사 (필요 시)
       designer_id = parse_designer_id(embed.description)
       if designer_id:
         return designer_id
@@ -128,6 +133,7 @@ class StarRatingView(discord.ui.View):
             "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
         )
 
+      # 메모리에 디자이너 ID가 없으면 채널 메시지 탐색
       designer_id = self.designer_id or await find_designer_id_from_ticket(
           channel
       )
@@ -246,6 +252,7 @@ class StarRatingView(discord.ui.View):
           ephemeral=True,
       )
 
+      # 제출 완료 후 별점 버튼 비활성화 처리
       disabled_view = discord.ui.View()
       for i in range(1, 6):
         style = (
