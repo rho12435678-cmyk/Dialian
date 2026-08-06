@@ -270,13 +270,16 @@ class CustomCommissionModal(ui.Modal):
         self.bundle_type = bundle_type
         self.designer_id = designer_id
 
-        self.roblox_name = ui.TextInput(
-            label="🎮 Roblox 닉네임",
-            placeholder="작품에 반영될 로블록스 닉네임을 작성해주세요.",
-            required=True
-        )
-        self.add_item(self.roblox_name)
+        # 👕 'Roblox 복장'이 아닐 때만 Roblox 닉네임 입력칸 추가
+        if category != "Roblox 복장":
+            self.roblox_name = ui.TextInput(
+                label="🎮 Roblox 닉네임",
+                placeholder="작품에 반영될 로블록스 닉네임을 작성해주세요.",
+                required=True
+            )
+            self.add_item(self.roblox_name)
 
+        # 🎨 GFX 카테고리일 때만 장르 입력칸 추가
         if category == "GFX":
             self.gfx_genre = ui.TextInput(
                 label="🎬 원하는 GFX 장르",
@@ -286,6 +289,7 @@ class CustomCommissionModal(ui.Modal):
             )
             self.add_item(self.gfx_genre)
 
+        # 📦 묶음 종류에 따른 상세 요구사항 입력칸 구성
         if bundle_type == "단품 (1개)":
             self.details = ui.TextInput(
                 label="🖌️ 원하는 스타일 및 설명",
@@ -295,16 +299,27 @@ class CustomCommissionModal(ui.Modal):
                 max_length=1000
             )
             self.add_item(self.details)
+            
         elif bundle_type == "2+1 묶음":
             self.details = ui.TextInput(
-                label="📝 제작 순서별 상세 요구사항 (3개)",
+                label="📝 1~2번째 작품 상세 요구사항",
                 style=discord.TextStyle.paragraph,
-                placeholder="1번, 2번, 3번 작품에 대한 요구사항을 작성해주세요.",
+                placeholder="1, 2번째 작품에 대한 요구사항을 작성해주세요.",
                 required=True,
                 max_length=1000
             )
             self.add_item(self.details)
-        else:
+
+            self.fourth_details = ui.TextInput(
+                label="🎁 3번째 작품 요구사항 (2+1 보너스)",
+                style=discord.TextStyle.paragraph,
+                placeholder="3번째(보너스) 작품에 대한 요구사항을 적어주세요.",
+                required=True,
+                max_length=1000
+            )
+            self.add_item(self.fourth_details)
+            
+        else:  # 3+1 묶음
             self.details = ui.TextInput(
                 label="📝 1~3번째 작품 요구사항",
                 style=discord.TextStyle.paragraph,
@@ -371,7 +386,10 @@ class CustomCommissionModal(ui.Modal):
             title=f"📋 {self.category} 커미션 신청서 ({self.bundle_type})",
             color=0x57F287
         )
-        embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_name.value, inline=False)
+        
+        # 닉네임이 있는 경우에만 임베드에 추가 (복장은 제외됨)
+        if hasattr(self, "roblox_name"):
+            embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_name.value, inline=False)
         
         if hasattr(self, "gfx_genre"):
             embed.add_field(name="🎬 GFX 장르", value=self.gfx_genre.value, inline=False)
@@ -379,7 +397,8 @@ class CustomCommissionModal(ui.Modal):
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
         
         if hasattr(self, "fourth_details"):
-            embed.add_field(name="🎁 4번째 작품 요구사항", value=self.fourth_details.value, inline=False)
+            bonus_label = "🎁 3번째 작품 요구사항 (2+1 보너스)" if self.bundle_type == "2+1 묶음" else "🎁 4번째 작품 요구사항 (3+1 보너스)"
+            embed.add_field(name=bonus_label, value=self.fourth_details.value, inline=False)
 
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
         await send_ticket_guides(ticket_channel, interaction.user, self.designer_id)
