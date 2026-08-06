@@ -3,6 +3,10 @@ from config import DESIGNER_ROLE_IDS  # config.py에서 역할 ID 불러오기
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
 
+
+# ==========================================
+# 4단계: 담당 디자이너 선택 드롭다운 (Dynamic UI)
+# ==========================================
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
         self.category = category
@@ -17,7 +21,7 @@ class DesignerSelect(discord.ui.Select):
             )
         ]
 
-        # 카테고리에 맞는 역할 ID 추출 ("GFX" -> "gfx", "복장" -> "uniform")
+        # 카테고리에 맞는 역할 ID 추출 ("GFX" -> "gfx", 그 외 -> "uniform")
         role_key = "gfx" if category == "GFX" else "uniform"
         role_id = DESIGNER_ROLE_IDS.get(role_key)
 
@@ -56,10 +60,12 @@ class DesignerSelect(discord.ui.Select):
 class DesignerSelectView(discord.ui.View):
     def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
         super().__init__(timeout=120)
-        # guild 정보 전달
         self.add_item(DesignerSelect(category, bundle_type, guild))
 
 
+# ==========================================
+# 3단계: 묶음(수량) 선택 뷰
+# ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
         super().__init__(timeout=120)
@@ -84,3 +90,41 @@ class BundleSelectView(discord.ui.View):
     @discord.ui.button(label="🎁 3+1 묶음 (총 4개)", style=discord.ButtonStyle.success, custom_id="bundle_31_btn")
     async def select_31(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.prompt_designer(interaction, "3+1 묶음")
+
+
+# ==========================================
+# 1 & 2단계: 티켓 생성 후 최초로 뜨는 카테고리 선택 뷰 (TicketOpenView와 연동)
+# ==========================================
+class CategoryView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @discord.ui.button(
+        label="🎨 GFX 커미션",
+        style=discord.ButtonStyle.primary,
+        custom_id="cat_gfx_btn"
+    )
+    async def select_gfx(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.edit_message(
+            content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.",
+            view=BundleSelectView(category="GFX")
+        )
+
+    @discord.ui.button(
+        label="👕 복장 커미션",
+        style=discord.ButtonStyle.secondary,
+        custom_id="cat_uniform_btn"
+    )
+    async def select_uniform(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.edit_message(
+            content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.",
+            view=BundleSelectView(category="복장")
+        )
