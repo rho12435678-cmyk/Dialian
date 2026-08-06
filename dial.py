@@ -79,7 +79,7 @@ async def claim_once(table_name, message_id):
             )
         """)
         cursor = await db.execute(
-            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)"
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
             (message_id,)
         )
         await db.commit()
