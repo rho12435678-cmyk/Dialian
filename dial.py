@@ -388,7 +388,7 @@ class CustomCommissionModal(ui.Modal):
         )
 
 
-# ==================== [디자이너 선택 드롭다운 UI] ====================
+# ==================== [디자이너 선택 UI] ====================
 
 class DesignerSelect(ui.Select):
     def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
@@ -465,8 +465,6 @@ class BundleSelectView(ui.View):
     async def select_31(self, interaction: discord.Interaction, button: ui.Button):
         await self.prompt_designer(interaction, "3+1 묶음")
 
-
-# ==================== [개발자 지원 모달 및 뷰] ====================
 
 class DeveloperApplyModal(ui.Modal):
     def __init__(self):
@@ -589,7 +587,7 @@ async def build_point_ranking_embed(guild):
 
     embed = discord.Embed(
         title="🏆 Dialian 포인트 랭킹 (TOP 10)",
-        description="6시간마다 실시간으로 동기화되는 포인트 순위입니다! ✨\n*(매월 1일 00시에 포인트가 초기화됩니다)*",
+        description="실시간으로 동기화되는 포인트 순위입니다! ✨\n*(매월 1일 00시에 포인트가 초기화됩니다)*",
         color=discord.Color.gold(),
         timestamp=datetime.now()
     )
@@ -612,7 +610,7 @@ async def build_point_ranking_embed(guild):
             inline=False
         )
 
-    embed.set_footer(text="자동 동기화: 6시간 주기 | 매월 1일 포인트 초기화")
+    embed.set_footer(text="자동 동기화: 주기적 동기화 | 매월 1일 포인트 초기화")
     return embed
 
 
@@ -1144,7 +1142,7 @@ async def mjb_game(ctx, user_choice: str, bet_points: int):
     await ctx.send(embed=embed)
 
 
-# --- [관리자 및 시스템 명령어] ---
+# --- [관리자 및 패널 시스템 명령어] ---
 
 @bot.command(name="티켓생성")
 @commands.has_permissions(administrator=True)
@@ -1197,7 +1195,8 @@ async def stats(ctx):
 @commands.has_permissions(administrator=True)
 async def sync_stats(ctx):
     await update_monthly_stats_message(bot)
-    await ctx.send("✅ 월간 통계가 동기화되었습니다.")
+    await update_point_ranking_message(bot)
+    await ctx.send("✅ 통계 및 랭킹 패널이 동기화되었습니다.")
 
 
 @bot.command(name="계좌전송", aliases=["계좌번호", "결제정보"])
@@ -1269,11 +1268,12 @@ async def delete_ticket_by_command(ctx):
 # ==================== [자동 반복 태스크 및 시작 이벤트] ====================
 
 @tasks.loop(minutes=30)
-async def monthly_stats_updater():
+async def auto_refresh_panels():
     try:
         await update_monthly_stats_message(bot)
+        await update_point_ranking_message(bot)
     except Exception as e:
-        print(f"[월간 통계 갱신 실패] {e}")
+        print(f"[패널 자동 갱신 실패] {e}")
 
 
 @bot.event
@@ -1285,7 +1285,7 @@ async def setup_hook():
         await bot.load_extension("database.services.auto_translator")
         print("✅ 자동 번역 기능 로드 완료")
     except Exception as e:
-        print(f"❌ 자동 번역 확장 로드 실패: {e}")
+        print(f"❌ 자동 번역 로드 실패: {e}")
 
 
 @bot.event
@@ -1311,10 +1311,10 @@ async def on_ready():
     if daily_notice is None:
         daily_notice = DailyNotice(bot)
 
-    if not monthly_stats_updater.is_running():
-        monthly_stats_updater.start()
+    if not auto_refresh_panels.is_running():
+        auto_refresh_panels.start()
 
-    print("✨ 영속성 버튼 등록 완료!")
+    print("✨ 영속성 버튼 및 자동 태스크 등록 완료!")
 
 
 if __name__ == "__main__":
