@@ -91,13 +91,13 @@ async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
 
 
-# ==================== [통계 평점 0.00 수정 및 월간 통계 함수] ====================
+# ==================== [통계 평점 및 상세 항목 복구 월간 통계 함수] ====================
 
 async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
     current_month = datetime.now().strftime("%Y-%m")
 
     async with aiosqlite.connect(DATABASE) as db:
-        # 평점 CAST 연산 및 포맷 대응으로 0.00 버그 수정
+        # 평점 및 후기 개수 조회
         async with db.execute(
             """
             SELECT 
@@ -112,6 +112,7 @@ async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
             avg_stars = round(row[0], 2) if row and row[0] else 0.00
             review_count = row[1] if row else 0
 
+        # 커미션 상태별 통계 조회
         async with db.execute(
             """
             SELECT status, COUNT(*) 
@@ -122,6 +123,25 @@ async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
             (f"{current_month}%",)
         ) as cursor:
             status_data = dict(await cursor.fetchall())
+
+        # TOP 디자이너 조회 (가장 완료를 많이 한 디자이너)
+        top_designer_text = "집계 데이터 없음"
+        async with db.execute(
+            """
+            SELECT designer_id, COUNT(*) as cnt
+            FROM commissions
+            WHERE (created_at LIKE ? OR strftime('%Y-%m', created_at) = ?) AND designer_id IS NOT NULL
+            GROUP BY designer_id
+            ORDER BY cnt DESC
+            LIMIT 1
+            """,
+            (f"{current_month}%", current_month)
+        ) as cursor:
+            top_row = await cursor.fetchone()
+            if top_row and guild:
+                member = guild.get_member(top_row[0])
+                if member:
+                    top_designer_text = f"{member.mention} ({top_row[1]}건 완료)"
 
     total = sum(status_data.values())
     completed = status_data.get("completed", 0)
@@ -135,12 +155,13 @@ async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
     )
 
     embed.description = (
-        f"📦 **총 주문** : {total}\n"
-        f"✅ **완료** : {completed}\n"
-        f"⏳ **진행 중** : {in_progress}\n"
-        f"❌ **취소** : {cancelled}\n"
-        f"⭐ **평균 평점** : {avg_stars:.2f}\n"
-        f"📝 **후기** : {review_count}"
+        f"📦 **총 주문** : {total}건\n"
+        f"✅ **완료** : {completed}건\n"
+        f"⏳ **진행 중** : {in_progress}건\n"
+        f"❌ **취소** : {cancelled}건\n"
+        f"🏆 **TOP Designer** : {top_designer_text}\n"
+        f"⭐ **평균 평점** : {avg_stars:.2f} / 5.0\n"
+        f"📝 **후기 참여** : {review_count}개"
     )
 
     embed.set_footer(text="월간 통계는 주기적으로 자동 갱신됩니다.")
@@ -209,7 +230,6 @@ class CustomCommissionModal(ui.Modal):
         self.category = category
         self.bundle_type = bundle_type
 
-        # Roblox 닉네임 입력란
         self.roblox_name = ui.TextInput(
             label="🎮 Roblox 닉네임",
             placeholder="작품에 반영될 로블록스 닉네임을 작성해주세요.",
@@ -217,7 +237,6 @@ class CustomCommissionModal(ui.Modal):
         )
         self.add_item(self.roblox_name)
 
-        # 단품 vs 묶음 세부 양식 구분
         if bundle_type == "단품 (1개)":
             self.details = ui.TextInput(
                 label="🖌️ 원하는 스타일 및 설명",
@@ -227,15 +246,13 @@ class CustomCommissionModal(ui.Modal):
                 max_length=1000
             )
         else:
-            count = 3 if "2+1" in bundle_type else 4
             self.details = ui.TextInput(
-                label=f"📝 제작 순서별 상세 요구사항 (총 {count}개)",
+                label="📝 제작 순서별 상세 요구사항",
                 style=discord.TextStyle.paragraph,
                 placeholder=(
                     "우선적으로 제작되길 원하는 순서대로 작성해주세요:\n"
                     "1번째 작품: (의상/구도/콘셉트)\n"
-                    "2번째 작품: (의상/구도/콘셉트)\n"
-                    "3번째 작품: (의상/구도/콘셉트)"
+                    "2번째 작품: (의상/구도/콘셉트)"
                 ),
                 required=True,
                 max_length=1000
@@ -260,11 +277,8 @@ class CustomCommissionModal(ui.Modal):
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
 
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
-        
-        # 참고자료 안내 메시지 자동 전송
         await send_reference_guide(ticket_channel, interaction.user)
 
-        # 통계 DB 등록
         now = datetime.now().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
@@ -297,6 +311,55 @@ class BundleSelectView(ui.View):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음"))
 
 
+# ==================== [개발자 지원 모달 및 뷰 추가] ====================
+
+class DeveloperApplyModal(ui.Modal):
+    def __init__(self):
+        super().__init__(title="🎨 Dialian 디자이너/개발자 지원서")
+
+        self.portfolio = ui.TextInput(
+            label="📌 포트폴리오 링크 또는 경력 소개",
+            style=discord.TextStyle.paragraph,
+            placeholder="자신의 작업물 링크(픽시브, 트위터, 오픈채팅 등)나 주요 경력을 적어주세요.",
+            required=True,
+            max_length=1000
+        )
+        self.add_item(self.portfolio)
+
+        self.tools = ui.TextInput(
+            label="🛠️ 다룰 수 있는 툴 및 자신 있는 분야",
+            placeholder="예: Blender, Photoshop, Roblox Studio, GFX, 의상 제작 등",
+            required=True,
+            max_length=200
+        )
+        self.add_item(self.tools)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        channel_name = f"지원-{interaction.user.name}"
+        ticket_channel = await guild.create_text_channel(
+            name=channel_name,
+            topic=str(interaction.user.id)
+        )
+
+        embed = discord.Embed(
+            title=f"📋 {interaction.user.display_name} 님의 개발자/디자이너 지원서",
+            color=discord.Color.gold(),
+            timestamp=datetime.now()
+        )
+        embed.add_field(name="📌 포트폴리오 / 경력", value=self.portfolio.value, inline=False)
+        embed.add_field(name="🛠️ 사용 가능 툴", value=self.tools.value, inline=False)
+
+        await ticket_channel.send(content=f"{interaction.user.mention} 님의 지원서가 접수되었습니다. 관리자의 심사를 기다려주세요!", embed=embed)
+
+        await interaction.followup.send(
+            f"✅ 지원 티켓 채널이 생성되었습니다: {ticket_channel.mention}",
+            ephemeral=True
+        )
+
+
 class CustomCategoryView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -304,7 +367,7 @@ class CustomCategoryView(ui.View):
     @ui.button(label="🎨 GFX", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def click_gfx(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message(
-            "🎨 **GFX 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
+            "🎨 **GFX 구매 수량을 선택해주세요.**",
             view=BundleSelectView("GFX"),
             ephemeral=True
         )
@@ -312,10 +375,14 @@ class CustomCategoryView(ui.View):
     @ui.button(label="👕 Roblox 복장", style=discord.ButtonStyle.primary, custom_id="cat_clothes_btn")
     async def click_clothes(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message(
-            "👕 **Roblox 복장 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
+            "👕 **Roblox 복장 구매 수량을 선택해주세요.**",
             view=BundleSelectView("Roblox 복장"),
             ephemeral=True
         )
+
+    @ui.button(label="💡 개발자 지원", style=discord.ButtonStyle.success, custom_id="cat_developer_apply_btn")
+    async def click_developer_apply(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(DeveloperApplyModal())
 
 
 # ==================== [포인트 랭킹 전용 DB 및 헬퍼] ====================
