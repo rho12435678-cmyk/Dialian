@@ -41,8 +41,8 @@ async def add_user_points(guild, member, amount: int) -> int:
             try:
                 await member.add_roles(role, reason="단골 기준 포인트 달성")
                 await member.send(
-                    f"🎉 축하합니다! **{TARGET_REGULAR_POINTS} P**를 달성하여 **@{role.name}** 등급으로 승급하셨습니다!\n"
-                    "앞으로 모든 커미션 이용 시 **혜택**이 자동 적용됩니다."
+                    f"🎉 축하합니다! **{TARGET_REGULAR_POINTS:,} P**를 달성하여 **@{role.name}** 등급으로 승급하셨습니다!\n"
+                    "앞으로 모든 커미션 이용 시 **15% 할인** 혜택이 자동 적용됩니다."
                 )
             except Exception as e:
                 print(f"[단골 역할 부여 실패] {e}")
