@@ -129,3 +129,7 @@ class CustomCategoryView(ui.View):
             view=BundleSelectView("Roblox 복장"),
             ephemeral=True
         )
+
+
+# ImportError 방지를 위한 클래스 별칭 추가
+CategoryView = CustomCategoryView
