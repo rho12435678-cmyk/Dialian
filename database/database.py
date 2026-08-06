@@ -67,14 +67,27 @@ async def create_tables():
             except aiosqlite.OperationalError:
                 pass
 
-        # 월간 통계 패널 테이블 (Startup Refresh 에러 해결용)
+        # 월간 통계 패널 테이블 (id, guild_id, channel_id, message_id)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS monthly_stats_panel (
-            guild_id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
             channel_id INTEGER,
             message_id INTEGER
         )
         """)
+
+        # 기존 DB 호환용 컬럼 추가 예외 처리
+        for col_sql in (
+            "ALTER TABLE monthly_stats_panel ADD COLUMN id INTEGER",
+            "ALTER TABLE monthly_stats_panel ADD COLUMN guild_id INTEGER",
+            "ALTER TABLE monthly_stats_panel ADD COLUMN channel_id INTEGER",
+            "ALTER TABLE monthly_stats_panel ADD COLUMN message_id INTEGER",
+        ):
+            try:
+                await db.execute(col_sql)
+            except aiosqlite.OperationalError:
+                pass
 
         # 개발자 계좌
         await db.execute("""
