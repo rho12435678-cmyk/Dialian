@@ -79,7 +79,7 @@ async def claim_once(table_name, message_id):
             )
         """)
         cursor = await db.execute(
-            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)" ,
             (message_id,)
         )
         await db.commit()
@@ -207,8 +207,9 @@ async def update_monthly_stats_message(bot_instance):
 
 # ==================== [티켓 채널 안내 임베드 및 신청서 UI] ====================
 
-async def send_ticket_guides(channel: discord.TextChannel, user: discord.User):
-    """문제점 4번 해결: 티켓 오픈 시 기존 안내사항 및 진행 임베드 함께 전송"""
+async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, designer_id: int = None):
+    designer_mention = f"<@{designer_id}>" if designer_id else "미배정"
+    
     guide_embed = discord.Embed(
         title="📌 커미션 안내 사항",
         description=(
@@ -218,7 +219,7 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User):
             "3. 모든 커미션은 선 결제 후 작업을 원칙으로 함\n"
             "4. 커미션 중 철회 시 수수료 부담\n\n"
             "**철회 수수료**\n"
-            "작업 전 철회 : 전역 환불\n\n"
+            "작업 전 철회 : 전액 환불\n\n"
             "작업 후 철회 :\n"
             "상급 : 3,000원\n"
             "중급 : 2,000원\n"
@@ -231,7 +232,7 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User):
     progress_embed = discord.Embed(
         title="📌 커미션 진행",
         description=(
-            "👨‍💻 담당 디자이너 : 미배정\n\n"
+            f"👨‍💻 담당 디자이너 : {designer_mention}\n\n"
             "📌 상태 : 🟢 상담중\n"
             "📊 진행률 : 0%\n"
             "⏰ 예상 완료 : 작업 시작 전"
@@ -253,10 +254,11 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User):
 
 
 class CustomCommissionModal(ui.Modal):
-    def __init__(self, category: str, bundle_type: str):
+    def __init__(self, category: str, bundle_type: str, designer_id: int = None):
         super().__init__(title=f"🎨 {category} [{bundle_type}] 신청서")
         self.category = category
         self.bundle_type = bundle_type
+        self.designer_id = designer_id
 
         self.roblox_name = ui.TextInput(
             label="🎮 Roblox 닉네임",
@@ -265,7 +267,6 @@ class CustomCommissionModal(ui.Modal):
         )
         self.add_item(self.roblox_name)
 
-        # 문제점 3번 해결: GFX 커미션일 때 원하는 장르 입력란 추가
         if category == "GFX":
             self.gfx_genre = ui.TextInput(
                 label="🎬 원하는 GFX 장르",
@@ -294,7 +295,6 @@ class CustomCommissionModal(ui.Modal):
             )
             self.add_item(self.details)
         else:
-            # 문제점 2번 해결: 3+1 묶음일 때 4번째 작품 입력란 분리 추가
             self.details = ui.TextInput(
                 label="📝 1~3번째 작품 요구사항",
                 style=discord.TextStyle.paragraph,
@@ -319,12 +319,39 @@ class CustomCommissionModal(ui.Modal):
         guild = interaction.guild
         channel_name = f"티켓-{interaction.user.name}"
         
-        # 문제점 1번 해결: 일반인들이 볼 수 없도록 권한 제어 (유저, 봇, 관리자/디자이너만 보임)
+        # 티켓 채널 권한 설정 (명령어, 이미지 파일 전송 권한 보장)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+                embed_links=True,
+                use_application_commands=True
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                attach_files=True,
+                embed_links=True,
+                use_application_commands=True
+            )
         }
+
+        # 선택된 담당 디자이너가 있다면 해당 디자이너 채널 접근 권한 추가
+        if self.designer_id:
+            designer_member = guild.get_member(self.designer_id)
+            if designer_member:
+                overwrites[designer_member] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
+                    embed_links=True,
+                    use_application_commands=True
+                )
 
         ticket_channel = await guild.create_text_channel(
             name=channel_name,
@@ -347,14 +374,14 @@ class CustomCommissionModal(ui.Modal):
             embed.add_field(name="🎁 4번째 작품 요구사항", value=self.fourth_details.value, inline=False)
 
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
-        await send_ticket_guides(ticket_channel, interaction.user)
+        await send_ticket_guides(ticket_channel, interaction.user, self.designer_id)
 
         now = datetime.now().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
-                INSERT INTO commissions (ticket_channel, customer_id, category, status, progress, created_at, updated_at)
-                VALUES (?, ?, ?, 'in_progress', 0, ?, ?)
-            """, (ticket_channel.id, interaction.user.id, self.category, now, now))
+                INSERT INTO commissions (ticket_channel, customer_id, designer_id, category, status, progress, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'in_progress', 0, ?, ?)
+            """, (ticket_channel.id, interaction.user.id, self.designer_id, self.category, now, now))
             await db.commit()
 
         await interaction.followup.send(
@@ -363,22 +390,83 @@ class CustomCommissionModal(ui.Modal):
         )
 
 
+# ==================== [디자이너 선택 드롭다운 UI] ====================
+
+class DesignerSelect(ui.Select):
+    def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
+        self.category = category
+        self.bundle_type = bundle_type
+
+        options = [
+            discord.SelectOption(
+                label="미지정 (추후 배정)", 
+                value="none", 
+                description="담당자를 나중에 배정받습니다."
+            )
+        ]
+
+        # config.py의 DESIGNER_ROLE_IDS 사용
+        role_key = "gfx" if category == "GFX" else "uniform"
+        role_id = DESIGNER_ROLE_IDS.get(role_key) if isinstance(DESIGNER_ROLE_IDS, dict) else None
+
+        if guild and role_id:
+            role = guild.get_role(role_id)
+            if role:
+                for member in role.members:
+                    options.append(
+                        discord.SelectOption(
+                            label=member.display_name,
+                            value=str(member.id),
+                            description=f"{category} 담당 디자이너"
+                        )
+                    )
+
+        super().__init__(
+            placeholder="👨‍💻 담당 디자이너를 선택해주세요",
+            options=options[:25],
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        designer_id = None if self.values[0] == "none" else int(self.values[0])
+        modal = CustomCommissionModal(
+            category=self.category,
+            bundle_type=self.bundle_type,
+            designer_id=designer_id
+        )
+        await interaction.response.send_modal(modal)
+
+
+class DesignerSelectView(ui.View):
+    def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
+        super().__init__(timeout=120)
+        self.add_item(DesignerSelect(category, bundle_type, guild))
+
+
 class BundleSelectView(ui.View):
     def __init__(self, category: str):
         super().__init__(timeout=120)
         self.category = category
 
+    async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
+        view = DesignerSelectView(self.category, bundle_type, interaction.guild)
+        await interaction.response.edit_message(
+            content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
+            view=view
+        )
+
     @ui.button(label="1개 (단품)", style=discord.ButtonStyle.secondary, custom_id="bundle_single_btn")
     async def select_single(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(CustomCommissionModal(self.category, "단품 (1개)"))
+        await self.prompt_designer(interaction, "단품 (1개)")
 
     @ui.button(label="🎁 2+1 묶음 (총 3개)", style=discord.ButtonStyle.primary, custom_id="bundle_21_btn")
     async def select_21(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(CustomCommissionModal(self.category, "2+1 묶음"))
+        await self.prompt_designer(interaction, "2+1 묶음")
 
     @ui.button(label="🎁 3+1 묶음 (총 4개)", style=discord.ButtonStyle.success, custom_id="bundle_31_btn")
     async def select_31(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음"))
+        await self.prompt_designer(interaction, "3+1 묶음")
 
 
 # ==================== [개발자 지원 모달 및 뷰 추가] ====================
@@ -412,8 +500,18 @@ class DeveloperApplyModal(ui.Modal):
         
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                use_application_commands=True
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                use_application_commands=True
+            )
         }
 
         ticket_channel = await guild.create_text_channel(
