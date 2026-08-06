@@ -79,7 +79,7 @@ async def claim_once(table_name, message_id):
             )
         """)
         cursor = await db.execute(
-            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)" ,
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
             (message_id,)
         )
         await db.commit()
@@ -319,7 +319,6 @@ class CustomCommissionModal(ui.Modal):
         guild = interaction.guild
         channel_name = f"티켓-{interaction.user.name}"
         
-        # 티켓 채널 권한 설정 (명령어, 이미지 파일 전송 권한 보장)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(
@@ -340,7 +339,6 @@ class CustomCommissionModal(ui.Modal):
             )
         }
 
-        # 선택된 담당 디자이너가 있다면 해당 디자이너 채널 접근 권한 추가
         if self.designer_id:
             designer_member = guild.get_member(self.designer_id)
             if designer_member:
@@ -405,7 +403,6 @@ class DesignerSelect(ui.Select):
             )
         ]
 
-        # config.py의 DESIGNER_ROLE_IDS 사용
         role_key = "gfx" if category == "GFX" else "uniform"
         role_id = DESIGNER_ROLE_IDS.get(role_key) if isinstance(DESIGNER_ROLE_IDS, dict) else None
 
@@ -469,7 +466,7 @@ class BundleSelectView(ui.View):
         await self.prompt_designer(interaction, "3+1 묶음")
 
 
-# ==================== [개발자 지원 모달 및 뷰 추가] ====================
+# ==================== [개발자 지원 모달 및 뷰] ====================
 
 class DeveloperApplyModal(ui.Modal):
     def __init__(self):
@@ -735,124 +732,6 @@ async def on_raw_reaction_add(payload):
                     pass
 
 
-# ==================== [명령어 모음] ====================
-
-@bot.command(name="명령어", aliases=["help", "도움말"])
-async def command_list(ctx):
-    embed = discord.Embed(
-        title="Dialian 명령어 목록",
-        description=(
-            "**[티켓 및 일반 서비스]**\n"
-            "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널`\n"
-            "`!진행 0|25|50|75|100` `!예상 1일|2일|3일` `!완료` `!청소 1~100`\n"
-            "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n"
-            "`!진행티켓` `!통계수정 티켓ID 진행중|완료|취소 [진행률]`\n"
-            "`!진행티켓종료 티켓ID` `!진행티켓삭제 티켓ID`\n\n"
-            "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
-            "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
-            "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
-            "`!뽑기` - 20P 소모\n"
-            "`!가위바위보 [가위/바위/보] [배팅포인트]`\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]`\n\n"
-            "**[명예 및 랭킹]**\n"
-            "`!포인트랭킹`"
-        ),
-        color=discord.Color.blurple(),
-    )
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="포인트", aliases=["마일리지", "p"])
-async def show_points(ctx, member: discord.Member = None):
-    if not await check_command_channel(ctx):
-        return
-
-    target = member or ctx.author
-    points = await get_user_points(target.id)
-
-    if points >= 1000:
-        tier_icon = "🥇"
-        tier_name = "골드 (최상위 VVIP 단골)"
-        color = discord.Color.gold()
-    elif points >= 500:
-        tier_icon = "🥈"
-        tier_name = "실버 (단골 유망주)"
-        color = discord.Color.light_grey()
-    elif points >= 200:
-        tier_icon = "🥉"
-        tier_name = "브론즈"
-        color = discord.Color.dark_orange()
-    else:
-        tier_icon = "🌱"
-        tier_name = "뉴비"
-        color = discord.Color.green()
-
-    embed = discord.Embed(title=f"📊 {target.display_name} 님의 프로필", color=color)
-    embed.add_field(name="현재 계급 (티어)", value=f"{tier_icon} **{tier_name}**", inline=False)
-    embed.add_field(name="현재 포인트", value=f"`{points} P` / (골드 기준: `1000 P`)", inline=False)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="뽑기", aliases=["가챠", "럭키드로우"])
-async def point_gacha(ctx):
-    if not await check_command_channel(ctx):
-        return
-
-    current_points = await get_user_points(ctx.author.id)
-    cost = GACHA_COST
-    
-    if current_points < cost:
-        return await ctx.send(f"❌ 포인트가 부족합니다. (현재 `{current_points}P` / 필요 `{cost}P`)")
-    
-    await add_user_points(ctx.guild, ctx.author, -cost)
-    prizes = [2, 10, 20, 30, 50, 100, 300]
-    weights = [60, 15, 15, 6, 3, 0.9, 0.1]
-    result = random.choices(prizes, weights=weights, k=1)[0]
-    
-    await add_user_points(ctx.guild, ctx.author, result)
-    final_points = await get_user_points(ctx.author.id)
-    
-    embed = discord.Embed(title="🎉 뽑기 결과", description=f"당첨 포인트: **+{result}P**", color=discord.Color.green())
-    embed.add_field(name="현재 잔여 포인트", value=f"`{final_points} P`", inline=False)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="티켓생성")
-@commands.has_permissions(administrator=True)
-async def t_create_panel(ctx):
-    file = discord.File("price.png", filename="price.png")
-    file2 = discord.File("price2.png", filename="price2.png")
-
-    embed = discord.Embed(
-        title="💼 커미션 및 문의 상담 공간",
-        description=(
-            "상담, 구매 진행, 문의사항이 있으시다면\n"
-            "아래 📩 버튼을 눌러주세요!\n\n"
-            "📌 구매 전 가격표를 확인해주세요."
-        ),
-        color=0x5865F2
-    )
-    embed.set_image(url="attachment://price.png")
-
-    embed2 = discord.Embed(color=0x5865F2)
-    embed2.set_image(url="attachment://price2.png")
-
-    await ctx.send(
-        files=[file, file2],
-        embeds=[embed, embed2],
-        view=CustomCategoryView()
-    )
-
-
-@bot.command(name="통계")
-@commands.has_permissions(administrator=True)
-async def stats(ctx):
-    embed = await build_monthly_stats_embed(ctx.guild)
-    message = await ctx.send(embed=embed)
-    await save_monthly_stats_message(message)
-    await ctx.reply("✅ 월간 통계 패널을 등록했습니다.", mention_author=False, delete_after=5)
-
-
 # ==================== [유틸리티 및 보안 함수] ====================
 
 def mask_account(account_number):
@@ -955,6 +834,372 @@ async def send_payment_info(channel, designer_id):
     return True
 
 
+# ==================== [명령어 모음] ====================
+
+@bot.command(name="명령어", aliases=["help", "도움말"])
+async def command_list(ctx):
+    embed = discord.Embed(
+        title="Dialian 명령어 목록",
+        description=(
+            "**[티켓 및 일반 서비스]**\n"
+            "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널`\n"
+            "`!진행 0|25|50|75|100` `!예상 1일|2일|3일` `!완료` `!청소 1~100`\n"
+            "`!계좌등록 [은행] [계좌] [예금주]` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n\n"
+            "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
+            "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
+            "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
+            "`!뽑기` - 20P 소모\n"
+            "`!가위바위보 [가위/바위/보] [배팅포인트]`\n"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]`\n\n"
+            "**[명예 및 랭킹]**\n"
+            "`!포인트랭킹`"
+        ),
+        color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed)
+
+
+# --- [티켓 및 진행 관리 명령어] ---
+
+@bot.command(name="진행")
+async def set_progress(ctx, percent: int):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+    
+    if percent not in [0, 25, 50, 75, 100]:
+        return await ctx.send("❌ 진행률은 0, 25, 50, 75, 100 중 하나여야 합니다.")
+
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 권한이 없습니다.")
+
+    now = datetime.now().isoformat()
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            UPDATE commissions SET progress = ?, updated_at = ? WHERE ticket_channel = ?
+        """, (percent, now, ctx.channel.id))
+        await db.commit()
+
+    await ctx.send(f"📊 작업 진행률이 **{percent}%**로 업데이트되었습니다.")
+
+
+@bot.command(name="예상")
+async def set_estimated_time(ctx, time_str: str):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 권한이 없습니다.")
+
+    await ctx.send(f"⏰ 예상 완료 시간: **{time_str}**")
+
+
+@bot.command(name="완료")
+async def mark_complete(ctx):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 권한이 없습니다.")
+
+    now = datetime.now().isoformat()
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            UPDATE commissions SET status = 'completed', progress = 100, updated_at = ? WHERE ticket_channel = ?
+        """, (now, ctx.channel.id))
+        await db.commit()
+
+    await ctx.send("✅ 커미션 작업이 완료되었습니다! 별점 및 후기 남기기를 진행해주세요.", view=StarRatingView())
+
+
+@bot.command(name="청소")
+@commands.has_permissions(manage_messages=True)
+async def clear_messages(ctx, amount: int):
+    if amount < 1 or amount > 100:
+        return await ctx.send("❌ 1~100 사이의 숫자를 입력해주세요.")
+    
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 메시지 {len(deleted) - 1}개를 삭제했습니다.", delete_after=3)
+
+
+# --- [계좌 관리 명령어] ---
+
+@bot.command(name="계좌등록")
+async def register_bank_account(ctx, bank_name: str, account_number: str, *, holder: str):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bank_accounts (
+                developer_id INTEGER PRIMARY KEY,
+                bank_name TEXT,
+                account_number TEXT,
+                holder TEXT
+            )
+        """)
+        await db.execute("""
+            INSERT INTO bank_accounts (developer_id, bank_name, account_number, holder)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(developer_id) DO UPDATE SET
+                bank_name = excluded.bank_name,
+                account_number = excluded.account_number,
+                holder = excluded.holder
+        """, (ctx.author.id, bank_name, account_number, holder))
+        await db.commit()
+
+    await ctx.send(f"✅ 계좌 정보가 등록되었습니다. (`{bank_name}` / `{account_number}` / {holder})")
+
+
+@bot.command(name="계좌목록")
+@commands.has_permissions(administrator=True)
+async def list_bank_accounts(ctx):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("SELECT developer_id, bank_name, account_number, holder FROM bank_accounts")
+        rows = await cursor.fetchall()
+
+    if not rows:
+        return await ctx.send("등록된 계좌가 없습니다.")
+
+    embed = discord.Embed(title="🏦 등록된 디자이너 계좌 목록", color=discord.Color.blue())
+    for dev_id, b_name, acc_num, holder in rows:
+        member = ctx.guild.get_member(dev_id)
+        name = member.display_name if member else f"ID: {dev_id}"
+        embed.add_field(
+            name=f"👤 {name}",
+            value=f"은행: {b_name}\n계좌번호: `{acc_num}`\n예금주: {holder}",
+            inline=False
+        )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="계좌삭제")
+async def delete_bank_account(ctx):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("DELETE FROM bank_accounts WHERE developer_id = ?", (ctx.author.id,))
+        await db.commit()
+        if cursor.rowcount > 0:
+            await ctx.send("✅ 계좌 정보가 삭제되었습니다.")
+        else:
+            await ctx.send("❌ 등록된 계좌 정보가 없습니다.")
+
+
+# --- [포인트, 미니게임 & 랭킹 명령어] ---
+
+@bot.command(name="포인트랭킹")
+async def point_ranking(ctx):
+    embed = await build_point_ranking_embed(ctx.guild)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="포인트", aliases=["마일리지", "p"])
+async def show_points(ctx, member: discord.Member = None):
+    if not await check_command_channel(ctx):
+        return
+
+    target = member or ctx.author
+    points = await get_user_points(target.id)
+
+    if points >= 1000:
+        tier_icon = "🥇"
+        tier_name = "골드 (최상위 VVIP 단골)"
+        color = discord.Color.gold()
+    elif points >= 500:
+        tier_icon = "🥈"
+        tier_name = "실버 (단골 유망주)"
+        color = discord.Color.light_grey()
+    elif points >= 200:
+        tier_icon = "🥉"
+        tier_name = "브론즈"
+        color = discord.Color.dark_orange()
+    else:
+        tier_icon = "🌱"
+        tier_name = "뉴비"
+        color = discord.Color.green()
+
+    embed = discord.Embed(title=f"📊 {target.display_name} 님의 프로필", color=color)
+    embed.add_field(name="현재 계급 (티어)", value=f"{tier_icon} **{tier_name}**", inline=False)
+    embed.add_field(name="현재 포인트", value=f"`{points} P` / (골드 기준: `1000 P`)", inline=False)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="포인트지급")
+@commands.has_permissions(administrator=True)
+async def give_points(ctx, member: discord.Member, amount: int):
+    if amount <= 0:
+        return await ctx.send("❌ 1 이상의 포인트를 입력해주세요.")
+    await add_user_points(ctx.guild, member, amount)
+    total = await get_user_points(member.id)
+    await ctx.send(f"✅ {member.mention} 님에게 **{amount}P**를 지급했습니다. (현재: `{total}P`)")
+
+
+@bot.command(name="포인트차감")
+@commands.has_permissions(administrator=True)
+async def deduct_points(ctx, member: discord.Member, amount: int):
+    if amount <= 0:
+        return await ctx.send("❌ 1 이상의 포인트를 입력해주세요.")
+    await add_user_points(ctx.guild, member, -amount)
+    total = await get_user_points(member.id)
+    await ctx.send(f"✅ {member.mention} 님의 포인트를 **{amount}P** 차감했습니다. (현재: `{total}P`)")
+
+
+@bot.command(name="포인트리셋")
+@commands.has_permissions(administrator=True)
+async def reset_points(ctx, member: discord.Member):
+    current = await get_user_points(member.id)
+    await add_user_points(ctx.guild, member, -current)
+    await ctx.send(f"✅ {member.mention} 님의 포인트를 초기화했습니다.")
+
+
+@bot.command(name="뽑기", aliases=["가챠", "럭키드로우"])
+async def point_gacha(ctx):
+    if not await check_command_channel(ctx):
+        return
+
+    current_points = await get_user_points(ctx.author.id)
+    cost = GACHA_COST
+    
+    if current_points < cost:
+        return await ctx.send(f"❌ 포인트가 부족합니다. (현재 `{current_points}P` / 필요 `{cost}P`)")
+    
+    await add_user_points(ctx.guild, ctx.author, -cost)
+    prizes = [2, 10, 20, 30, 50, 100, 300]
+    weights = [60, 15, 15, 6, 3, 0.9, 0.1]
+    result = random.choices(prizes, weights=weights, k=1)[0]
+    
+    await add_user_points(ctx.guild, ctx.author, result)
+    final_points = await get_user_points(ctx.author.id)
+    
+    embed = discord.Embed(title="🎉 뽑기 결과", description=f"당첨 포인트: **+{result}P**", color=discord.Color.green())
+    embed.add_field(name="현재 잔여 포인트", value=f"`{final_points} P`", inline=False)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="가위바위보")
+async def rps_game(ctx, user_choice: str, bet_points: int):
+    if not await check_command_channel(ctx):
+        return
+    if user_choice not in ["가위", "바위", "보"]:
+        return await ctx.send("❌ `가위`, `바위`, `보` 중 하나를 입력해 주세요.")
+    if bet_points <= 0:
+        return await ctx.send("❌ 1P 이상 배팅해 주세요.")
+
+    curr_p = await get_user_points(ctx.author.id)
+    if curr_p < bet_points:
+        return await ctx.send(f"❌ 포인트가 부족합니다. (현재: `{curr_p}P`)")
+
+    bot_choice = random.choice(["가위", "바위", "보"])
+    rules = {"가위": "보", "바위": "가위", "보": "바위"}
+
+    if user_choice == bot_choice:
+        result = "비겼습니다! 배팅금이 유지됩니다."
+    elif rules[user_choice] == bot_choice:
+        await add_user_points(ctx.guild, ctx.author, bet_points)
+        result = f"🎉 이겼습니다! **+{bet_points}P** 획득!"
+    else:
+        await add_user_points(ctx.guild, ctx.author, -bet_points)
+        result = f"💀 졌습니다... **-{bet_points}P** 차감!"
+
+    final_p = await get_user_points(ctx.author.id)
+    embed = discord.Embed(
+        title="✌️✊🖐️ 가위바위보 결과",
+        description=f"유저: **{user_choice}** vs 봇: **{bot_choice}**\n\n{result}",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="현재 잔여 포인트", value=f"`{final_p} P`")
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="묵찌빠")
+async def mjb_game(ctx, user_choice: str, bet_points: int):
+    if not await check_command_channel(ctx):
+        return
+    if user_choice not in ["가위", "바위", "보"]:
+        return await ctx.send("❌ `가위`, `바위`, `보` 중 하나를 입력해 주세요.")
+    if bet_points <= 0:
+        return await ctx.send("❌ 1P 이상 배팅해 주세요.")
+
+    curr_p = await get_user_points(ctx.author.id)
+    if curr_p < bet_points:
+        return await ctx.send(f"❌ 포인트가 부족합니다. (현재: `{curr_p}P`)")
+
+    bot_choice = random.choice(["가위", "바위", "보"])
+    if user_choice == bot_choice:
+        win = random.choice([True, False])
+        if win:
+            await add_user_points(ctx.guild, ctx.author, bet_points * 2)
+            result = f"🎉 승리! **+{bet_points * 2}P** 획득!"
+        else:
+            await add_user_points(ctx.guild, ctx.author, -bet_points)
+            result = f"💀 패배! **-{bet_points}P** 차감!"
+    else:
+        result = f"턴 변경! (봇 선택: {bot_choice})"
+
+    final_p = await get_user_points(ctx.author.id)
+    embed = discord.Embed(
+        title="✊✌️🖐️ 묵찌빠 결과",
+        description=f"유저: **{user_choice}** vs 봇: **{bot_choice}**\n\n{result}",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="현재 잔여 포인트", value=f"`{final_p} P`")
+    await ctx.send(embed=embed)
+
+
+# --- [관리자 및 시스템 명령어] ---
+
+@bot.command(name="티켓생성")
+@commands.has_permissions(administrator=True)
+async def t_create_panel(ctx):
+    file = discord.File("price.png", filename="price.png")
+    file2 = discord.File("price2.png", filename="price2.png")
+
+    embed = discord.Embed(
+        title="💼 커미션 및 문의 상담 공간",
+        description=(
+            "상담, 구매 진행, 문의사항이 있으시다면\n"
+            "아래 📩 버튼을 눌러주세요!\n\n"
+            "📌 구매 전 가격표를 확인해주세요."
+        ),
+        color=0x5865F2
+    )
+    embed.set_image(url="attachment://price.png")
+
+    embed2 = discord.Embed(color=0x5865F2)
+    embed2.set_image(url="attachment://price2.png")
+
+    await ctx.send(
+        files=[file, file2],
+        embeds=[embed, embed2],
+        view=CustomCategoryView()
+    )
+
+
+@bot.command(name="인증패널")
+@commands.has_permissions(administrator=True)
+async def send_verify_panel(ctx):
+    embed = discord.Embed(
+        title="🔒 서버 인증 패널",
+        description="아래 버튼을 눌러 유저 인증을 완료해 주세요.",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed, view=VerifyView())
+
+
+@bot.command(name="통계")
+@commands.has_permissions(administrator=True)
+async def stats(ctx):
+    embed = await build_monthly_stats_embed(ctx.guild)
+    message = await ctx.send(embed=embed)
+    await save_monthly_stats_message(message)
+    await ctx.reply("✅ 월간 통계 패널을 등록했습니다.", mention_author=False, delete_after=5)
+
+
+@bot.command(name="통계동기화")
+@commands.has_permissions(administrator=True)
+async def sync_stats(ctx):
+    await update_monthly_stats_message(bot)
+    await ctx.send("✅ 월간 통계가 동기화되었습니다.")
+
+
 @bot.command(name="계좌전송", aliases=["계좌번호", "결제정보"])
 async def send_bank_to_ticket(ctx, member: discord.Member = None):
     if not is_ticket_channel(ctx.channel):
@@ -993,7 +1238,6 @@ async def close_ticket_by_command(ctx):
         return await ctx.send("❌ 권한이 없습니다.")
 
     notice = await ctx.send("🔒 티켓 종료 처리 중입니다.")
-    ticket_owner = await find_ticket_owner(channel)
     designer = await fetch_member_or_none(guild, designer_id)
 
     if designer:
@@ -1037,8 +1281,11 @@ async def setup_hook():
     if not os.getenv("OPENAI_API_KEY"):
         print("Auto translator disabled: OPENAI_API_KEY is missing")
         return
-    await bot.load_extension("database.services.auto_translator")
-    print("✅ 자동 번역 기능 로드 완료")
+    try:
+        await bot.load_extension("database.services.auto_translator")
+        print("✅ 자동 번역 기능 로드 완료")
+    except Exception as e:
+        print(f"❌ 자동 번역 확장 로드 실패: {e}")
 
 
 @bot.event
