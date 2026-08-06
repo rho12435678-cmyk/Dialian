@@ -229,17 +229,6 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
         color=0xFEE75C
     )
 
-    progress_embed = discord.Embed(
-        title="📌 커미션 진행",
-        description=(
-            f"👨‍💻 담당 디자이너 : {designer_mention}\n\n"
-            "📌 상태 : 🟢 상담중\n"
-            "📊 진행률 : 0%\n"
-            "⏰ 예상 완료 : 작업 시작 전"
-        ),
-        color=0x5865F2
-    )
-
     ref_embed = discord.Embed(
         title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
         description=(
@@ -250,17 +239,38 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
     )
     ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
 
-    # 1. 커미션 안내 및 참고 자료 임베드 전송
+    # 1. 일반 티켓 채널에는 안내 및 참고 자료 임베드만 전송 (진행 버튼 제외)
     await channel.send(embeds=[guide_embed, ref_embed])
 
-    # 2. 진행 상황 임베드 + 진행률 컨트롤 버튼(ProgressView)
-    await channel.send(embed=progress_embed, view=ProgressView())
-
-    # 3. 계좌 전송 버튼(PaymentView)
+    # 2. 계좌 전송 버튼(PaymentView) 전송
     await channel.send("💳 **결제 안내**\n아래 버튼을 눌러 담당 디자이너의 계좌 정보를 확인하실 수 있습니다.", view=PaymentView())
 
-    # 4. 티켓 관리/닫기 버튼(TicketCloseView)
+    # 3. 티켓 관리/닫기 버튼(TicketCloseView) 전송
     await channel.send("🔒 **티켓 관리**\n상담 완료 후 아래 버튼을 눌러 티켓을 종료하실 수 있습니다.", view=TicketCloseView())
+
+    # 4. 담당 디자이너가 지정되어 있는 경우, 디자이너의 DM으로만 진행 제어 패널 전송
+    if designer_id:
+        try:
+            guild = channel.guild
+            designer = guild.get_member(designer_id) or await guild.fetch_member(designer_id)
+            if designer:
+                progress_embed = discord.Embed(
+                    title=f"📌 [{guild.name}] 커미션 진행 관리",
+                    description=(
+                        f"🏷️ 티켓 채널 : {channel.mention} (`{channel.name}`)\n"
+                        f"👤 고객 : {user.mention} (`{user.name}`)\n\n"
+                        "📌 상태 : 🟢 상담중\n"
+                        "📊 진행률 : 0%\n"
+                        "⏰ 예상 완료 : 작업 시작 전"
+                    ),
+                    color=0x5865F2
+                )
+                await designer.send(
+                    embed=progress_embed, 
+                    view=ProgressView(ticket_channel_id=channel.id)
+                )
+        except Exception as e:
+            print(f"[디자이너 DM 전송 실패] {e}")
 
 
 class CustomCommissionModal(ui.Modal):
