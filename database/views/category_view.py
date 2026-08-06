@@ -130,6 +130,33 @@ class CustomCategoryView(ui.View):
             ephemeral=True
         )
 
+class CustomCategoryView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="🎨 GFX", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
+    async def click_gfx(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_message(
+            "🎨 **GFX 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
+            view=BundleSelectView("GFX"),
+            ephemeral=True
+        )
+
+    @ui.button(label="👕 Roblox 복장", style=discord.ButtonStyle.primary, custom_id="cat_clothes_btn")
+    async def click_clothes(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_message(
+            "👕 **Roblox 복장 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
+            view=BundleSelectView("Roblox 복장"),
+            ephemeral=True
+        )
+
+    @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_btn")
+    async def click_developer(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_message(
+            "💻 **개발자 지원 문의입니다.**\n담당자가 확인 후 답변드립니다.",
+            ephemeral=True
+        )
+
 
 # ImportError 방지를 위한 클래스 별칭 추가
 CategoryView = CustomCategoryView
