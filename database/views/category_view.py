@@ -5,6 +5,7 @@ from datetime import datetime
 from database.database import DATABASE
 
 
+# 1. 참고 자료 안내 함수
 async def send_reference_guide(channel: discord.TextChannel, user: discord.User):
     """티켓 생성 시 참고자료 첨부 안내 전송"""
     embed = discord.Embed(
@@ -19,6 +20,56 @@ async def send_reference_guide(channel: discord.TextChannel, user: discord.User)
     await channel.send(embed=embed)
 
 
+# 2. 진행 현황 & 수수료/계좌 안내 임베드 전송 함수
+async def send_ticket_info_embeds(channel: discord.TextChannel):
+    """진행 현황 및 수수료/계좌 안내 임베드 전송"""
+    # 진행 현황 임베드
+    status_embed = discord.Embed(title="⚙️ 커미션 진행 현황", color=0x3498DB)
+    status_embed.add_field(name="현재 상태", value="🟡 작업 대기 중", inline=True)
+    status_embed.add_field(name="진행률", value="[▒▒▒▒▒▒▒▒▒▒] 0%", inline=True)
+
+    # 결제 및 수수료 안내 임베드
+    payment_embed = discord.Embed(
+        title="💳 결제 및 수수료 안내",
+        description=(
+            "• **결제 수단**: 계좌이체 / 토스 / 문화상품권\n"
+            "• **수수료 안내**: 계좌이체 외 결제 진행 시 추가 수수료가 발생할 수 있습니다.\n"
+            "• 입금 확인 후 본격적인 제작이 시작됩니다."
+        ),
+        color=0xF1C40F
+    )
+
+    await channel.send(embed=status_embed)
+    await channel.send(embed=payment_embed)
+
+
+# 3. 담당 디자이너 선택 드롭다운 UI
+class DesignerSelect(ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Dial", description="GFX / 복장 담당 디자이너", emoji="🎨"),
+            discord.SelectOption(label="ParkSun", description="GFX / 복장 담당 디자이너", emoji="👕"),
+            discord.SelectOption(label="Sian", description="GFX / 복장 담당 디자이너", emoji="🖌️")
+        ]
+        super().__init__(placeholder="👨‍🎨 담당 디자이너를 선택해 주세요...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_designer = self.values[0]
+        embed = discord.Embed(
+            title="👨‍🎨 담당 디자이너 배정 완료",
+            description=f"본 커미션의 담당 디자이너가 **{selected_designer}** 님으로 지정되었습니다.",
+            color=0x9B59B6
+        )
+        await interaction.response.send_message(embed=embed)
+
+
+class DesignerSelectView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(DesignerSelect())
+
+
+# 4. 커미션 신청 모달
 class CustomCommissionModal(ui.Modal):
     def __init__(self, category: str, bundle_type: str):
         super().__init__(title=f"🎨 {category} [{bundle_type}] 신청서")
@@ -68,16 +119,25 @@ class CustomCommissionModal(ui.Modal):
             topic=str(interaction.user.id)
         )
 
+        # [1] 신청서 내용 임베드 전송
         embed = discord.Embed(
             title=f"📋 {self.category} 커미션 신청서 ({self.bundle_type})",
             color=0x57F287
         )
         embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_name.value, inline=False)
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
-
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
+
+        # [2] 참고 자료 안내 전송
         await send_reference_guide(ticket_channel, interaction.user)
 
+        # [3] 진행 현황 & 수수료 안내 임베드 전송
+        await send_ticket_info_embeds(ticket_channel)
+
+        # [4] 담당 디자이너 선택 드롭다운 전송
+        await ticket_channel.send("👨‍🎨 **담당 디자이너를 선택해 주세요:**", view=DesignerSelectView())
+
+        # DB 저장
         now = datetime.now().isoformat()
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
@@ -92,6 +152,7 @@ class CustomCommissionModal(ui.Modal):
         )
 
 
+# 5. 수량/묶음 선택 뷰
 class BundleSelectView(ui.View):
     def __init__(self, category: str):
         super().__init__(timeout=120)
@@ -110,26 +171,7 @@ class BundleSelectView(ui.View):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음"))
 
 
-class CustomCategoryView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @ui.button(label="🎨 GFX", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
-    async def click_gfx(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_message(
-            "🎨 **GFX 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
-            view=BundleSelectView("GFX"),
-            ephemeral=True
-        )
-
-    @ui.button(label="👕 Roblox 복장", style=discord.ButtonStyle.primary, custom_id="cat_clothes_btn")
-    async def click_clothes(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_message(
-            "👕 **Roblox 복장 구매 수량을 선택해주세요.**\n*(묶음 선택 시 우선순위 순서대로 제작이 진행됩니다)*",
-            view=BundleSelectView("Roblox 복장"),
-            ephemeral=True
-        )
-
+# 6. 메인 카테고리 선택 뷰 (개발자 지원 버튼 포함)
 class CustomCategoryView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
