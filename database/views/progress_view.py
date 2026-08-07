@@ -1,7 +1,9 @@
+from datetime import datetime
 import re
 import aiosqlite
 import discord
 from discord import ui
+
 from database.database import DATABASE
 from config import DESIGNER_ROLE_IDS
 
@@ -55,8 +57,7 @@ class ProgressView(ui.View):
         channel_id = int(match.group(1))
         
         # 임베드 제목이나 텍스트에서 서버 이름/정보를 통해 Guild 객체 탐색 (bot 인스턴스 활용)
-        guild = message._state._get_client().guilds[0] # 기본 Fallback 혹은 연동된 봇 클라이언트 이용
-        # 정확한 매칭을 위해 봇이 속한 모든 길드 중 해당 채널을 가지고 있는 길드 탐색
+        guild = message._state._get_client().guilds[0]
         for g in message._state._get_client().guilds:
             if g.get_channel(channel_id):
                 guild = g
