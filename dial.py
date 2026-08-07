@@ -89,6 +89,9 @@ async def claim_once(table_name, message_id):
 
 @bot.check
 async def prevent_duplicate_command_processing(ctx):
+    # 업데이트 관련 명령어는 중복 체크 예외 처리하여 항상 실행 허용
+    if ctx.command and ctx.command.name in ["업데이트", "업데이트확인"]:
+        return True
     return await claim_once("processed_commands", ctx.message.id)
 
 
@@ -292,6 +295,8 @@ async def command_list(ctx):
             "`!계좌등록` `!계좌목록` `!계좌삭제` `!통계` `!통계동기화`\n"
             "`!진행티켓` `!통계수정 티켓ID 진행중|완료|취소 [진행률]`\n"
             "`!진행티켓종료 티켓ID` `!진행티켓삭제 티켓ID`\n\n"
+            "**[시스템 & 관리]**\n"
+            "`!업데이트확인` `!업데이트` (최신 Git Pull 반영)\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
@@ -562,9 +567,66 @@ async def setup_point_ranking(ctx):
 @commands.has_permissions(administrator=True)
 async def update_check(ctx):
     embed = discord.Embed(title="봇 실행 정보", color=discord.Color.green(), timestamp=bot_started_at)
-    embed.add_field(name="버전", value=f"`{get_bot_version()}`", inline=True)
+    embed.add_field(name="버전 (Commit)", value=f"`{get_bot_version()}`", inline=True)
     embed.add_field(name="시작 시간", value=discord.utils.format_dt(bot_started_at, style="F"), inline=False)
     await ctx.send(embed=embed)
+
+
+@bot.command(name="업데이트", aliases=["패치", "update"])
+@commands.has_permissions(administrator=True)
+async def update_bot(ctx):
+    """Git repository에서 최신 코드를 pull 받고 갱신 상태를 출력합니다."""
+    status_msg = await ctx.send("🔄 **최신 업데이트를 확인하고 반영 중입니다 (git pull)...**")
+    
+    bot_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    try:
+        # 비동기로 git pull 명령어 실행
+        proc = await asyncio.create_subprocess_exec(
+            "git", "pull",
+            cwd=bot_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        
+        stdout_str = stdout.decode("utf-8", errors="replace").strip()
+        stderr_str = stderr.decode("utf-8", errors="replace").strip()
+
+        if proc.returncode == 0:
+            current_version = get_bot_version()
+            embed = discord.Embed(
+                title="✅ 업데이트 성공",
+                description=f"git pull 처리가 성공적으로 진행되었습니다.",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="현재 버전 (Git Commit)", value=f"`{current_version}`", inline=False)
+            
+            output_log = stdout_str if stdout_str else "출력 결과 없음"
+            if len(output_log) > 1000:
+                output_log = output_log[:1000] + "\n... (생략됨)"
+                
+            embed.add_field(name="Git 실행 로그", value=f"```\n{output_log}\n```", inline=False)
+            embed.set_footer(text="⚠️ Python 코드 변경사항을 완벽히 적용하려면 프로세스 재시작(PM2, Docker 등)이 필요할 수 있습니다.")
+            
+            await status_msg.edit(content=None, embed=embed)
+        else:
+            embed = discord.Embed(
+                title="❌ 업데이트 실패 (Git Pull Error)",
+                description=f"Git 실행 도중 오류가 발생했습니다.",
+                color=discord.Color.red()
+            )
+            error_log = stderr_str if stderr_str else stdout_str
+            if len(error_log) > 1000:
+                error_log = error_log[:1000] + "\n... (생략됨)"
+                
+            embed.add_field(name="오류 로그", value=f"```\n{error_log}\n```", inline=False)
+            await status_msg.edit(content=None, embed=embed)
+
+    except FileNotFoundError:
+        await status_msg.edit(content="❌ **Git이 설치되어 있지 않거나 경로 환경변수가 설정되지 않았습니다.**")
+    except Exception as e:
+        await status_msg.edit(content=f"❌ **업데이트 중 오류 발생:** `{e}`")
 
 
 # ==================== [보안 및 유틸리티 함수] ====================
