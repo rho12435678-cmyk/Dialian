@@ -533,8 +533,8 @@ async def on_ready():
     if daily_notice is None:
         daily_notice = DailyNotice(bot)
 
-    if not daily_notice.send_daily_notice.is_running():
-        daily_notice.send_daily_notice.start()
+    if not daily_notice.daily_notice.is_running():
+        daily_notice.daily_notice.start()
 
     update_presence.start()
     backup_database_task.start()
