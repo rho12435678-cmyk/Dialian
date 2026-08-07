@@ -90,7 +90,7 @@ async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
 
 
-# ==================== [에러 핸들러 (누락분 추가)] ====================
+# ==================== [에러 핸들러] ====================
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -155,7 +155,6 @@ async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
     current_month = datetime.now().strftime("%Y-%m")
 
     async with aiosqlite.connect(DATABASE) as db:
-        # 리뷰 테이블 안전 생성 보장
         await db.execute("""
             CREATE TABLE IF NOT EXISTS reviews (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,17 +234,14 @@ async def save_monthly_stats_message(message: discord.Message):
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS monthly_stats_panel (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
+                id INTEGER PRIMARY KEY,
                 channel_id INTEGER,
                 message_id INTEGER
             )
         """)
         await db.execute("""
-            INSERT INTO monthly_stats_panel (id, channel_id, message_id)
+            INSERT OR REPLACE INTO monthly_stats_panel (id, channel_id, message_id)
             VALUES (1, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                channel_id = excluded.channel_id,
-                message_id = excluded.message_id
         """, (message.channel.id, message.id))
         await db.commit()
 
@@ -267,7 +263,7 @@ async def update_monthly_stats_message(bot_instance):
                 print(f"[Monthly Stats 오류] {e}")
 
 
-# ==================== [티켓/커미션 관련 코드 (기존 원본 완벽 유지)] ====================
+# ==================== [티켓/커미션 관련 코드] ====================
 
 async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, designer_id: int = None):
     designer_text = f"<@{designer_id}>" if designer_id else "미배정 (랜덤)"
@@ -320,7 +316,8 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
                     ),
                     color=0x5865F2
                 )
-                await designer.send(embed=progress_embed, view=ProgressView(ticket_channel_id=channel.id))
+                # [수정 완료] ticket_channel_id 인자 제거 및 ProgressView 호출 정상화
+                await designer.send(embed=progress_embed, view=ProgressView(designer_id=designer.id, active_progress=0))
                 await designer.send("💳 **계좌 정보 전송**", view=PaymentView())
                 await designer.send("🔒 **티켓 관리 및 종료**", view=TicketCloseView())
         except Exception as e:
