@@ -5,6 +5,47 @@ from database.modal.uniform_modal import UniformModal
 
 
 # ==========================================
+# 개발자 지원 모달 (Modal)
+# ==========================================
+class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청서"):
+    portfolio = discord.ui.TextInput(
+        label="포트폴리오 링크 또는 경력",
+        style=discord.TextStyle.paragraph,
+        placeholder="포트폴리오 링크나 간단한 개발 경력을 작성해 주세요.",
+        required=True,
+        max_length=1000
+    )
+    introduction = discord.ui.TextInput(
+        label="자기소개 및 지원 동기",
+        style=discord.TextStyle.paragraph,
+        placeholder="자기소개와 각오를 적어주세요.",
+        required=True,
+        max_length=500
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # 지원서를 수신할 채널 ID (실제 채널 ID로 변경해 주세요)
+        APPLY_CHANNEL_ID = 123456789012345678  
+
+        channel = interaction.guild.get_channel(APPLY_CHANNEL_ID)
+        
+        embed = discord.Embed(
+            title="📩 새로운 개발자 지원서 접수",
+            color=discord.Color.green(),
+            timestamp=interaction.created_at
+        )
+        embed.add_field(name="지원자", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
+        embed.add_field(name="포트폴리오 / 경력", value=self.portfolio.value, inline=False)
+        embed.add_field(name="자기소개 및 동기", value=self.introduction.value, inline=False)
+
+        if channel:
+            await channel.send(embed=embed)
+            await interaction.response.send_message("✅ 개발자 지원서가 성공적으로 접수되었습니다!", ephemeral=True)
+        else:
+            await interaction.response.send_message("✅ 지원서 작성이 완료되었습니다. (관리자 수신 채널 설정 필요)", ephemeral=True)
+
+
+# ==========================================
 # 4단계: 담당 디자이너 선택 드롭다운 (Dynamic UI)
 # ==========================================
 class DesignerSelect(discord.ui.Select):
@@ -128,3 +169,15 @@ class CategoryView(discord.ui.View):
             content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.",
             view=BundleSelectView(category="복장")
         )
+
+    @discord.ui.button(
+        label="💻 개발자 지원",
+        style=discord.ButtonStyle.success,
+        custom_id="cat_dev_apply_btn"
+    )
+    async def select_dev_apply(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(DeveloperApplyModal())
