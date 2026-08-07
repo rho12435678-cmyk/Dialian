@@ -24,7 +24,7 @@ class TicketOpenView(discord.ui.View):
             return
 
         await interaction.response.send_message(
-            "원하시는 커미션을 선택해주세요.",
+            "원하시는 커미션 또는 지원 항목을 선택해주세요.",
             view=CategoryView(),
             ephemeral=True
         )
