@@ -267,7 +267,7 @@ async def update_monthly_stats_message(bot_instance):
                 print(f"[Monthly Stats 오류] {e}")
 
 
-# ==================== [티켓/커미션 관련 코드 (수정됨)] ====================
+# ==================== [티켓/커미션 관련 뷰 및 로직] ====================
 
 class TicketOpenView(ui.View):
     def __init__(self):
@@ -275,7 +275,6 @@ class TicketOpenView(ui.View):
 
     @ui.button(label="티켓 생성", style=discord.ButtonStyle.success, emoji="📩", custom_id="ticket_open_btn")
     async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
-        # 💡 [핵심 수정] 티켓 생성 버튼을 눌렀을 때 카테고리 선택 뷰가 정상적으로 뜨도록 연결
         await interaction.response.send_message(
             "📂 **신청하실 커미션의 배정 방식을 선택해주세요.**", 
             view=TicketCategoryView(), 
@@ -458,16 +457,16 @@ class CustomCommissionModal(ui.Modal):
         ticket_channel = await guild.create_text_channel(name=channel_name, topic=str(interaction.user.id), overwrites=overwrites)
 
         embed = discord.Embed(title=f"📋 {self.category} 커미션 신청서 ({self.bundle_type})", color=0x57F287)
-        if hasattr(self, "roblox_name"):
+        if hasattr(self, "roblox_name") and self.roblox_name.value:
             embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_name.value, inline=False)
-        if hasattr(self, "gfx_genre"):
+        if hasattr(self, "gfx_genre") and self.gfx_genre.value:
             embed.add_field(name="🎬 GFX 장르", value=self.gfx_genre.value, inline=False)
 
         designer_mention = f"<@{self.designer_id}>" if self.designer_id else "미배정 (랜덤)"
         embed.add_field(name="👨‍💻 담당 디자이너", value=designer_mention, inline=False)
         embed.add_field(name="📌 요청 상세 내용", value=self.details.value, inline=False)
         
-        if hasattr(self, "fourth_details"):
+        if hasattr(self, "fourth_details") and self.fourth_details.value:
             embed.add_field(name="🎁 보너스 작품 요구사항", value=self.fourth_details.value, inline=False)
 
         await ticket_channel.send(content=interaction.user.mention, embed=embed)
@@ -490,30 +489,24 @@ class BundleSelectionView(ui.View):
         self.category = category
         self.designer_id = designer_id
 
-    @ui.button(label="1개 (기본)", style=discord.ButtonStyle.secondary)
+    @ui.button(label="1개 (기본)", style=discord.ButtonStyle.secondary, custom_id="bundle_single")
     async def single_item(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "1개", 1, self.designer_id))
 
-    @ui.button(label="2+1 묶음 (2개 결제, 3개 수령)", style=discord.ButtonStyle.success)
+    @ui.button(label="2+1 묶음 (2개 결제, 3개 수령)", style=discord.ButtonStyle.success, custom_id="bundle_2_1")
     async def bundle_2_plus_1(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "2+1 묶음", 3, self.designer_id))
 
-    @ui.button(label="3+1 묶음 (3개 결제, 4개 수령)", style=discord.ButtonStyle.primary)
+    @ui.button(label="3+1 묶음 (3개 결제, 4개 수령)", style=discord.ButtonStyle.primary, custom_id="bundle_3_1")
     async def bundle_3_plus_1(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(CustomCommissionModal(self.category, "3+1 묶음", 4, self.designer_id))
-
-
-class TicketCategoryView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(CategorySelect())
 
 
 class CategorySelect(ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="랜덤 배정", description="디자이너를 무작위로 배정받습니다.", emoji="🎲"),
-            discord.SelectOption(label="담당 디자이너 지정", description="원하는 디자이너를 선택합니다.", emoji="🎨")
+            discord.SelectOption(label="랜덤 배정", description="디자이너를 무작위로 배정받습니다.", emoji="🎲", value="랜덤 배정"),
+            discord.SelectOption(label="담당 디자이너 지정", description="원하는 디자이너를 선택합니다.", emoji="🎨", value="담당 디자이너 지정")
         ]
         super().__init__(placeholder="디자이너 배정 방식을 선택하세요.", min_values=1, max_values=1, options=options, custom_id="assign_method_select")
 
@@ -539,10 +532,10 @@ class CategorySelect(ui.Select):
             await interaction.followup.send("📂 **신청할 커미션 종류를 선택해주세요.**", view=CategorySelectView(designer_id=None), ephemeral=True)
 
 
-class DesignerSelectView(ui.View):
-    def __init__(self, designers):
+class TicketCategoryView(ui.View):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(DesignerSelect(designers))
+        self.add_item(CategorySelect())
 
 
 class DesignerSelect(ui.Select):
@@ -556,24 +549,30 @@ class DesignerSelect(ui.Select):
         await interaction.followup.send(f"✅ 선택된 디자이너: <@{designer_id}>\n📂 **신청할 커미션 종류를 선택해주세요.**", view=CategorySelectView(designer_id=designer_id), ephemeral=True)
 
 
+class DesignerSelectView(ui.View):
+    def __init__(self, designers):
+        super().__init__(timeout=None)
+        self.add_item(DesignerSelect(designers))
+
+
 class CategorySelectView(ui.View):
     def __init__(self, designer_id: int = None):
         super().__init__(timeout=None)
         self.designer_id = designer_id
 
-    @ui.button(label="GFX 커미션", style=discord.ButtonStyle.primary, emoji="🖼️")
+    @ui.button(label="GFX 커미션", style=discord.ButtonStyle.primary, emoji="🖼️", custom_id="cat_gfx")
     async def btn_gfx(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message("🖼️ **GFX 커미션 신청 수량을 선택하세요.**", view=BundleSelectionView("GFX", self.designer_id), ephemeral=True)
 
-    @ui.button(label="게임 UI / 썸네일", style=discord.ButtonStyle.primary, emoji="🎮")
+    @ui.button(label="게임 UI / 썸네일", style=discord.ButtonStyle.primary, emoji="🎮", custom_id="cat_gameui")
     async def btn_game_ui(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message("🎮 **게임 UI / 썸네일 커미션 신청 수량을 선택하세요.**", view=BundleSelectionView("게임 UI / 썸네일", self.designer_id), ephemeral=True)
 
-    @ui.button(label="복장 커미션", style=discord.ButtonStyle.primary, emoji="👕")
+    @ui.button(label="복장 커미션", style=discord.ButtonStyle.primary, emoji="👕", custom_id="cat_uniform")
     async def btn_uniform(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message("👕 **복장 커미션 신청 수량을 선택하세요.**", view=BundleSelectionView("복장", self.designer_id), ephemeral=True)
 
-    @ui.button(label="그룹 로고 / 홍보지", style=discord.ButtonStyle.primary, emoji="🏢")
+    @ui.button(label="그룹 로고 / 홍보지", style=discord.ButtonStyle.primary, emoji="🏢", custom_id="cat_grouplogo")
     async def btn_group_logo(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_message("🏢 **그룹 로고 / 홍보지 커미션 신청 수량을 선택하세요.**", view=BundleSelectionView("그룹 로고 / 홍보지", self.designer_id), ephemeral=True)
 
@@ -1026,118 +1025,4 @@ async def cmd_update(ctx):
             await bot.close()
             os.execv(sys.executable, [sys.executable] + sys.argv)
     except subprocess.CalledProcessError as e:
-        await msg.edit(content=f"❌ 업데이트 중 오류가 발생했습니다.\n```err\n{e.stderr}\n```")
-    except Exception as e:
-        await msg.edit(content=f"❌ 알 수 없는 오류 발생: {e}")
-
-
-# ==================== [명령어: 진행 상황 및 작업 관리] ====================
-
-@bot.command(name="진행")
-async def cmd_progress(ctx, percent: int):
-    if percent not in [0, 25, 50, 75, 100]:
-        await ctx.send("❌ 진행률은 0, 25, 50, 75, 100 중 하나만 입력 가능합니다.")
-        return
-
-    async with aiosqlite.connect(DATABASE) as db:
-        await db.execute("UPDATE commissions SET progress = ? WHERE ticket_channel = ?", (percent, ctx.channel.id))
-        await db.commit()
-    
-    embed = discord.Embed(title="📊 작업 진행률 업데이트", description=f"현재 작업 진행률이 **{percent}%**로 변경되었습니다.", color=0x3498DB)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="예상")
-async def cmd_estimate(ctx, *, time_str: str):
-    embed = discord.Embed(title="⏰ 예상 완료일 안내", description=f"고객님, 예상 작업 소요 시간은 **{time_str}** 입니다.", color=0xF1C40F)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="완료")
-async def cmd_complete(ctx):
-    async with aiosqlite.connect(DATABASE) as db:
-        await db.execute("UPDATE commissions SET status = 'completed', progress = 100 WHERE ticket_channel = ?", (ctx.channel.id,))
-        await db.commit()
-    
-    embed = discord.Embed(
-        title="🎉 작업 완료 안내", 
-        description="커미션 작업이 완료되었습니다! 최종 결과물을 확인해주세요.\n문제가 없다면 `!티켓닫기`를 통해 종료할 수 있습니다.", 
-        color=0x2ECC71
-    )
-    await ctx.send(embed=embed)
-
-
-# ==================== [명령어: 티켓 및 서버 관리] ====================
-
-@bot.command(name="셋업")
-@commands.has_permissions(administrator=True)
-async def setup_ticket(ctx):
-    embed = discord.Embed(
-        title="📩 커미션 문의 / 티켓 생성",
-        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
-        color=0x5865F2
-    )
-    await ctx.send(embed=embed, view=TicketOpenView())
-
-
-@bot.command(name="청소")
-@commands.has_permissions(manage_messages=True)
-async def clear_messages(ctx, amount: int):
-    if amount < 1 or amount > 100:
-        await ctx.send("❌ 1에서 100 사이의 숫자를 입력해주세요.", delete_after=3)
-        return
-    deleted = await ctx.channel.purge(limit=amount + 1)
-    await ctx.send(f"🧹 **{len(deleted)-1}**개의 메시지를 청소했습니다.", delete_after=3)
-
-
-@bot.command(name="티켓생성")
-@commands.has_permissions(administrator=True)
-async def cmd_ticket_open(ctx):
-    embed = discord.Embed(
-        title="📩 커미션 문의 / 티켓 생성",
-        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
-        color=0x5865F2
-    )
-    await ctx.send(embed=embed, view=TicketOpenView())
-    await ctx.message.delete()
-
-
-@bot.command(name="인증패널")
-@commands.has_permissions(administrator=True)
-async def cmd_verify_panel(ctx):
-    embed = discord.Embed(
-        title="✅ 역할 인증",
-        description="아래 버튼을 눌러 인증을 완료해주세요.",
-        color=0x57F287
-    )
-    await ctx.send(embed=embed, view=VerifyView())
-    await ctx.message.delete()
-
-
-@bot.command(name="계좌전송")
-async def cmd_payment_panel(ctx):
-    await ctx.send("💳 **계좌 정보 전송**", view=PaymentView())
-    await ctx.message.delete()
-
-
-@bot.command(name="티켓닫기")
-async def cmd_ticket_close(ctx):
-    await ctx.send("🔒 **티켓 관리 및 종료**", view=TicketCloseView())
-    await ctx.message.delete()
-
-
-@bot.command(name="티켓삭제")
-@commands.has_permissions(manage_channels=True)
-async def cmd_ticket_delete(ctx):
-    await ctx.send("🗑️ 5초 후 이 티켓 채널이 삭제됩니다...")
-    await asyncio.sleep(5)
-    await ctx.channel.delete()
-
-
-# ==================== [시스템 구동] ====================
-
-if __name__ == "__main__":
-    if TOKEN:
-        bot.run(TOKEN)
-    else:
-        print("❌ 환경 변수 파일(.env)에서 'TOKEN'을 찾을 수 없습니다.")
+        await msg.edit(content=f"❌ 업데이트 중 오류가 발생했습니다.\n```err\n{e.stderr}\n
