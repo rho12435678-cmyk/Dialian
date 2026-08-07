@@ -6,6 +6,7 @@ from database.database import DATABASE
 from database.views.close_ticket import TicketCloseView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
+from database.views.claim_view import ClaimTicketView  # 추가된 부분
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
@@ -97,10 +98,14 @@ class PurchaseModal(discord.ui.Modal):
         guild = interaction.guild
         user = interaction.user
 
-        designer_name = "미지정"
+        # 디자이너 배정 여부에 따른 텍스트 및 Claim View 준비
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
             designer_name = developer.mention if developer else "미지정"
+            claim_view = ClaimTicketView(is_claimed=True)   # 이미 배정됨 -> 버튼 비활성화
+        else:
+            designer_name = "미지정"
+            claim_view = ClaimTicketView(is_claimed=False)  # 미배정 -> [내가 담당하기] 활성화
 
         if get_open_ticket_channel(guild, user):
             return await interaction.response.send_message("❌ 이미 진행 중인 티켓이 있습니다.", ephemeral=True)
@@ -147,7 +152,7 @@ class PurchaseModal(discord.ui.Modal):
 
         await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다.", embed=embed)
 
-        # 안내, 참고자료, 진행 임베드 3종 동시 전송
+        # 안내, 참고자료 전송
         guide_embed = build_ticket_notice_embed() 
         
         ref_embed = discord.Embed(
@@ -157,6 +162,9 @@ class PurchaseModal(discord.ui.Modal):
         )
         ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
 
+        await ticket_channel.send(embeds=[guide_embed, ref_embed])
+
+        # 진행 임베드 + 담당하기 버튼 전송
         progress_embed = discord.Embed(
             title="📌 커미션 진행",
             description=(f"👨‍💻 담당 디자이너 : {designer_name}\n\n📌 상태 : 🟢 상담중\n📊 진행률 : 0%\n⏰ 예상 완료 : 미설정"),
@@ -164,6 +172,6 @@ class PurchaseModal(discord.ui.Modal):
             timestamp=datetime.now()
         )
 
-        await ticket_channel.send(embeds=[guide_embed, ref_embed, progress_embed])
+        await ticket_channel.send(embed=progress_embed, view=claim_view)
         
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
