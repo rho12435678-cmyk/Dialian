@@ -245,7 +245,7 @@ async def update_monthly_stats_message(bot_instance):
                 print(f"[Monthly Stats 오류] {e}")
 
 
-# ==================== [티켓/커미션 관련 코드] ====================
+# ==================== [티켓/커미션 관련 코드 (기존 원본 완벽 유지)] ====================
 
 async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, designer_id: int = None):
     designer_text = f"<@{designer_id}>" if designer_id else "미배정 (랜덤)"
@@ -556,7 +556,7 @@ async def update_stats_panel_task():
     await update_monthly_stats_message(bot)
 
 
-# ==================== [포인트 이벤트 처리 (이미지 안내 기준)] ====================
+# ==================== [포인트 이벤트 처리] ====================
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -819,7 +819,7 @@ async def setup_ranking_panel(guild: discord.Guild):
 async def update_ranking_panel_task():
     for guild in bot.guilds:
         await setup_ranking_panel(guild)
-        break
+        # 수정됨: break를 제거하여 다중 서버 환경에서도 모든 서버의 랭킹 패널이 정상 갱신되도록 보완
 
 
 @bot.command(name="포인트랭킹")
@@ -828,6 +828,67 @@ async def setup_ranking_cmd(ctx):
     await setup_ranking_panel(ctx.guild)
     await ctx.send("✅ 이 채널에 포인트 랭킹 패널이 생성(또는 갱신)되었습니다.", delete_after=5)
     await ctx.message.delete()
+
+
+# ==================== [명령어: 계좌 및 통계 관리 추가] ====================
+
+@bot.command(name="계좌등록")
+@commands.has_permissions(administrator=True)
+async def cmd_register_account(ctx, bank: str = None, account: str = None, holder: str = None):
+    if not bank or not account or not holder:
+        await ctx.send("사용법: `!계좌등록 [은행] [계좌번호] [예금주]`")
+        return
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bank_accounts (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                bank TEXT,
+                account TEXT,
+                holder TEXT
+            )
+        """)
+        await db.execute("""
+            INSERT INTO bank_accounts (id, bank, account, holder)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET bank = excluded.bank, account = excluded.account, holder = excluded.holder
+        """, (bank, account, holder))
+        await db.commit()
+    await ctx.send(f"✅ 계좌가 등록되었습니다: **{bank} {account} ({holder})**")
+
+
+@bot.command(name="계좌목록")
+async def cmd_list_account(ctx):
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("SELECT bank, account, holder FROM bank_accounts WHERE id = 1") as cursor:
+            row = await cursor.fetchone()
+    if not row:
+        await ctx.send("❌ 등록된 계좌 정보가 없습니다.")
+        return
+    await ctx.send(f"💳 **등록된 계좌 정보**\n은행: `{row[0]}`\n계좌: `{row[1]}`\n예금주: `{row[2]}`")
+
+
+@bot.command(name="계좌삭제")
+@commands.has_permissions(administrator=True)
+async def cmd_delete_account(ctx):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("DELETE FROM bank_accounts WHERE id = 1")
+        await db.commit()
+    await ctx.send("🗑️ 등록된 계좌 정보가 삭제되었습니다.")
+
+
+@bot.command(name="통계")
+async def cmd_stats(ctx):
+    embed = await build_monthly_stats_embed(ctx.guild)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="통계동기화")
+@commands.has_permissions(administrator=True)
+async def cmd_sync_stats(ctx):
+    embed = await build_monthly_stats_embed(ctx.guild)
+    msg = await ctx.send(embed=embed)
+    await save_monthly_stats_message(msg)
+    await ctx.send("✅ 월간 통계 패널이 이 채널에 등록 및 동기화되었습니다.", delete_after=5)
 
 
 # ==================== [명령어: 진행 상황 및 작업 관리] ====================
@@ -894,7 +955,7 @@ async def clear_messages(ctx, amount: int):
 async def cmd_ticket_open(ctx):
     embed = discord.Embed(
         title="📩 커미션 문의 / 티켓 생성",
-        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
+        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러중세요.",
         color=0x5865F2
     )
     await ctx.send(embed=embed, view=TicketOpenView())
