@@ -410,6 +410,13 @@ class CategorySelect(ui.Select):
 
         if method == "담당 디자이너 지정":
             async with aiosqlite.connect(DATABASE) as db:
+                # designer_status 테이블 유무 보장
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS designer_status (
+                        user_id INTEGER PRIMARY KEY,
+                        active INTEGER DEFAULT 0
+                    )
+                """)
                 async with db.execute("SELECT user_id, active FROM designer_status WHERE active = 1") as cursor:
                     active_designers = await cursor.fetchall()
             if not active_designers:
@@ -466,7 +473,18 @@ async def on_ready():
     global persistent_views_registered, update_notice_sent
     print(f"✅ 봇이 로그인했습니다: {bot.user}")
 
+    # 1. DB 기본 테이블 생성 및 designer_status 테이블 생성 보장
     await create_tables()
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS designer_status (
+                user_id INTEGER PRIMARY KEY,
+                active INTEGER DEFAULT 0
+            )
+        """)
+        await db.commit()
+
+    # 2. persistent view 등록
     bot.add_view(TicketOpenView())
     bot.add_view(TicketCategoryView())
     bot.add_view(VerifyView())
@@ -483,11 +501,17 @@ async def on_ready():
     if not daily_notice.daily_notice.is_running():
         daily_notice.daily_notice.start()
 
-    update_presence.start()
-    backup_database_task.start()
-    db_cleanup_task.start()
-    update_stats_panel_task.start()
-    update_ranking_panel_task.start()
+    # 3. 백그라운드 태스크 안전 실행
+    if not update_presence.is_running():
+        update_presence.start()
+    if not backup_database_task.is_running():
+        backup_database_task.start()
+    if not db_cleanup_task.is_running():
+        db_cleanup_task.start()
+    if not update_stats_panel_task.is_running():
+        update_stats_panel_task.start()
+    if not update_ranking_panel_task.is_running():
+        update_ranking_panel_task.start()
 
 
 @tasks.loop(seconds=60)
@@ -515,7 +539,8 @@ async def update_presence():
 
 @tasks.loop(hours=24)
 async def backup_database_task():
-    backup_database()
+    # backup_database()가 비동기 coroutine 함수이므로 await 적용
+    await backup_database()
 
 
 @tasks.loop(hours=24)
