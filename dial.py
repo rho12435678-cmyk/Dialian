@@ -3,6 +3,7 @@ import os
 import random
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -909,6 +910,34 @@ async def cmd_sync_stats(ctx):
     msg = await ctx.send(embed=embed)
     await save_monthly_stats_message(msg)
     await ctx.send("✅ 월간 통계 패널이 이 채널에 등록 및 동기화되었습니다.", delete_after=5)
+
+
+# ==================== [명령어: 봇 업데이트 및 패치] ====================
+
+@bot.command(name="업데이트", aliases=["gitpull", "패치"])
+@commands.has_permissions(administrator=True)
+async def cmd_update(ctx):
+    """Git 저장소에서 최신 코드를 불러오고 봇을 재시작합니다."""
+    msg = await ctx.send("🔄 최신 코드를 불러오는 중...")
+    try:
+        process = subprocess.run(
+            ["git", "pull"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        output = process.stdout.strip()
+        if "Already up to date." in output:
+            await msg.edit(content="✅ 이미 최신 버전입니다.")
+        else:
+            await msg.edit(content=f"✅ 업데이트가 완료되었습니다!\n```ansi\n{output}\n```\n🔄 봇을 재시작합니다...")
+            await bot.close()
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except subprocess.CalledProcessError as e:
+        await msg.edit(content=f"❌ 업데이트 중 오류가 발생했습니다.\n```err\n{e.stderr}\n```")
+    except Exception as e:
+        await msg.edit(content=f"❌ 알 수 없는 오류 발생: {e}")
 
 
 # ==================== [명령어: 진행 상황 및 작업 관리] ====================
