@@ -9,6 +9,15 @@ class UniformModal(PurchaseModal):
         self.bundle_type = bundle_type
         self.selected_designer = selected_designer
 
+        # 0. Roblox 닉네임 (부모 클래스의 create_ticket 연동용)
+        self.roblox_nickname = discord.ui.TextInput(
+            label="🎮 Roblox 닉네임",
+            placeholder="작품에 반영될 로블록스 닉네임을 작성해주세요.",
+            required=True,
+            max_length=30
+        )
+        self.add_item(self.roblox_nickname)
+
         # 1. [2+1 묶음] - 1~2번째 본품 + 3번째 보너스 분리
         if self.bundle_type == "2+1 묶음":
             self.gfx_style = discord.ui.TextInput(
@@ -63,6 +72,5 @@ class UniformModal(PurchaseModal):
             # 단품은 보너스 칸이 없으므로 None 처리
             self.fourth_style = None
 
-        # 제출 로직(on_submit) 참조 에러 방지용 기본값
-        self.roblox_nickname = None
-        self.gfx_type = None
+        # GFX 전용 필드는 부모 클래스 참조 에러 방지용 기본값 지정
+        self.gfx_genre = None
