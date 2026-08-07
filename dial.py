@@ -267,7 +267,21 @@ async def update_monthly_stats_message(bot_instance):
                 print(f"[Monthly Stats 오류] {e}")
 
 
-# ==================== [티켓/커미션 관련 코드] ====================
+# ==================== [티켓/커미션 관련 코드 (수정됨)] ====================
+
+class TicketOpenView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="티켓 생성", style=discord.ButtonStyle.success, emoji="📩", custom_id="ticket_open_btn")
+    async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
+        # 💡 [핵심 수정] 티켓 생성 버튼을 눌렀을 때 카테고리 선택 뷰가 정상적으로 뜨도록 연결
+        await interaction.response.send_message(
+            "📂 **신청하실 커미션의 배정 방식을 선택해주세요.**", 
+            view=TicketCategoryView(), 
+            ephemeral=True
+        )
+
 
 class ClaimTicketView(ui.View):
     def __init__(self):
