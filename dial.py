@@ -90,6 +90,20 @@ async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
 
 
+# ==================== [에러 핸들러 (누락분 추가)] ====================
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ 이 명령어를 실행할 권한이 없습니다.", delete_after=5)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ 필수 인자가 누락되었습니다. 올바른 사용법을 확인해주세요.\n오류 내용: `{error.param.name}`", delete_after=5)
+    elif isinstance(error, commands.CommandNotFound):
+        return
+    else:
+        print(f"[명령어 오류 발생] {ctx.command}: {error}")
+
+
 # ==================== [포인트 및 단골 손님 혜택 로직] ====================
 
 async def check_daily_limit(user_id: int, action_type: str, limit: int = 3) -> bool:
@@ -141,6 +155,14 @@ async def build_monthly_stats_embed(guild: discord.Guild) -> discord.Embed:
     current_month = datetime.now().strftime("%Y-%m")
 
     async with aiosqlite.connect(DATABASE) as db:
+        # 리뷰 테이블 안전 생성 보장
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stars INTEGER,
+                created_at TEXT
+            )
+        """)
         async with db.execute(
             """
             SELECT 
@@ -819,7 +841,6 @@ async def setup_ranking_panel(guild: discord.Guild):
 async def update_ranking_panel_task():
     for guild in bot.guilds:
         await setup_ranking_panel(guild)
-        # 수정됨: break를 제거하여 다중 서버 환경에서도 모든 서버의 랭킹 패널이 정상 갱신되도록 보완
 
 
 @bot.command(name="포인트랭킹")
@@ -955,7 +976,7 @@ async def clear_messages(ctx, amount: int):
 async def cmd_ticket_open(ctx):
     embed = discord.Embed(
         title="📩 커미션 문의 / 티켓 생성",
-        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러중세요.",
+        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
         color=0x5865F2
     )
     await ctx.send(embed=embed, view=TicketOpenView())
