@@ -41,7 +41,6 @@ def iso(dt):
 
 async def set_setting(key, value):
     async with aiosqlite.connect(DATABASE) as db:
-        # bot_settings 테이블이 없으면 자동 생성하여 ON CONFLICT 에러 방지
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS bot_settings (
@@ -84,7 +83,8 @@ def member_name(guild, member_id):
 # ==========================================
 
 class ProgressView(ui.View):
-    def __init__(self, designer_id: int = None, active_progress: int = 0):
+    # *args, **kwargs를 추가하여 외부에서 불필요한 인자(예: ticket_channel_id 등)가 전달되어도 에러가 나지 않도록 방어 코드 추가
+    def __init__(self, designer_id: int = None, active_progress: int = 0, *args, **kwargs):
         super().__init__(timeout=None)
         self.designer_id = int(designer_id) if designer_id else None
         self.active_progress = active_progress
