@@ -53,7 +53,9 @@ def get_bot_version():
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix=["!", "!"], intents=intents, help_command=None)
+
+# 🛠️ [수정 완료] 명령어 접두사 오류를 단일 문자열 "!"로 정상 수정했습니다.
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 daily_notice = None
 persistent_views_registered = False
@@ -410,7 +412,6 @@ class CategorySelect(ui.Select):
 
         if method == "담당 디자이너 지정":
             async with aiosqlite.connect(DATABASE) as db:
-                # designer_status 테이블 유무 보장
                 await db.execute("""
                     CREATE TABLE IF NOT EXISTS designer_status (
                         user_id INTEGER PRIMARY KEY,
@@ -473,7 +474,6 @@ async def on_ready():
     global persistent_views_registered, update_notice_sent
     print(f"✅ 봇이 로그인했습니다: {bot.user}")
 
-    # 1. DB 기본 테이블 생성 및 designer_status 테이블 생성 보장
     await create_tables()
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute("""
@@ -484,7 +484,6 @@ async def on_ready():
         """)
         await db.commit()
 
-    # 2. persistent view 등록
     bot.add_view(TicketOpenView())
     bot.add_view(TicketCategoryView())
     bot.add_view(VerifyView())
@@ -501,7 +500,6 @@ async def on_ready():
     if not daily_notice.daily_notice.is_running():
         daily_notice.daily_notice.start()
 
-    # 3. 백그라운드 태스크 안전 실행
     if not update_presence.is_running():
         update_presence.start()
     if not backup_database_task.is_running():
@@ -539,7 +537,6 @@ async def update_presence():
 
 @tasks.loop(hours=24)
 async def backup_database_task():
-    # backup_database()가 비동기 coroutine 함수이므로 await 적용
     await backup_database()
 
 
@@ -569,7 +566,6 @@ async def on_message(message: discord.Message):
 
     channel_name = message.channel.name if hasattr(message.channel, "name") else ""
 
-    # 1. 작품 공유 (#작품공유-share-portfolio): 이미지 첨부 + 20자 이상 (+15P, 하루 최대 3회)
     if "작품공유" in channel_name or "share-portfolio" in channel_name:
         if message.attachments and len(message.content.strip()) >= 20:
             if await check_daily_limit(message.author.id, "share_portfolio", limit=3):
@@ -588,7 +584,6 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """2. 피드백 (#피드백-feedback): 반응 남길 시 +10P (하루 최대 3회, 본인 메시지 제외)"""
     if payload.user_id == bot.user.id:
         return
 
@@ -600,7 +595,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         try:
             message = await channel.fetch_message(payload.message_id)
             if message.author.id == payload.user_id:
-                return  # 본인 메시지 반응 제외
+                return
 
             if await check_daily_limit(payload.user_id, "feedback_reaction", limit=3):
                 guild = bot.get_guild(payload.guild_id)
@@ -639,18 +634,17 @@ async def mini_game_gacha(ctx):
 
     await add_user_points(ctx.author.id, -20)
     
-    # 확률형 적립
     rand = random.random()
-    if rand < 0.02:  # 2% 확률 대박
+    if rand < 0.02:
         reward = 360
         msg = "🎉 **대박 잭팟! 360P에 당첨되었습니다!** 🎰"
-    elif rand < 0.30:  # 28% 확률
+    elif rand < 0.30:
         reward = 50
         msg = "✨ **축하합니다! 50P에 당첨되었습니다!**"
-    elif rand < 0.60:  # 30% 확률 (본전)
+    elif rand < 0.60:
         reward = 20
         msg = "👍 **본전! 20P를 획득했습니다.**"
-    else:  # 꽝
+    else:
         reward = 0
         msg = "💀 **꽝! 다음 기회에...**"
 
