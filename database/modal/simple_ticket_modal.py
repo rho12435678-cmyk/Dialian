@@ -7,6 +7,7 @@ from database.database import DATABASE
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
+from database.views.claim_view import ClaimTicketView  # 1. ClaimTicketView Import
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
@@ -67,11 +68,14 @@ class SimpleTicketModal(discord.ui.Modal):
         guild = interaction.guild
         user = interaction.user
 
-        designer_name = "미지정"
-
+        # 디자이너 배정 여부에 따른 View 생성
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
             designer_name = developer.mention if developer else "미지정"
+            claim_view = ClaimTicketView(is_claimed=True)   # 배정 완료 시 버튼 비활성화
+        else:
+            designer_name = "미지정"
+            claim_view = ClaimTicketView(is_claimed=False)  # 미배정 시 [내가 담당하기] 버튼 활성화
 
         ticket_channel_name = f"티켓-{user.id}"
 
@@ -165,7 +169,7 @@ class SimpleTicketModal(discord.ui.Modal):
             inline=False
         )
 
-        # 신청서 및 멘션 전송
+        # 1. 신청서 및 멘션 전송
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
@@ -174,7 +178,7 @@ class SimpleTicketModal(discord.ui.Modal):
             embed=embed
         )
 
-        # 안내/참고자료/진행 임베드 3종 동시 전송 구성
+        # 2. 안내 및 참고자료 임베드묶음 전송
         guide_embed = build_ticket_notice_embed()
         
         ref_embed = discord.Embed(
@@ -187,6 +191,9 @@ class SimpleTicketModal(discord.ui.Modal):
         )
         ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
 
+        await ticket_channel.send(embeds=[guide_embed, ref_embed])
+
+        # 3. 진행 임베드 전송 (🔥 view=claim_view 추가!)
         progress_embed = discord.Embed(
             title="📌 커미션 진행",
             description=(
@@ -199,11 +206,7 @@ class SimpleTicketModal(discord.ui.Modal):
             timestamp=datetime.now()
         )
 
-        # 세 개의 임베드를 한 번에 전송
-        await ticket_channel.send(embeds=[guide_embed, ref_embed, progress_embed])
-
-        # progress_message 변수 지정을 위한 참조용 진행 메시지 저장
-        progress_message = await ticket_channel.send(embed=progress_embed)
+        progress_message = await ticket_channel.send(embed=progress_embed, view=claim_view)
 
         log_channel = discord.utils.get(
             guild.text_channels,
