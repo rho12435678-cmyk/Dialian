@@ -1,14 +1,26 @@
 from datetime import datetime, timedelta
-
+import re
 import aiosqlite
 import discord
+from discord import ui
 
 from database.database import DATABASE
+from config import DESIGNER_ROLE_IDS
 
+# ==========================================
+# 1. 권한 및 헬퍼 함수
+# ==========================================
 
 STATS_CHANNEL_KEY = "monthly_stats_channel_id"
 STATS_MESSAGE_KEY = "monthly_stats_message_id"
-STATS_FOOTER_MARKER = "\uc6d4\uac04 \ud1b5\uacc4"
+STATS_FOOTER_MARKER = "월간 통계"
+
+
+def has_designer_role(member):
+    if member is None:
+        return False
+    role_ids = {role_id for role_id in DESIGNER_ROLE_IDS.values() if role_id}
+    return any(role.id in role_ids for role in member.roles)
 
 
 def month_range(now=None):
@@ -29,6 +41,15 @@ def iso(dt):
 
 async def set_setting(key, value):
     async with aiosqlite.connect(DATABASE) as db:
+        # bot_settings 테이블이 없으면 자동 생성하여 ON CONFLICT 에러 방지
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
         await db.execute(
             """
             INSERT OR REPLACE INTO bot_settings(key, value)
@@ -57,6 +78,179 @@ def member_name(guild, member_id):
     member = guild.get_member(int(member_id))
     return member.display_name if member else str(member_id)
 
+
+# ==========================================
+# 2. ProgressView (디자이너 DM 진행률 뷰)
+# ==========================================
+
+class ProgressView(ui.View):
+    def __init__(self, designer_id: int = None, active_progress: int = 0):
+        super().__init__(timeout=None)
+        self.designer_id = int(designer_id) if designer_id else None
+        self.active_progress = active_progress
+        self.mark_active_progress()
+
+    def mark_active_progress(self):
+        """현재 진행률에 맞춰 버튼의 색상과 라벨 상태를 동적으로 변경합니다."""
+        for item in self.children:
+            if not isinstance(item, discord.ui.Button):
+                continue
+            if not item.custom_id or not item.custom_id.startswith("progress_"):
+                continue
+
+            try:
+                progress = int(item.custom_id.replace("progress_", ""))
+                item.label = f"✓ {progress}%" if progress == self.active_progress else f"{progress}%"
+                item.style = (
+                    discord.ButtonStyle.success
+                    if progress == self.active_progress
+                    else discord.ButtonStyle.secondary
+                )
+            except ValueError:
+                pass
+
+    def extract_channel_id_and_guild(self, message: discord.Message):
+        """DM 메시지의 임베드 설명에서 티켓 채널 ID와 서버 객체를 안전하게 추출합니다."""
+        if not message.embeds:
+            return None, None
+            
+        embed = message.embeds[0]
+        desc = embed.description or ""
+        
+        match = re.search(r"<#(\d+)>", desc)
+        if not match:
+            return None, None
+            
+        channel_id = int(match.group(1))
+        
+        guild = message._state._get_client().guilds[0]
+        for g in message._state._get_client().guilds:
+            if g.get_channel(channel_id):
+                guild = g
+                break
+                
+        return channel_id, guild
+
+    async def update_progress(self, interaction: discord.Interaction, progress: int, status: str, estimate: str):
+        channel_id, guild = self.extract_channel_id_and_guild(interaction.message)
+        if not channel_id or not guild:
+            return await interaction.response.send_message(
+                "❌ 이 패널에 연결된 티켓 채널 정보를 찾을 수 없습니다.", 
+                ephemeral=True
+            )
+
+        guild_member = guild.get_member(interaction.user.id)
+        if not guild_member:
+            try:
+                guild_member = await guild.fetch_member(interaction.user.id)
+            except Exception:
+                pass
+
+        is_admin = guild_member and guild_member.guild_permissions.administrator
+        is_assigned_designer = self.designer_id is not None and interaction.user.id == self.designer_id
+        is_designer_fallback = self.designer_id is None and has_designer_role(guild_member)
+
+        if not (is_admin or is_assigned_designer or is_designer_fallback):
+            return await interaction.response.send_message(
+                "❌ 담당 디자이너 또는 관리자만 사용할 수 있습니다.",
+                ephemeral=True
+            )
+
+        ticket_channel = guild.get_channel(channel_id)
+        
+        async with aiosqlite.connect(DATABASE) as db:
+            async with db.execute(
+                "SELECT progress, status FROM commissions WHERE ticket_channel = ?", 
+                (channel_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                
+        already_completed = row and row[0] == 100
+
+        try:
+            old_embed = interaction.message.embeds[0]
+            new_embed = discord.Embed.from_dict(old_embed.to_dict())
+            
+            desc = new_embed.description or ""
+            desc = re.sub(r"📌 상태 : .*", f"📌 상태 : {status}", desc)
+            desc = re.sub(r"📊 진행률 : \d+%", f"📊 진행률 : {progress}%", desc)
+            desc = re.sub(r"⏰ 예상 완료 : .*", f"⏰ 예상 완료 : {estimate}", desc)
+            new_embed.description = desc
+
+            new_view = ProgressView(designer_id=self.designer_id, active_progress=progress)
+            await interaction.message.edit(embed=new_embed, view=new_view)
+        except Exception as e:
+            print(f"[DM 패널 갱신 오류] {e}")
+
+        now = datetime.now().isoformat()
+        status_value = "completed" if progress == 100 else "in_progress"
+        completed_at = now if progress == 100 and not already_completed else None
+
+        async with aiosqlite.connect(DATABASE) as db:
+            if completed_at:
+                await db.execute(
+                    """
+                    UPDATE commissions
+                    SET progress = ?, status = ?, completed_at = ?, updated_at = ?
+                    WHERE ticket_channel = ?
+                    """,
+                    (progress, status_value, completed_at, now, channel_id)
+                )
+            else:
+                await db.execute(
+                    """
+                    UPDATE commissions
+                    SET progress = ?, status = ?, updated_at = ?
+                    WHERE ticket_channel = ?
+                    """,
+                    (progress, status_value, now, channel_id)
+                )
+            await db.commit()
+
+        if ticket_channel:
+            await ticket_channel.send(
+                f"📊 디자이너가 작업 진행률을 **{progress}%**로 변경했습니다.\n"
+                f"상태: {status}"
+            )
+
+            if progress == 100 and not already_completed:
+                await ticket_channel.send(
+                    embed=discord.Embed(
+                        title="📦 작업이 완료되었습니다!",
+                        description="작업이 완료되었습니다. 완성작을 전달해주세요.",
+                        color=discord.Color.green()
+                    )
+                )
+
+        await interaction.response.send_message(
+            f"✅ 진행률이 **{progress}%**로 성공적으로 반영되었습니다.",
+            ephemeral=True
+        )
+
+    @ui.button(label="0%", style=discord.ButtonStyle.secondary, custom_id="progress_0")
+    async def p0(self, interaction: discord.Interaction, button: ui.Button):
+        await self.update_progress(interaction, 0, "🟢 상담중", "미설정")
+
+    @ui.button(label="25%", style=discord.ButtonStyle.secondary, custom_id="progress_25")
+    async def p25(self, interaction: discord.Interaction, button: ui.Button):
+        await self.update_progress(interaction, 25, "🟡 작업 시작", "3일")
+
+    @ui.button(label="50%", style=discord.ButtonStyle.primary, custom_id="progress_50")
+    async def p50(self, interaction: discord.Interaction, button: ui.Button):
+        await self.update_progress(interaction, 50, "🟠 작업중", "2일")
+
+    @ui.button(label="75%", style=discord.ButtonStyle.success, custom_id="progress_75")
+    async def p75(self, interaction: discord.Interaction, button: ui.Button):
+        await self.update_progress(interaction, 75, "🔵 마무리 작업", "1일")
+
+    @ui.button(label="100%", style=discord.ButtonStyle.success, custom_id="progress_100")
+    async def p100(self, interaction: discord.Interaction, button: ui.Button):
+        await self.update_progress(interaction, 100, "✅ 완료", "완료")
+
+
+# ==========================================
+# 3. 월간 통계 관련 함수들
+# ==========================================
 
 async def build_monthly_stats_embed(guild):
     start, end = month_range()
@@ -251,7 +445,7 @@ def is_monthly_stats_message(message, bot_user_id):
     embed = message.embeds[0]
     footer = embed.footer.text or ""
     description = embed.description or ""
-    return STATS_FOOTER_MARKER in footer or "\ucd1d \uc8fc\ubb38" in description
+    return STATS_FOOTER_MARKER in footer or "총 주문" in description
 
 
 async def find_existing_monthly_stats_message(bot):
