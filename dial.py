@@ -39,6 +39,7 @@ from database.views.progress_view import ProgressView
 from database.views.review_view import StarRatingView
 from database.views.ticket_view import TicketOpenView
 from database.views.verify_view import VerifyView
+from database.views.claim_view import ClaimTicketView  # <-- 추가: 담당하기 버튼 뷰 Import
 
 TOKEN = os.getenv("TOKEN")
 POINT_RANKING_CHANNEL_ID = 1532599012316938321  # 랭킹 패널 전용 채널 ID
@@ -1176,7 +1177,7 @@ async def setup_hook():
 
 @bot.event
 async def on_ready():
-    global persistent_views_registered, update_notice_sent, daily_notice  # <-- daily_notice 전역 변수 선언 추가
+    global persistent_views_registered, update_notice_sent, daily_notice
 
     await create_tables()
     await init_ranking_db()
@@ -1191,6 +1192,7 @@ async def on_ready():
         bot.add_view(PaymentView())
         bot.add_view(TicketCloseView())
         bot.add_view(VerifyView())
+        bot.add_view(ClaimTicketView())  # <-- 추가: 담당하기 버튼 영속성 뷰 등록
         persistent_views_registered = True
 
     if daily_notice is None:
