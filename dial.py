@@ -1025,4 +1025,118 @@ async def cmd_update(ctx):
             await bot.close()
             os.execv(sys.executable, [sys.executable] + sys.argv)
     except subprocess.CalledProcessError as e:
-        await msg.edit(content=f"❌ 업데이트 중 오류가 발생했습니다.\n```err\n{e.stderr}\n
+        await msg.edit(content=f"❌ 업데이트 중 오류가 발생했습니다.\n```err\n{e.stderr}\n```")
+    except Exception as e:
+        await msg.edit(content=f"❌ 알 수 없는 오류 발생: {e}")
+
+
+# ==================== [명령어: 진행 상황 및 작업 관리] ====================
+
+@bot.command(name="진행")
+async def cmd_progress(ctx, percent: int):
+    if percent not in [0, 25, 50, 75, 100]:
+        await ctx.send("❌ 진행률은 0, 25, 50, 75, 100 중 하나만 입력 가능합니다.")
+        return
+
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("UPDATE commissions SET progress = ? WHERE ticket_channel = ?", (percent, ctx.channel.id))
+        await db.commit()
+    
+    embed = discord.Embed(title="📊 작업 진행률 업데이트", description=f"현재 작업 진행률이 **{percent}%**로 변경되었습니다.", color=0x3498DB)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="예상")
+async def cmd_estimate(ctx, *, time_str: str):
+    embed = discord.Embed(title="⏰ 예상 완료일 안내", description=f"고객님, 예상 작업 소요 시간은 **{time_str}** 입니다.", color=0xF1C40F)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="완료")
+async def cmd_complete(ctx):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("UPDATE commissions SET status = 'completed', progress = 100 WHERE ticket_channel = ?", (ctx.channel.id,))
+        await db.commit()
+    
+    embed = discord.Embed(
+        title="🎉 작업 완료 안내", 
+        description="커미션 작업이 완료되었습니다! 최종 결과물을 확인해주세요.\n문제가 없다면 `!티켓닫기`를 통해 종료할 수 있습니다.", 
+        color=0x2ECC71
+    )
+    await ctx.send(embed=embed)
+
+
+# ==================== [명령어: 티켓 및 서버 관리] ====================
+
+@bot.command(name="셋업")
+@commands.has_permissions(administrator=True)
+async def setup_ticket(ctx):
+    embed = discord.Embed(
+        title="📩 커미션 문의 / 티켓 생성",
+        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
+        color=0x5865F2
+    )
+    await ctx.send(embed=embed, view=TicketOpenView())
+
+
+@bot.command(name="청소")
+@commands.has_permissions(manage_messages=True)
+async def clear_messages(ctx, amount: int):
+    if amount < 1 or amount > 100:
+        await ctx.send("❌ 1에서 100 사이의 숫자를 입력해주세요.", delete_after=3)
+        return
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 **{len(deleted)-1}**개의 메시지를 청소했습니다.", delete_after=3)
+
+
+@bot.command(name="티켓생성")
+@commands.has_permissions(administrator=True)
+async def cmd_ticket_open(ctx):
+    embed = discord.Embed(
+        title="📩 커미션 문의 / 티켓 생성",
+        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
+        color=0x5865F2
+    )
+    await ctx.send(embed=embed, view=TicketOpenView())
+    await ctx.message.delete()
+
+
+@bot.command(name="인증패널")
+@commands.has_permissions(administrator=True)
+async def cmd_verify_panel(ctx):
+    embed = discord.Embed(
+        title="✅ 역할 인증",
+        description="아래 버튼을 눌러 인증을 완료해주세요.",
+        color=0x57F287
+    )
+    await ctx.send(embed=embed, view=VerifyView())
+    await ctx.message.delete()
+
+
+@bot.command(name="계좌전송")
+async def cmd_payment_panel(ctx):
+    await ctx.send("💳 **계좌 정보 전송**", view=PaymentView())
+    await ctx.message.delete()
+
+
+@bot.command(name="티켓닫기")
+async def cmd_ticket_close(ctx):
+    await ctx.send("🔒 **티켓 관리 및 종료**", view=TicketCloseView())
+    await ctx.message.delete()
+
+
+@bot.command(name="티켓삭제")
+@commands.has_permissions(manage_channels=True)
+async def cmd_ticket_delete(ctx):
+    await ctx.send("🗑️ 5초 후 이 티켓 채널이 삭제됩니다...")
+    await asyncio.sleep(5)
+    await ctx.channel.delete()
+
+
+# ==================== [시스템 구동] ====================
+
+if __name__ == "__main__":
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("❌ 환경 변수 파일(.env)에서 'TOKEN'을 찾을 수 없습니다.")
