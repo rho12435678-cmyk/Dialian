@@ -269,6 +269,81 @@ async def update_monthly_stats_message(bot_instance):
 
 # ==================== [티켓/커미션 관련 코드] ====================
 
+class ClaimTicketView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="🎨 디자이너 담당하기", style=discord.ButtonStyle.success, custom_id="claim_ticket_btn")
+    async def claim_ticket(self, interaction: discord.Interaction, button: ui.Button):
+        # 1. 활성화된 디자이너인지 확인
+        async with aiosqlite.connect(DATABASE) as db:
+            async with db.execute("SELECT active FROM designer_status WHERE user_id = ?", (interaction.user.id,)) as cursor:
+                row = await cursor.fetchone()
+        
+        if not row or row[0] != 1:
+            await interaction.response.send_message("❌ 활성화된 디자이너만 이 티켓을 담당할 수 있습니다.", ephemeral=True)
+            return
+
+        # 2. 이미 담당 디자이너가 배정되어 있는지 확인
+        async with aiosqlite.connect(DATABASE) as db:
+            async with db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (interaction.channel.id,)) as cursor:
+                comm_row = await cursor.fetchone()
+        
+        if comm_row and comm_row[0] is not None:
+            await interaction.response.send_message("❌ 이미 다른 디자이너가 담당하고 있는 티켓입니다.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # 3. 데이터베이스 업데이트 (designer_id를 누른 디자이너 ID로 변경)
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute("UPDATE commissions SET designer_id = ? WHERE ticket_channel = ?", (interaction.user.id, interaction.channel.id))
+            await db.commit()
+
+        # 4. 티켓 채널 권한 부여 (디자이너가 해당 채널을 볼 수 있게 설정)
+        channel = interaction.channel
+        await channel.set_permissions(
+            interaction.user,
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True
+        )
+
+        # 5. 채널 내 버튼 비활성화 및 안내 메시지 전송
+        button.disabled = True
+        button.label = f"담당 완료 ({interaction.user.display_name})"
+        await interaction.message.edit(view=self)
+        await channel.send(f"✅ {interaction.user.mention}님이 이 티켓의 담당 디자이너로 배정되었습니다!")
+
+        # 6. 지정된 디자이너에게 기존과 동일하게 관리 DM 전송
+        try:
+            designer = interaction.user
+            async with aiosqlite.connect(DATABASE) as db:
+                async with db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
+                    c_row = await cursor.fetchone()
+            customer_id = c_row[0] if c_row else None
+            customer = channel.guild.get_member(customer_id) if customer_id else None
+
+            progress_embed = discord.Embed(
+                title=f"📌 [{channel.guild.name}] 커미션 진행 관리",
+                description=(
+                    f"🏷️ 티켓 채널 : {channel.mention} (`{channel.name}`)\n"
+                    f"👤 고객 : {customer.mention if customer else '알 수 없음'} (`{customer.name if customer else 'unknown'}`)\n\n"
+                    "📌 상태 : 🟢 상담중\n"
+                    "📊 진행률 : 0%\n"
+                    "⏰ 예상 완료 : 작업 시작 전"
+                ),
+                color=0x5865F2
+            )
+            await designer.send(embed=progress_embed, view=ProgressView(designer_id=designer.id, active_progress=0))
+            await designer.send("💳 **계좌 정보 전송**", view=PaymentView())
+            await designer.send("🔒 **티켓 관리 및 종료**", view=TicketCloseView())
+        except Exception as e:
+            print(f"[디자이너 DM 전송 실패] {e}")
+
+
 async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, designer_id: int = None):
     designer_text = f"<@{designer_id}>" if designer_id else "미배정 (랜덤)"
 
@@ -304,7 +379,14 @@ async def send_ticket_guides(channel: discord.TextChannel, user: discord.User, d
 
     await channel.send(embeds=[guide_embed, ref_embed])
 
-    if designer_id:
+    if designer_id is None:
+        claim_embed = discord.Embed(
+            title="🎨 디자이너 배정 대기 중",
+            description="아직 담당 디자이너가 배정되지 않았습니다.\n디자이너이신 경우 아래 **[디자이너 담당하기]** 버튼을 눌러주세요!",
+            color=0x3498DB
+        )
+        await channel.send(embed=claim_embed, view=ClaimTicketView())
+    else:
         try:
             guild = channel.guild
             designer = guild.get_member(designer_id) or await guild.fetch_member(designer_id)
@@ -510,6 +592,7 @@ async def on_ready():
     bot.add_view(VerifyView())
     bot.add_view(PaymentView())
     bot.add_view(TicketCloseView())
+    bot.add_view(ClaimTicketView())  # ⬅️ 디자이너 담당하기 뷰 등록 추가
 
     if not persistent_views_registered:
         persistent_views_registered = True
