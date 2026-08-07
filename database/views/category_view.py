@@ -138,7 +138,8 @@ class BundleSelectView(discord.ui.View):
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=120)
+        # Persistent View 요구조건: timeout=None으로 설정
+        super().__init__(timeout=None)
 
     @discord.ui.button(
         label="🎨 GFX 커미션",
