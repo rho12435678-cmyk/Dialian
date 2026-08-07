@@ -1176,7 +1176,7 @@ async def setup_hook():
 
 @bot.event
 async def on_ready():
-    global persistent_views_registered, update_notice_sent
+    global persistent_views_registered, update_notice_sent, daily_notice  # <-- daily_notice 전역 변수 선언 추가
 
     await create_tables()
     await init_ranking_db()
