@@ -54,7 +54,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-# 🛠️ [수정 완료] 명령어 접두사 오류를 단일 문자열 "!"로 정상 수정했습니다.
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 daily_notice = None
@@ -608,7 +607,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             print(f"[피드백 적립 오류] {e}")
 
 
-# ==================== [명령어: 포인트 조회 & 관리자/오락실] ====================
+# ==================== [명령어: 포인트 & 회원 관리] ====================
 
 @bot.command(name="포인트", aliases=["마일리지", "p"])
 async def check_user_points(ctx, member: discord.Member = None):
@@ -624,6 +623,30 @@ async def check_user_points(ctx, member: discord.Member = None):
     embed.add_field(name="👑 단골 손님 혜택", value=has_role, inline=True)
     await ctx.send(embed=embed)
 
+
+@bot.command(name="포인트지급")
+@commands.has_permissions(administrator=True)
+async def admin_give_points(ctx, member: discord.Member, amount: int):
+    pts = await grant_points_and_check_role(ctx.guild, member.id, amount)
+    await ctx.send(f"✅ {member.mention}님에게 **{amount}P**를 지급하였습니다. (현재: **{pts}P**)")
+
+
+@bot.command(name="포인트차감")
+@commands.has_permissions(administrator=True)
+async def admin_deduct_points(ctx, member: discord.Member, amount: int):
+    pts = await add_user_points(member.id, -amount)
+    await ctx.send(f"✅ {member.mention}님의 포인트를 **{amount}P** 차감하였습니다. (현재: **{pts}P**)")
+
+
+@bot.command(name="포인트리셋")
+@commands.has_permissions(administrator=True)
+async def admin_reset_points(ctx, member: discord.Member):
+    current = await get_user_points(member.id)
+    await add_user_points(member.id, -current)
+    await ctx.send(f"✅ {member.mention}님의 포인트를 **0P**로 초기화했습니다.")
+
+
+# ==================== [명령어: 오락실 & 미니게임] ====================
 
 @bot.command(name="뽑기", aliases=["가챠", "럭키드로우"])
 async def mini_game_gacha(ctx):
@@ -693,29 +716,45 @@ async def mini_game_rps(ctx, choice: str = None, bet: int = None):
         await ctx.send(f"💀 봇: **{bot_choice}** | **패배했습니다.** (-{bet}P 차감 / 현재: **{new_pts}P**)")
 
 
-@bot.command(name="포인트지급")
-@commands.has_permissions(administrator=True)
-async def admin_give_points(ctx, member: discord.Member, amount: int):
-    pts = await grant_points_and_check_role(ctx.guild, member.id, amount)
-    await ctx.send(f"✅ {member.mention}님에게 **{amount}P**를 지급하였습니다. (현재: **{pts}P**)")
+@bot.command(name="묵찌빠")
+async def mini_game_mjb(ctx, choice: str = None, bet: int = None):
+    if not choice or bet is None:
+        await ctx.send("사용법: `!묵찌빠 [가위/바위/보] [배팅포인트]` (최소 10P)")
+        return
+
+    if bet < 10:
+        await ctx.send("❌ 최소 배팅 포인트는 10P 이상이어야 합니다.")
+        return
+
+    pts = await get_user_points(ctx.author.id)
+    if pts < bet:
+        await ctx.send("❌ 보유 포인트가 부족합니다.")
+        return
+
+    options = ["가위", "바위", "보"]
+    if choice not in options:
+        await ctx.send("❌ '가위', '바위', '보' 중 하나를 입력해주세요.")
+        return
+
+    bot_choice = random.choice(options)
+    
+    if choice == bot_choice:
+        await ctx.send(f"🤝 봇: **{bot_choice}** | 비겼습니다! 배팅금액이 반환됩니다.")
+        return
+
+    win_map = {"가위": "보", "바위": "가위", "보": "바위"}
+    if win_map[choice] == bot_choice:
+        win_amt = int(bet * 1.3) - bet
+        await grant_points_and_check_role(ctx.guild, ctx.author.id, win_amt)
+        new_pts = await get_user_points(ctx.author.id)
+        await ctx.send(f"🎉 봇: **{bot_choice}** | **승리했습니다!** (+{win_amt}P 적립 / 현재: **{new_pts}P**)")
+    else:
+        await add_user_points(ctx.author.id, -bet)
+        new_pts = await get_user_points(ctx.author.id)
+        await ctx.send(f"💀 봇: **{bot_choice}** | **패배했습니다.** (-{bet}P 차감 / 현재: **{new_pts}P**)")
 
 
-@bot.command(name="포인트차감")
-@commands.has_permissions(administrator=True)
-async def admin_deduct_points(ctx, member: discord.Member, amount: int):
-    pts = await add_user_points(member.id, -amount)
-    await ctx.send(f"✅ {member.mention}님의 포인트를 **{amount}P** 차감하였습니다. (현재: **{pts}P**)")
-
-
-@bot.command(name="포인트리셋")
-@commands.has_permissions(administrator=True)
-async def admin_reset_points(ctx, member: discord.Member):
-    current = await get_user_points(member.id)
-    await add_user_points(member.id, -current)
-    await ctx.send(f"✅ {member.mention}님의 포인트를 **0P**로 초기화했습니다.")
-
-
-# ==================== [랭킹 패널 / 시스템 구동] ====================
+# ==================== [명령어: 명예 및 랭킹] ====================
 
 async def build_ranking_embed(guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
@@ -783,6 +822,52 @@ async def update_ranking_panel_task():
         break
 
 
+@bot.command(name="포인트랭킹")
+@commands.has_permissions(administrator=True)
+async def setup_ranking_cmd(ctx):
+    await setup_ranking_panel(ctx.guild)
+    await ctx.send("✅ 이 채널에 포인트 랭킹 패널이 생성(또는 갱신)되었습니다.", delete_after=5)
+    await ctx.message.delete()
+
+
+# ==================== [명령어: 진행 상황 및 작업 관리] ====================
+
+@bot.command(name="진행")
+async def cmd_progress(ctx, percent: int):
+    if percent not in [0, 25, 50, 75, 100]:
+        await ctx.send("❌ 진행률은 0, 25, 50, 75, 100 중 하나만 입력 가능합니다.")
+        return
+
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("UPDATE commissions SET progress = ? WHERE ticket_channel = ?", (percent, ctx.channel.id))
+        await db.commit()
+    
+    embed = discord.Embed(title="📊 작업 진행률 업데이트", description=f"현재 작업 진행률이 **{percent}%**로 변경되었습니다.", color=0x3498DB)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="예상")
+async def cmd_estimate(ctx, *, time_str: str):
+    embed = discord.Embed(title="⏰ 예상 완료일 안내", description=f"고객님, 예상 작업 소요 시간은 **{time_str}** 입니다.", color=0xF1C40F)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="완료")
+async def cmd_complete(ctx):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("UPDATE commissions SET status = 'completed', progress = 100 WHERE ticket_channel = ?", (ctx.channel.id,))
+        await db.commit()
+    
+    embed = discord.Embed(
+        title="🎉 작업 완료 안내", 
+        description="커미션 작업이 완료되었습니다! 최종 결과물을 확인해주세요.\n문제가 없다면 `!티켓닫기`를 통해 종료할 수 있습니다.", 
+        color=0x2ECC71
+    )
+    await ctx.send(embed=embed)
+
+
+# ==================== [명령어: 티켓 및 서버 관리] ====================
+
 @bot.command(name="셋업")
 @commands.has_permissions(administrator=True)
 async def setup_ticket(ctx):
@@ -793,6 +878,62 @@ async def setup_ticket(ctx):
     )
     await ctx.send(embed=embed, view=TicketOpenView())
 
+
+@bot.command(name="청소")
+@commands.has_permissions(manage_messages=True)
+async def clear_messages(ctx, amount: int):
+    if amount < 1 or amount > 100:
+        await ctx.send("❌ 1에서 100 사이의 숫자를 입력해주세요.", delete_after=3)
+        return
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 **{len(deleted)-1}**개의 메시지를 청소했습니다.", delete_after=3)
+
+
+@bot.command(name="티켓생성")
+@commands.has_permissions(administrator=True)
+async def cmd_ticket_open(ctx):
+    embed = discord.Embed(
+        title="📩 커미션 문의 / 티켓 생성",
+        description="커미션 신청, 디자인 문의, 가격 상담 등을 위해 아래 버튼을 눌러주세요.",
+        color=0x5865F2
+    )
+    await ctx.send(embed=embed, view=TicketOpenView())
+    await ctx.message.delete()
+
+
+@bot.command(name="인증패널")
+@commands.has_permissions(administrator=True)
+async def cmd_verify_panel(ctx):
+    embed = discord.Embed(
+        title="✅ 역할 인증",
+        description="아래 버튼을 눌러 인증을 완료해주세요.",
+        color=0x57F287
+    )
+    await ctx.send(embed=embed, view=VerifyView())
+    await ctx.message.delete()
+
+
+@bot.command(name="계좌전송")
+async def cmd_payment_panel(ctx):
+    await ctx.send("💳 **계좌 정보 전송**", view=PaymentView())
+    await ctx.message.delete()
+
+
+@bot.command(name="티켓닫기")
+async def cmd_ticket_close(ctx):
+    await ctx.send("🔒 **티켓 관리 및 종료**", view=TicketCloseView())
+    await ctx.message.delete()
+
+
+@bot.command(name="티켓삭제")
+@commands.has_permissions(manage_channels=True)
+async def cmd_ticket_delete(ctx):
+    await ctx.send("🗑️ 5초 후 이 티켓 채널이 삭제됩니다...")
+    await asyncio.sleep(5)
+    await ctx.channel.delete()
+
+
+# ==================== [시스템 구동] ====================
 
 if __name__ == "__main__":
     if TOKEN:
