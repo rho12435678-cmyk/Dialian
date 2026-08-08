@@ -73,3 +73,26 @@ class ClaimTicketView(discord.ui.View):
             f"✅ {member.mention} 님이 해당 커미션의 담당 디자이너로 배정되었습니다!",
             ephemeral=False
         )
+
+        # --------------------------------------------------
+        # 📩 [추가] 담당 디자이너 DM으로 컨트롤 패널 전송
+        # --------------------------------------------------
+        try:
+            from database.views.ticket_view import DesignerDMControlView
+
+            dm_embed = discord.Embed(
+                title="🎨 커미션 담당자 제어 패널",
+                description=(
+                    f"**담당 티켓:** {channel.mention}\n\n"
+                    "아래 버튼들을 통해 DM에서 진행률 설정, 계좌 전송, 상태 변경, 작업 완료 및 티켓 닫기를 즉시 조작할 수 있습니다."
+                ),
+                color=discord.Color.blue()
+            )
+            await member.send(embed=dm_embed, view=DesignerDMControlView(ticket_channel_id=channel.id))
+            
+        except discord.Forbidden:
+            await channel.send(
+                f"⚠️ {member.mention} 님의 DM이 닫혀 있어 제어 패널을 전송하지 못했습니다. 서버 멤버의 DM 수신 설정을 허용해주세요."
+            )
+        except Exception as e:
+            print(f"[DM 패널 발송 오류]: {e}")
