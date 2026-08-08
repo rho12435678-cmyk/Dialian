@@ -1170,19 +1170,35 @@ async def setup_hook():
         except Exception as e:
             print(f"[자동번역 로드 실패] {e}")
 
-    # 영속성 뷰 등록 (setup_hook에서 실행해야 재시작 후에도 버튼이 완벽하게 작동함)
-    try:
-        bot.add_view(TicketOpenView())
-        bot.add_view(CategoryView())
-        bot.add_view(StarRatingView(designer_id=None))
-        bot.add_view(ProgressView())
-        bot.add_view(PaymentView())
-        bot.add_view(TicketCloseView())
-        bot.add_view(VerifyView())
-        bot.add_view(ClaimTicketView())
-        print("✨ 모든 영속성 뷰가 정상적으로 로드되었습니다!")
-    except Exception as e:
-        print(f"❌ 영속성 뷰 등록 중 에러 발생: {e}")
+    # 인자 없이 생성 가능한 기본 영속성 뷰 등록
+    default_views = [
+        TicketOpenView,
+        CategoryView,
+        VerifyView,
+        ClaimTicketView,
+    ]
+
+    for view_cls in default_views:
+        try:
+            bot.add_view(view_cls())
+        except Exception as e:
+            print(f"❌ 영속성 뷰 등록 실패 ({view_cls.__name__}): {e}")
+
+    # 인자 기본값(=None) 설정이 필수적인 영속성 뷰 안전 등록
+    optional_arg_views = [
+        ("StarRatingView", lambda: StarRatingView(designer_id=None)),
+        ("ProgressView", lambda: ProgressView()),
+        ("PaymentView", lambda: PaymentView()),
+        ("TicketCloseView", lambda: TicketCloseView()),
+    ]
+
+    for name, view_factory in optional_arg_views:
+        try:
+            bot.add_view(view_factory())
+        except Exception as e:
+            print(f"⚠️ {name} 영속성 뷰 등록 실패 (해당 View 클래스 __init__에 매개변수 기본값 default=None 설정 권장): {e}")
+
+    print("✨ 영속성 뷰 로드 로직 완료!")
 
 
 @bot.event
