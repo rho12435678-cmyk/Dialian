@@ -6,7 +6,7 @@ from database.database import DATABASE
 from database.views.close_ticket import TicketCloseView
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
-from database.views.claim_view import ClaimTicketView  # 추가된 부분
+from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
@@ -14,6 +14,7 @@ from database.views.ticket_guard import (
     get_open_ticket_channel,
     release_ticket_creation_lock,
 )
+
 
 class PurchaseModal(discord.ui.Modal):
     COMMISSION_NAME = "GFX"
@@ -72,7 +73,7 @@ class PurchaseModal(discord.ui.Modal):
             )
             self.add_item(self.fourth_style)
 
-        else: # 단품 (1개)
+        else:  # 단품 (1개)
             self.gfx_style = discord.ui.TextInput(
                 label="📝 원하는 스타일 및 설명",
                 placeholder="원하시는 콘셉트, 구도, 색감, 의상 등을 적어주세요.",
@@ -89,7 +90,7 @@ class PurchaseModal(discord.ui.Modal):
         try:
             await self.create_ticket(interaction)
         except Exception as error:
-            print(f"[GFX ticket creation failed] {error}")
+            print(f"[{self.COMMISSION_NAME} ticket creation failed] {error}")
             await interaction.response.send_message("❌ 티켓 생성 중 오류가 발생했습니다.", ephemeral=True)
         finally:
             release_ticket_creation_lock(ticket_lock)
@@ -141,8 +142,10 @@ class PurchaseModal(discord.ui.Modal):
         # 신청서 임베드 생성
         embed = discord.Embed(title=f"📋 {self.COMMISSION_NAME} 신청서 ({self.bundle_type})", color=0x5865F2, timestamp=datetime.now())
         embed.add_field(name="👨‍💻 담당 디자이너", value=designer_name, inline=False)
-        embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_nickname.value, inline=False)
-        embed.add_field(name="🎬 GFX 장르", value=self.gfx_genre.value, inline=False)
+        if self.roblox_nickname and self.roblox_nickname.value:
+            embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_nickname.value, inline=False)
+        if self.gfx_genre and self.gfx_genre.value:
+            embed.add_field(name="🎬 GFX 장르", value=self.gfx_genre.value, inline=False)
         embed.add_field(name="🎨 요구사항", value=self.gfx_style.value, inline=False)
         
         # 보너스 요구사항이 있는 경우 (2+1 또는 3+1)
@@ -172,6 +175,134 @@ class PurchaseModal(discord.ui.Modal):
             timestamp=datetime.now()
         )
 
-        await ticket_channel.send(embed=progress_embed, view=claim_view)
-        
+        progress_message = await ticket_channel.send(embed=progress_embed, view=claim_view)
+
+        # 구매 로그 전송
+        log_channel = discord.utils.get(
+            guild.text_channels,
+            name=LOG_CHANNEL_NAME
+        )
+        if log_channel:
+            await send_purchase_log(guild, content=(
+                f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성\n"
+                f"{ticket_channel.mention}\n"
+                f"신청자 : {user.mention}"
+            ))
+
+        # 담당 디자이너에게 DM으로 관리 버튼 발송
+        if self.selected_designer:
+            developer = guild.get_member(self.selected_designer)
+
+            if developer:
+                try:
+                    await developer.send(
+                        f"🔔 새로운 커미션이 들어왔습니다.\n"
+                        f"{ticket_channel.mention}"
+                    )
+                    await developer.send(
+                        f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
+                        view=ProgressView(progress_message, self.selected_designer)
+                    )
+                    await developer.send(
+                        f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
+                        view=PaymentView(ticket_channel, self.selected_designer)
+                    )
+                    await developer.send(
+                        f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
+                        view=TicketCloseView(ticket_channel)
+                    )
+                except Exception as e:
+                    print(
+                        f"[DM 전송 실패] designer_id={self.selected_designer} "
+                        f"user={developer} error={e}"
+                    )
+                    await ticket_channel.send(
+                        f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
+                        allowed_mentions=discord.AllowedMentions(users=True)
+                    )
+                    await ticket_channel.send(
+                        "📊 진행률 관리",
+                        view=ProgressView(progress_message, self.selected_designer)
+                    )
+                    await ticket_channel.send(
+                        "💳 결제 및 티켓 관리",
+                        view=PaymentView(ticket_channel, self.selected_designer)
+                    )
+                    await ticket_channel.send(
+                        "🔒 티켓 종료 / 🗑️ 티켓 삭제",
+                        view=TicketCloseView(ticket_channel)
+                    )
+            else:
+                print(
+                    f"[DM 전송 실패] 서버에서 디자이너를 찾지 못했습니다: "
+                    f"{self.selected_designer}"
+                )
+
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
+
+
+class UniformModal(PurchaseModal):
+    COMMISSION_NAME = "Roblox 복장"
+
+    def __init__(self, bundle_type: str = "단품 (1개)", selected_designer: int = None):
+        discord.ui.Modal.__init__(self, title=f"👕 복장 커미션 신청서 [{bundle_type}]")
+        self.bundle_type = bundle_type
+        self.selected_designer = selected_designer
+
+        # 1. [2+1 묶음] - 1~2번째 본품 + 3번째 보너스 분리
+        if self.bundle_type == "2+1 묶음":
+            self.gfx_style = discord.ui.TextInput(
+                label="📝 1~2번째 복장 상세 요구사항",
+                placeholder="1, 2번째 의상에 대한 요구사항을 적어주세요.",
+                required=True, 
+                style=discord.TextStyle.paragraph, 
+                max_length=1000
+            )
+            self.add_item(self.gfx_style)
+
+            self.fourth_style = discord.ui.TextInput(
+                label="🎁 3번째 복장 요구사항 (2+1 보너스)",
+                placeholder="3번째(보너스) 의상에 대한 요구사항을 적어주세요.",
+                required=True, 
+                style=discord.TextStyle.paragraph, 
+                max_length=1000
+            )
+            self.add_item(self.fourth_style)
+
+        # 2. [3+1 묶음] - 1~3번째 본품 + 4번째 보너스 분리
+        elif self.bundle_type == "3+1 묶음":
+            self.gfx_style = discord.ui.TextInput(
+                label="📝 1~3번째 복장 상세 요구사항",
+                placeholder="1, 2, 3번째 의상에 대한 요구사항을 적어주세요.",
+                required=True, 
+                style=discord.TextStyle.paragraph, 
+                max_length=1000
+            )
+            self.add_item(self.gfx_style)
+
+            self.fourth_style = discord.ui.TextInput(
+                label="🎁 4번째 복장 요구사항 (3+1 보너스)",
+                placeholder="4번째(보너스) 의상에 대한 요구사항을 적어주세요.",
+                required=True, 
+                style=discord.TextStyle.paragraph, 
+                max_length=1000
+            )
+            self.add_item(self.fourth_style)
+
+        # 3. [단품 (1개)] - 깔끔하게 단일 입력칸
+        else:
+            self.gfx_style = discord.ui.TextInput(
+                label="📝 원하는 스타일 및 설명",
+                placeholder="원하시는 콘셉트, 색감, 디테일 등을 적어주세요.",
+                required=True, 
+                style=discord.TextStyle.paragraph, 
+                max_length=1000
+            )
+            self.add_item(self.gfx_style)
+            
+            # 단품은 보너스 칸이 없으므로 None 처리
+            self.fourth_style = None
+
+        # 부모 클래스(PurchaseModal) 참조 에러 방지용 기본값 지정
+        self.roblox_nickname = None
+        self.gfx_genre = None
