@@ -189,33 +189,52 @@ class PurchaseModal(discord.ui.Modal):
                 f"신청자 : {user.mention}"
             ))
 
-        # 담당 디자이너에게 DM으로 관리 버튼 발송
+        # 담당 디자이너에게 DM으로 관리 버튼 개별 발송 (오류 분리 처리)
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
 
             if developer:
+                dm_blocked = False
+
+                # 1. 알림 메시지 발송
                 try:
                     await developer.send(
-                        f"🔔 새로운 커미션이 들어왔습니다.\n"
-                        f"{ticket_channel.mention}"
-                    )
-                    await developer.send(
-                        f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                        view=ProgressView(progress_message, self.selected_designer)
-                    )
-                    await developer.send(
-                        f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                        view=PaymentView(ticket_channel, self.selected_designer)
-                    )
-                    await developer.send(
-                        f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                        view=TicketCloseView(ticket_channel)
+                        f"🔔 새로운 커미션이 들어왔습니다.\n{ticket_channel.mention}"
                     )
                 except Exception as e:
-                    print(
-                        f"[DM 전송 실패] designer_id={self.selected_designer} "
-                        f"user={developer} error={e}"
-                    )
+                    print(f"[DM 1단계 전송 실패 - DM 차단 가능성] {e}")
+                    dm_blocked = True
+
+                if not dm_blocked:
+                    # 2. 진행률 관리 버튼 발송
+                    try:
+                        await developer.send(
+                            f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
+                            view=ProgressView(progress_message, self.selected_designer)
+                        )
+                    except Exception as e:
+                        print(f"[DM 2단계(ProgressView) 전송 에러] {e}")
+
+                    # 3. 결제 및 티켓 관리 버튼 발송
+                    try:
+                        await developer.send(
+                            f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
+                            view=PaymentView(ticket_channel, self.selected_designer)
+                        )
+                    except Exception as e:
+                        print(f"[DM 3단계(PaymentView) 전송 에러] {e}")
+
+                    # 4. 티켓 종료/삭제 버튼 발송
+                    try:
+                        await developer.send(
+                            f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
+                            view=TicketCloseView(ticket_channel)
+                        )
+                    except Exception as e:
+                        print(f"[DM 4단계(TicketCloseView) 전송 에러] {e}")
+
+                # 첫 DM 자체가 차단되어 아예 안 들어간 경우에만 백업 안내문 출력
+                else:
                     await ticket_channel.send(
                         f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
                         allowed_mentions=discord.AllowedMentions(users=True)
@@ -233,10 +252,7 @@ class PurchaseModal(discord.ui.Modal):
                         view=TicketCloseView(ticket_channel)
                     )
             else:
-                print(
-                    f"[DM 전송 실패] 서버에서 디자이너를 찾지 못했습니다: "
-                    f"{self.selected_designer}"
-                )
+                print(f"[DM 전송 실패] 서버에서 디자이너를 찾지 못했습니다: {self.selected_designer}")
 
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
 
@@ -249,7 +265,6 @@ class UniformModal(PurchaseModal):
         self.bundle_type = bundle_type
         self.selected_designer = selected_designer
 
-        # 1. [2+1 묶음] - 1~2번째 본품 + 3번째 보너스 분리
         if self.bundle_type == "2+1 묶음":
             self.gfx_style = discord.ui.TextInput(
                 label="📝 1~2번째 복장 상세 요구사항",
@@ -269,7 +284,6 @@ class UniformModal(PurchaseModal):
             )
             self.add_item(self.fourth_style)
 
-        # 2. [3+1 묶음] - 1~3번째 본품 + 4번째 보너스 분리
         elif self.bundle_type == "3+1 묶음":
             self.gfx_style = discord.ui.TextInput(
                 label="📝 1~3번째 복장 상세 요구사항",
@@ -289,7 +303,6 @@ class UniformModal(PurchaseModal):
             )
             self.add_item(self.fourth_style)
 
-        # 3. [단품 (1개)] - 깔끔하게 단일 입력칸
         else:
             self.gfx_style = discord.ui.TextInput(
                 label="📝 원하는 스타일 및 설명",
@@ -299,10 +312,7 @@ class UniformModal(PurchaseModal):
                 max_length=1000
             )
             self.add_item(self.gfx_style)
-            
-            # 단품은 보너스 칸이 없으므로 None 처리
             self.fourth_style = None
 
-        # 부모 클래스(PurchaseModal) 참조 에러 방지용 기본값 지정
         self.roblox_nickname = None
         self.gfx_genre = None
