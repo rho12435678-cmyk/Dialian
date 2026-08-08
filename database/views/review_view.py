@@ -5,7 +5,7 @@ import discord
 
 import config
 from config import *
-from database.services.points import add_user_points
+from database.services.points import add_review_points_by_bundle
 
 DATABASE = getattr(
     config, 'DATABASE', getattr(config, 'DB_PATH', 'database/database.db')
@@ -131,9 +131,29 @@ class StarRatingView(discord.ui.View):
                     "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
                 )
 
-            designer_id = self.designer_id or await find_designer_id_from_ticket(
-                channel
-            )
+            # DB에서 티켓 카테고리 및 담당 디자이너 정보 조회
+            category_name = "일반 커미션"
+            bundle_type = "단품 (1개)"
+            db_designer_id = None
+
+            async with aiosqlite.connect(DATABASE) as db:
+                cursor = await db.execute(
+                    "SELECT category, designer_id FROM commissions WHERE ticket_channel = ?",
+                    (channel.id,)
+                )
+                row = await cursor.fetchone()
+                if row:
+                    if row[0]:
+                        category_name = row[0]
+                        if "2+1" in category_name:
+                            bundle_type = "2+1 묶음"
+                        elif "3+1" in category_name:
+                            bundle_type = "3+1 묶음"
+                    if row[1]:
+                        db_designer_id = row[1]
+
+            designer_id = self.designer_id or db_designer_id or await find_designer_id_from_ticket(channel)
+            designer_mention = f"<@{designer_id}>" if designer_id else "미지정"
 
             async with aiosqlite.connect(DATABASE) as db:
                 await db.execute("""
@@ -169,6 +189,9 @@ class StarRatingView(discord.ui.View):
                     "이 티켓에는 이미 후기가 등록되었습니다.", ephemeral=True
                 )
 
+            # --------------------------------------------------
+            # 🎨 개편된 후기 채널 임베드 구성
+            # --------------------------------------------------
             star_emojis = "⭐" * stars
             review_embed = discord.Embed(
                 title="✨ 소중한 커미션 후기가 도착했습니다!",
@@ -176,15 +199,26 @@ class StarRatingView(discord.ui.View):
                 timestamp=datetime.now(),
             )
             review_embed.set_thumbnail(url=ticket_owner.display_avatar.url)
+            
             review_embed.add_field(
                 name="👤 작성자(오너)",
                 value=f"{ticket_owner.mention} ({ticket_owner.name})",
                 inline=True,
             )
             review_embed.add_field(
+                name="👨‍💻 담당 디자이너",
+                value=designer_mention,
+                inline=True,
+            )
+            review_embed.add_field(
                 name="📊 만족도 별점",
                 value=f"**{star_emojis} ({stars} / 5점)**",
                 inline=True,
+            )
+            review_embed.add_field(
+                name="📦 신청 항목 및 묶음 정보",
+                value=f"• **커미션 항목:** `{category_name}`\n• **묶음 구성:** `{bundle_type}`",
+                inline=False,
             )
             review_embed.set_footer(
                 text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏"
@@ -216,14 +250,16 @@ class StarRatingView(discord.ui.View):
             except Exception as role_err:
                 print(f"[구매자 역할 지급 실패] {role_err}")
 
+            # --------------------------------------------------
+            # 💰 [신규] 묶음별 차등 포인트 지급 연결
+            # --------------------------------------------------
             points_notice = ""
             try:
-                points_to_add = 30
-                new_total = await add_user_points(
-                    guild, interaction.user, points_to_add
+                points_to_add, new_total = await add_review_points_by_bundle(
+                    guild, interaction.user, bundle_type
                 )
                 points_notice = (
-                    f"\n🪙 **{points_to_add} P**가 적립되었습니다! (현재: `{new_total}` P)"
+                    f"\n🪙 **{points_to_add} P**가 적립되었습니다! [{bundle_type}] (현재: `{new_total}` P)"
                 )
             except Exception as points_err:
                 print(f"[후기 포인트 적립 실패] {points_err}")
