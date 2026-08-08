@@ -94,10 +94,10 @@ async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
 
 
-# ==================== [포인트 랭킹 전용 DB 및 헬퍼] ====================
+# ==================== [DB 초기화 및 헬퍼] ====================
 
 async def init_ranking_db():
-    """랭킹 패널 정보 및 월간 초기화 로그 DB 테이블 생성"""
+    """랭킹 패널, 월간 초기화 로그 및 commissions 테이블 생성"""
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS point_ranking_panel (
@@ -109,6 +109,19 @@ async def init_ranking_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS point_reset_logs (
                 year_month TEXT PRIMARY KEY
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS commissions (
+                ticket_channel INTEGER PRIMARY KEY,
+                customer_id INTEGER,
+                designer_id INTEGER,
+                category TEXT,
+                status TEXT,
+                progress INTEGER DEFAULT 0,
+                created_at TEXT,
+                completed_at TEXT,
+                updated_at TEXT
             )
         """)
         await db.commit()
@@ -1170,7 +1183,6 @@ async def setup_hook():
         except Exception as e:
             print(f"[자동번역 로드 실패] {e}")
 
-    # 인자 없이 생성 가능한 기본 영속성 뷰 등록
     default_views = [
         TicketOpenView,
         CategoryView,
@@ -1184,7 +1196,6 @@ async def setup_hook():
         except Exception as e:
             print(f"❌ 영속성 뷰 등록 실패 ({view_cls.__name__}): {e}")
 
-    # 인자 기본값(=None) 설정이 필수적인 영속성 뷰 안전 등록
     optional_arg_views = [
         ("StarRatingView", lambda: StarRatingView(designer_id=None)),
         ("ProgressView", lambda: ProgressView()),
@@ -1196,7 +1207,7 @@ async def setup_hook():
         try:
             bot.add_view(view_factory())
         except Exception as e:
-            print(f"⚠️ {name} 영속성 뷰 등록 실패 (해당 View 클래스 __init__에 매개변수 기본값 default=None 설정 권장): {e}")
+            print(f"⚠️ {name} 영속성 뷰 등록 실패: {e}")
 
     print("✨ 영속성 뷰 로드 로직 완료!")
 
