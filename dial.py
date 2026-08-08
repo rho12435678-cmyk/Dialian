@@ -65,7 +65,6 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 daily_notice = None
-persistent_views_registered = False
 update_notice_sent = False
 bot_started_at = datetime.now()
 
@@ -1168,29 +1167,32 @@ async def setup_hook():
     if os.getenv("OPENAI_API_KEY"):
         try:
             await bot.load_extension("database.services.auto_translator")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[자동번역 로드 실패] {e}")
 
-
-@bot.event
-async def on_ready():
-    global persistent_views_registered, update_notice_sent, daily_notice
-
-    await create_tables()
-    await init_ranking_db()
-
-    print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
-
-    if not persistent_views_registered:
+    # 영속성 뷰 등록 (setup_hook에서 실행해야 재시작 후에도 버튼이 완벽하게 작동함)
+    try:
         bot.add_view(TicketOpenView())
         bot.add_view(CategoryView())
-        bot.add_view(StarRatingView())
+        bot.add_view(StarRatingView(designer_id=None))
         bot.add_view(ProgressView())
         bot.add_view(PaymentView())
         bot.add_view(TicketCloseView())
         bot.add_view(VerifyView())
         bot.add_view(ClaimTicketView())
-        persistent_views_registered = True
+        print("✨ 모든 영속성 뷰가 정상적으로 로드되었습니다!")
+    except Exception as e:
+        print(f"❌ 영속성 뷰 등록 중 에러 발생: {e}")
+
+
+@bot.event
+async def on_ready():
+    global update_notice_sent, daily_notice
+
+    await create_tables()
+    await init_ranking_db()
+
+    print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
 
     if daily_notice is None:
         daily_notice = DailyNotice(bot)
@@ -1208,8 +1210,6 @@ async def on_ready():
         await update_monthly_stats_message(bot)
     except Exception:
         pass
-
-    print("✨ 모든 기능과 영속성 뷰가 정상적으로 로드되었습니다!")
 
 
 if __name__ == "__main__":
