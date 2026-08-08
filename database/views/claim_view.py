@@ -2,6 +2,8 @@ import discord
 import aiosqlite
 from database.database import DATABASE
 from database.views.close_ticket import has_designer_role
+from database.views.progress_view import ProgressView
+
 
 class ClaimTicketView(discord.ui.View):
     def __init__(self, is_claimed: bool = False):
@@ -75,20 +77,26 @@ class ClaimTicketView(discord.ui.View):
         )
 
         # --------------------------------------------------
-        # 📩 [추가] 담당 디자이너 DM으로 컨트롤 패널 전송
+        # 📩 [수정] 담당 디자이너 DM으로 ProgressView 제어 패널 전송
         # --------------------------------------------------
         try:
-            from database.views.ticket_view import DesignerDMControlView
-
             dm_embed = discord.Embed(
                 title="🎨 커미션 담당자 제어 패널",
                 description=(
-                    f"**담당 티켓:** {channel.mention}\n\n"
-                    "아래 버튼들을 통해 DM에서 진행률 설정, 계좌 전송, 상태 변경, 작업 완료 및 티켓 닫기를 즉시 조작할 수 있습니다."
+                    f"🏷️ 티켓 채널 : {channel.mention}\n"
+                    f"📌 상태 : 🟢 상담중\n"
+                    f"📊 진행률 : 0%\n"
+                    f"⏰ 예상 완료 : 미설정\n\n"
+                    "아래 버튼을 통해 진행률을 즉시 변경할 수 있습니다."
                 ),
                 color=discord.Color.blue()
             )
-            await member.send(embed=dm_embed, view=DesignerDMControlView(ticket_channel_id=channel.id))
+            
+            # ProgressView를 연결하여 DM 발송
+            await member.send(
+                embed=dm_embed,
+                view=ProgressView(designer_id=member.id, active_progress=0)
+            )
             
         except discord.Forbidden:
             await channel.send(
