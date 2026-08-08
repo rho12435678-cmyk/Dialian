@@ -49,6 +49,27 @@ async def add_user_points(guild, member, amount: int) -> int:
 
     return new_points
 
+# --------------------------------------------------
+# 💰 [신규] 묶음 종류별 후기 적립 포인트 차등 계산
+# --------------------------------------------------
+async def add_review_points_by_bundle(guild, member, bundle_type: str = "단품 (1개)") -> tuple[int, int]:
+    """
+    후기 작성 시 묶음 종류에 따라 포인트를 차등 적립합니다.
+    - 단품: +30P
+    - 2+1 묶음: +45P
+    - 3+1 묶음: +60P
+    반환값: (이번에 적립된 포인트, 적립 후 총 포인트)
+    """
+    if "2+1" in bundle_type:
+        points_to_add = 45
+    elif "3+1" in bundle_type:
+        points_to_add = 60
+    else:
+        points_to_add = 30  # 단품 기본값
+
+    new_total = await add_user_points(guild, member, points_to_add)
+    return points_to_add, new_total
+
 async def check_and_add_share_points(guild, member, message) -> bool:
     """작품공유 어뷰징 검사 (+15P)"""
     if not message.attachments or len(message.content.strip()) < 20:
