@@ -26,6 +26,7 @@ from database.services.points import (
     get_user_points,
 )
 from database.views.category_view import CategoryView
+from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
     archive_ticket_channel,
@@ -39,10 +40,9 @@ from database.views.progress_view import ProgressView
 from database.views.review_view import StarRatingView
 from database.views.ticket_view import TicketOpenView
 from database.views.verify_view import VerifyView
-from database.views.claim_view import ClaimTicketView  # <-- 추가: 담당하기 버튼 뷰 Import
 
 TOKEN = os.getenv("TOKEN")
-POINT_RANKING_CHANNEL_ID = 1532599012316938321  # 랭킹 패널 전용 채널 ID
+POINT_RANKING_CHANNEL_ID = 1532599012316938321
 
 
 def get_bot_version():
@@ -90,7 +90,6 @@ async def claim_once(table_name, message_id):
 
 @bot.check
 async def prevent_duplicate_command_processing(ctx):
-    # 업데이트 관련 명령어는 중복 체크 예외 처리하여 항상 실행 허용
     if ctx.command and ctx.command.name in ["업데이트", "업데이트확인"]:
         return True
     return await claim_once("processed_commands", ctx.message.id)
@@ -582,7 +581,6 @@ async def update_bot(ctx):
     bot_dir = os.path.dirname(os.path.abspath(__file__))
     
     try:
-        # 비동기로 git pull 명령어 실행
         proc = await asyncio.create_subprocess_exec(
             "git", "pull",
             cwd=bot_dir,
@@ -598,7 +596,7 @@ async def update_bot(ctx):
             current_version = get_bot_version()
             embed = discord.Embed(
                 title="✅ 업데이트 성공",
-                description=f"git pull 처리가 성공적으로 진행되었습니다.",
+                description="git pull 처리가 성공적으로 진행되었습니다.",
                 color=discord.Color.blue()
             )
             embed.add_field(name="현재 버전 (Git Commit)", value=f"`{current_version}`", inline=False)
@@ -614,7 +612,7 @@ async def update_bot(ctx):
         else:
             embed = discord.Embed(
                 title="❌ 업데이트 실패 (Git Pull Error)",
-                description=f"Git 실행 도중 오류가 발생했습니다.",
+                description="Git 실행 도중 오류가 발생했습니다.",
                 color=discord.Color.red()
             )
             error_log = stderr_str if stderr_str else stdout_str
@@ -977,7 +975,7 @@ async def edit_commission_stats(ctx, ticket_id: int, status: str, progress: int 
 @bot.command(name="계좌등록")
 @commands.has_permissions(administrator=True)
 async def register_bank(ctx, member: discord.Member, bank_name, account_number, holder):
-    async with aiosqlite.connect("data/dialian.db") as db:
+    async with aiosqlite.connect(DATABASE) as db:
         await db.execute(
             "INSERT OR REPLACE INTO bank_accounts(developer_id, bank_name, account_number, holder) VALUES(?,?,?,?)",
             (member.id, bank_name, account_number, holder)
@@ -1024,7 +1022,6 @@ async def close_ticket_by_command(ctx):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.")
 
     notice = await ctx.send("🔒 티켓 종료 처리 중입니다.")
-    ticket_owner = await find_ticket_owner(channel)
     designer = await fetch_member_or_none(guild, designer_id)
 
     if designer:
@@ -1192,7 +1189,7 @@ async def on_ready():
         bot.add_view(PaymentView())
         bot.add_view(TicketCloseView())
         bot.add_view(VerifyView())
-        bot.add_view(ClaimTicketView())  # <-- 추가: 담당하기 버튼 영속성 뷰 등록
+        bot.add_view(ClaimTicketView())
         persistent_views_registered = True
 
     if daily_notice is None:
