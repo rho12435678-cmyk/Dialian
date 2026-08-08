@@ -108,8 +108,10 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        ticket_lock = await acquire_ticket_creation_lock(interaction)
+        # 3초 타임아웃 방지를 위해 제출 즉시 defer 호출
+        await interaction.response.defer(ephemeral=True)
 
+        ticket_lock = await acquire_ticket_creation_lock(interaction)
         if ticket_lock is None:
             return
 
@@ -117,19 +119,11 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
             await self.create_ticket(interaction)
 
         except discord.Forbidden:
-            msg = "❌ 봇에 채널 생성 또는 권한 설정 권한이 없습니다."
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.followup.send("❌ 봇에 채널 생성 또는 권한 설정 권한이 없습니다.", ephemeral=True)
 
         except Exception as error:
             print(f"[개발자 지원 티켓 생성 오류] {error}")
-            msg = "❌ 지원 티켓을 생성하는 중 오류가 발생했습니다."
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.followup.send("❌ 지원 티켓을 생성하는 중 오류가 발생했습니다.", ephemeral=True)
 
         finally:
             release_ticket_creation_lock(ticket_lock)
@@ -139,24 +133,19 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         user = interaction.user
 
         if guild is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "❌ 서버 안에서만 사용할 수 있습니다.",
                 ephemeral=True
             )
 
         existing_channel = get_open_ticket_channel(guild, user)
-
         if existing_channel:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"이미 생성된 티켓이 있습니다.\n{existing_channel.mention}",
                 ephemeral=True
             )
 
-        await interaction.response.defer(ephemeral=True)
-
-        bot_member = guild.me
-        if bot_member is None and interaction.client.user:
-            bot_member = guild.get_member(interaction.client.user.id)
+        bot_member = guild.me or guild.get_member(interaction.client.user.id)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -200,6 +189,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
 
         now = datetime.now().isoformat()
 
+        # DB 저장 (designer_id에 None 대신 0 지정하여 NOT NULL 제약조건 방지)
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute(
                 """
@@ -218,7 +208,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
                 (
                     ticket_channel.id,
                     user.id,
-                    None,
+                    0,
                     "개발자 지원",
                     "in_progress",
                     0,
@@ -239,7 +229,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         embed.add_field(name="사용 가능 프로그램", value=self.program.value, inline=False)
         embed.set_footer(text=f"지원자: {user}")
 
-        # 임베드 전송 시 심사 전용 버튼 View(DeveloperReviewView) 부착
+        # 심사 전용 버튼 View 부착 전송
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
@@ -255,10 +245,14 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
             "📎 포트폴리오, 작업물, 증명 자료는 이 티켓에 첨부파일로 자유롭게 올려주세요."
         )
 
-        await send_purchase_log(
-            guild,
-            content=f"개발자 지원 티켓 생성\n{ticket_channel.mention}\n신청자: {user.mention}",
-        )
+        # 로그 알림 전송 에러 시에도 티켓 생성이 중단되지 않도록 보호
+        try:
+            await send_purchase_log(
+                guild,
+                content=f"개발자 지원 티켓 생성\n{ticket_channel.mention}\n신청자: {user.mention}",
+            )
+        except Exception as log_error:
+            print(f"[구매 로그 전송 실패] {log_error}")
 
         await interaction.followup.send(
             f"✅ 지원서가 제출되었습니다.\n{ticket_channel.mention}",
