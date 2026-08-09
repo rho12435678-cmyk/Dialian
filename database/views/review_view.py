@@ -128,11 +128,12 @@ class StarRatingView(discord.ui.View):
                     "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
                 )
 
-            # DB에서 티켓 카테고리 및 담당 디자이너 정보 조회
+            # DB 및 채널 정보에서 묶음 정보 자동 추적 (DB -> 채널명/토픽 -> 첫 메시지 검색)
             category_name = "일반 커미션"
             bundle_type = "단품 (1개)"
             db_designer_id = None
 
+            # 1. DB에서 기본 정보 조회
             async with aiosqlite.connect(DATABASE) as db:
                 cursor = await db.execute(
                     "SELECT category, designer_id FROM commissions WHERE ticket_channel = ?",
@@ -142,12 +143,34 @@ class StarRatingView(discord.ui.View):
                 if row:
                     if row[0]:
                         category_name = row[0]
-                        if "2+1" in category_name:
-                            bundle_type = "2+1 묶음"
-                        elif "3+1" in category_name:
-                            bundle_type = "3+1 묶음"
                     if row[1]:
                         db_designer_id = row[1]
+
+            # 2. 텍스트 정제 (공백 제거 후 묶음 키워드 판별)
+            search_text = f"{category_name} {channel.name} {channel.topic or ''}"
+            clean_text = search_text.replace(" ", "").lower()
+
+            if "3+1" in clean_text or "3플러스1" in clean_text:
+                bundle_type = "3+1 묶음"
+            elif "2+1" in clean_text or "2플러스1" in clean_text:
+                bundle_type = "2+1 묶음"
+            else:
+                # 3. 채널 최상단 메시지(티켓 임베드) 내용까지 2차 정밀 검색
+                async for msg in channel.history(limit=5, oldest_first=True):
+                    embed_text = ""
+                    for emb in msg.embeds:
+                        embed_text += f"{emb.title or ''} {emb.description or ''} "
+                        for field in emb.fields:
+                            embed_text += f"{field.name} {field.value} "
+                    
+                    full_msg_text = f"{msg.content} {embed_text}".replace(" ", "").lower()
+                    
+                    if "3+1" in full_msg_text or "3플러스1" in full_msg_text:
+                        bundle_type = "3+1 묶음"
+                        break
+                    elif "2+1" in full_msg_text or "2플러스1" in full_msg_text:
+                        bundle_type = "2+1 묶음"
+                        break
 
             designer_id = self.designer_id or db_designer_id or await find_designer_id_from_ticket(channel)
             designer_mention = f"<@{designer_id}>" if designer_id else "미지정"
