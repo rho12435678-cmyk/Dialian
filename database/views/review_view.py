@@ -5,11 +5,8 @@ import discord
 
 import config
 from config import *
+from database.database import DATABASE  # 중앙 DB 경로 모듈 직접 연결
 from database.services.points import add_review_points_by_bundle
-
-DATABASE = getattr(
-    config, 'DATABASE', getattr(config, 'DB_PATH', 'database/database.db')
-)
 
 
 def parse_designer_id(text):
