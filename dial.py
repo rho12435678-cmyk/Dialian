@@ -673,7 +673,9 @@ def is_ticket_or_archive_channel(channel):
 async def find_ticket_owner(channel):
     try:
         if channel.topic:
-            return channel.guild.get_member(int(channel.topic))
+            match = re.search(r"\d+", channel.topic)
+            if match:
+                return channel.guild.get_member(int(match.group(0)))
     except (TypeError, ValueError):
         pass
     async for msg in channel.history(limit=5, oldest_first=True):
@@ -954,6 +956,34 @@ async def list_active_tickets(ctx):
     await ctx.send(embed=embed)
 
 
+@bot.command(name="진행티켓종료")
+@commands.has_permissions(administrator=True)
+async def close_ticket_by_id(ctx, ticket_id: int):
+    channel = ctx.guild.get_channel(ticket_id)
+    if not channel or not is_ticket_channel(channel):
+        return await ctx.send("❌ 유효한 진행 중인 티켓 채널을 찾을 수 없습니다.")
+
+    designer_id = await find_ticket_designer_id(channel)
+    designer = await fetch_member_or_none(ctx.guild, designer_id)
+    if designer:
+        await delete_ticket_dm_messages(bot.user, designer, channel)
+
+    await update_commission_progress(channel, 100)
+    await archive_ticket_channel(channel)
+    await ctx.send(f"✅ 티켓 `{ticket_id}`를 종료하고 보관함으로 이동했습니다.")
+
+
+@bot.command(name="진행티켓삭제")
+@commands.has_permissions(administrator=True)
+async def delete_ticket_by_id(ctx, ticket_id: int):
+    channel = ctx.guild.get_channel(ticket_id)
+    if not channel or not is_ticket_or_archive_channel(channel):
+        return await ctx.send("❌ 유효한 티켓 채널을 찾을 수 없습니다.")
+
+    await ctx.send(f"🗑️ 티켓 `{ticket_id}` 삭제 처리를 시작합니다.")
+    await delete_ticket_channel(channel, ctx.author)
+
+
 @bot.command(name="통계수정")
 @commands.has_permissions(administrator=True)
 async def edit_commission_stats(ctx, ticket_id: int, status: str, progress: int = None):
@@ -1079,7 +1109,7 @@ async def progress(ctx, percent: int):
             continue
         lines = embed.description.splitlines()
         if len(lines) < 4:
-            return
+            continue
         embed.description = f"{lines[0]}\n\n📌 상태 : {status}\n📊 진행률 : {percent}%\n{lines[3]}"
         await msg.edit(embed=embed)
         await update_commission_progress(ctx.channel, percent)
@@ -1177,6 +1207,9 @@ async def on_command_error(ctx, error):
 
 @bot.event
 async def setup_hook():
+    await create_tables()
+    await init_ranking_db()
+
     if os.getenv("OPENAI_API_KEY"):
         try:
             await bot.load_extension("database.services.auto_translator")
@@ -1209,15 +1242,12 @@ async def setup_hook():
         except Exception as e:
             print(f"⚠️ {name} 영속성 뷰 등록 실패: {e}")
 
-    print("✨ 영속성 뷰 로드 로직 완료!")
+    print("✨ 영속성 뷰 및 DB 로드 완료!")
 
 
 @bot.event
 async def on_ready():
     global update_notice_sent, daily_notice
-
-    await create_tables()
-    await init_ranking_db()
 
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
 
