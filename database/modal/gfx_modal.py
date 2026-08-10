@@ -91,13 +91,24 @@ class PurchaseModal(discord.ui.Modal):
             await self.create_ticket(interaction)
         except Exception as error:
             print(f"[{self.COMMISSION_NAME} ticket creation failed] {error}")
-            await interaction.response.send_message("❌ 티켓 생성 중 오류가 발생했습니다.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ 티켓 생성 중 오류가 발생했습니다.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ 티켓 생성 중 오류가 발생했습니다.", ephemeral=True)
         finally:
             release_ticket_creation_lock(ticket_lock)
 
     async def create_ticket(self, interaction: discord.Interaction):
+        # 1. 디스코드 3초 타임아웃 방지를 위해 최상단에서 가장 먼저 defer 실행
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         guild = interaction.guild
         user = interaction.user
+
+        # 2. 이미 열린 티켓 검사 (defer가 되었으므로 followup 사용)
+        if get_open_ticket_channel(guild, user):
+            return await interaction.followup.send("❌ 이미 진행 중인 티켓이 있습니다.", ephemeral=True)
 
         # 디자이너 배정 여부에 따른 텍스트 및 Claim View 준비
         if self.selected_designer:
@@ -107,11 +118,6 @@ class PurchaseModal(discord.ui.Modal):
         else:
             designer_name = "미지정"
             claim_view = ClaimTicketView(is_claimed=False)  # 미배정 -> [내가 담당하기] 활성화
-
-        if get_open_ticket_channel(guild, user):
-            return await interaction.response.send_message("❌ 이미 진행 중인 티켓이 있습니다.", ephemeral=True)
-
-        await interaction.response.defer(ephemeral=True)
 
         # 티켓 채널 권한 제어
         overwrites = {
