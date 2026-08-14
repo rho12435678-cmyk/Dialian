@@ -1,13 +1,13 @@
 import discord
 import aiosqlite
-
 from datetime import datetime
+
 from config import *
 from database.database import DATABASE
 from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
-from database.views.claim_view import ClaimTicketView  # 1. ClaimTicketView Import
+from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
@@ -19,19 +19,24 @@ from database.views.ticket_guard import (
 
 class SimpleTicketModal(discord.ui.Modal):
 
-    COMMISSION_NAME = "로고"
-    MODAL_TITLE = "커미션 신청서"
-    FORM_TITLE = "📋 커미션 신청서"
+    COMMISSION_NAME = "문의"
+    MODAL_TITLE = "문의 신청서"
+    FORM_TITLE = "📋 문의 신청서"
     FIELD_NAME = "내용"
 
-    def __init__(self):
+    def __init__(self, ticket_type: str = "문의", selected_designer: int = None):
+        # 파트너 문의, 기타 문의 등 유형에 맞춰 제목 및 명칭 변경
+        self.COMMISSION_NAME = ticket_type
+        self.MODAL_TITLE = f"{ticket_type} 신청서"
+        self.FORM_TITLE = f"📋 {ticket_type} 접수"
+        
         super().__init__(title=self.MODAL_TITLE)
 
-        self.selected_designer = None
+        self.selected_designer = selected_designer
 
         self.content = discord.ui.TextInput(
             label=self.FIELD_NAME,
-            placeholder="원하는 내용을 자유롭게 작성해주세요.",
+            placeholder="원하시는 내용을 상세하게 작성해 주세요.",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=1000
@@ -141,7 +146,7 @@ class SimpleTicketModal(discord.ui.Modal):
                 (
                     ticket_channel.id,
                     user.id,
-                    self.selected_designer,
+                    self.selected_designer if self.selected_designer else 0,
                     self.COMMISSION_NAME,
                     "in_progress",
                     0,
@@ -173,29 +178,30 @@ class SimpleTicketModal(discord.ui.Modal):
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
-                "신청이 접수되었습니다. 담당 디자이너가 확인 후 안내드릴 예정입니다."
+                "신청이 접수되었습니다. 담당자가 확인 후 안내드릴 예정입니다."
             ),
             embed=embed
         )
 
-        # 2. 안내 및 참고자료 임베드묶음 전송
-        guide_embed = build_ticket_notice_embed()
-        
-        ref_embed = discord.Embed(
-            title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
-            description=(
-                f"{user.mention}님, 디자이너가 원하시는 스타일을 명확히 파악할 수 있도록\n"
-                "**원하시는 구도, 분위기, 색감, 참고용 이미지/파일**을 이 채널에 구체적으로 올려주세요!"
-            ),
-            color=0x5865F2
-        )
-        ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
+        # 2. 안내 및 참고자료 임베드 묶음 전송
+        try:
+            guide_embed = build_ticket_notice_embed()
+            ref_embed = discord.Embed(
+                title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
+                description=(
+                    f"{user.mention}님, 원하시는 구체적인 구도, 분위기, 색감, "
+                    "또는 참고용 이미지/파일이 있다면 이 채널에 구체적으로 올려주세요!"
+                ),
+                color=0x5865F2
+            )
+            ref_embed.set_footer(text="참고 자료가 상세할수록 신속하고 명확한 안내가 가능합니다 ✨")
+            await ticket_channel.send(embeds=[guide_embed, ref_embed])
+        except Exception as notice_err:
+            print(f"[안내 임베드 생성/전송 오류] {notice_err}")
 
-        await ticket_channel.send(embeds=[guide_embed, ref_embed])
-
-        # 3. 진행 임베드 전송 (🔥 view=claim_view 추가!)
+        # 3. 진행 임베드 전송 ([내가 담당하기] View 부착)
         progress_embed = discord.Embed(
-            title="📌 커미션 진행",
+            title="📌 커미션/문의 진행",
             description=(
                 f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
                 "📌 상태 : 🟢 상담중\n"
@@ -208,25 +214,28 @@ class SimpleTicketModal(discord.ui.Modal):
 
         progress_message = await ticket_channel.send(embed=progress_embed, view=claim_view)
 
-        log_channel = discord.utils.get(
-            guild.text_channels,
-            name=LOG_CHANNEL_NAME
-        )
+        # 4. 구매/신청 로그 처리
+        try:
+            log_channel_name = globals().get('LOG_CHANNEL_NAME', None)
+            if log_channel_name:
+                log_channel = discord.utils.get(guild.text_channels, name=log_channel_name)
+                if log_channel:
+                    await send_purchase_log(guild, content=(
+                        f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성\n"
+                        f"{ticket_channel.mention}\n"
+                        f"신청자 : {user.mention}"
+                    ))
+        except Exception as log_err:
+            print(f"[로그 전송 실패] {log_err}")
 
-        if log_channel:
-            await send_purchase_log(guild, content=(
-                f"📩 새로운 로고 티켓 생성\n"
-                f"{ticket_channel.mention}\n"
-                f"신청자 : {user.mention}"
-            ))
-
+        # 5. 지정 디자이너 DM 및 컨트롤러 제어
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
 
             if developer:
                 try:
                     await developer.send(
-                        f"🔔 새로운 커미션이 들어왔습니다.\n"
+                        f"🔔 새로운 문의가 들어왔습니다.\n"
                         f"{ticket_channel.mention}"
                     )
 
