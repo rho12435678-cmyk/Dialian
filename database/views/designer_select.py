@@ -59,7 +59,6 @@ async def get_designer_options(guild: discord.Guild, category: str):
     return options
 
 
-# 1️⃣ 디자이너 선택 및 모달 호출 클래스
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, options: list):
         self.category = category
@@ -101,7 +100,6 @@ class DesignerView(discord.ui.View):
         self.add_item(DesignerSelect(category, bundle_type, options))
 
 
-# 2️⃣ 수량을 먼저 선택하는 셀렉트 메뉴 클래스 추가
 class QuantitySelect(discord.ui.Select):
     def __init__(self, category: str):
         self.category = category
@@ -119,7 +117,6 @@ class QuantitySelect(discord.ui.Select):
         bundle_type = self.values[0]
         options = await get_designer_options(interaction.guild, self.category)
         
-        # 수량 선택 후 디자이너 선택 뷰로 교체 (또는 새로운 메시지로 전송)
         view = DesignerView(self.category, bundle_type, options)
         await interaction.response.edit_message(
             content=f"선택하신 상품 유형: **{bundle_type}**\n담당 디자이너를 선택해주세요.",
@@ -127,8 +124,7 @@ class QuantitySelect(discord.ui.Select):
         )
 
 
-# 3️⃣ 최초에 호출되는 수량 선택 뷰
 class QuantitySelectView(discord.ui.View):
     def __init__(self, category: str):
         super().__init__(timeout=None)
-        self.add_item(QuantitySelect(category)))
+        self.add_item(QuantitySelect(category))
