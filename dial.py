@@ -1588,7 +1588,6 @@ async def setup_hook():
         except Exception as e:
             print(f"[자동번역 로드 실패] {e}")
 
-    # 영속성 뷰 등록 (DesignerView 추가 완료)
     default_views = [
         CombinedTicketOpenView,
         CategorySelectView,
