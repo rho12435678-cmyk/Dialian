@@ -4,7 +4,6 @@ from datetime import datetime
 from config import *
 from database.database import DATABASE
 from database.views.close_ticket import TicketCloseView
-from database.views.progress_view import ProgressView
 from database.views.payment_view import PaymentView
 from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
@@ -207,42 +206,29 @@ class PurchaseModal(discord.ui.Modal):
                     dm_blocked = True
 
                 if not dm_blocked:
-                    # 2) 진행률 관리 버튼 발송
-                    try:
-                        await developer.send(
-                            f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                            view=ProgressView(None, self.selected_designer)
-                        )
-                    except Exception as e:
-                        print(f"[DM 2단계(ProgressView) 전송 에러] {e}")
-
-                    # 3) 결제 및 티켓 관리 버튼 발송
+                    # 2) 결제 및 티켓 관리 버튼 발송
                     try:
                         await developer.send(
                             f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                             view=PaymentView(ticket_channel, self.selected_designer)
                         )
                     except Exception as e:
-                        print(f"[DM 3단계(PaymentView) 전송 에러] {e}")
+                        print(f"[DM 2단계(PaymentView) 전송 에러] {e}")
 
-                    # 4) 티켓 종료/삭제 버튼 발송
+                    # 3) 티켓 종료/삭제 버튼 발송
                     try:
                         await developer.send(
                             f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                             view=TicketCloseView(ticket_channel)
                         )
                     except Exception as e:
-                        print(f"[DM 4단계(TicketCloseView) 전송 에러] {e}")
+                        print(f"[DM 3단계(TicketCloseView) 전송 에러] {e}")
 
                 # 첫 DM 자체가 차단되어 아예 안 들어간 경우에만 백업 안내문 출력
                 else:
                     await ticket_channel.send(
                         f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
                         allowed_mentions=discord.AllowedMentions(users=True)
-                    )
-                    await ticket_channel.send(
-                        "📊 진행률 관리",
-                        view=ProgressView(None, self.selected_designer)
                     )
                     await ticket_channel.send(
                         "💳 결제 및 티켓 관리",
