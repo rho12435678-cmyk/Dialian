@@ -106,7 +106,7 @@ class PurchaseModal(discord.ui.Modal):
         guild = interaction.guild
         user = interaction.user
 
-        # 2. 이미 열린 티켓 검사 (defer가 되었으므로 followup 사용)
+        # 2. 이미 열린 티켓 검사
         if get_open_ticket_channel(guild, user):
             return await interaction.followup.send("❌ 이미 진행 중인 티켓이 있습니다.", ephemeral=True)
 
@@ -142,7 +142,7 @@ class PurchaseModal(discord.ui.Modal):
             await db.execute("""
                 INSERT INTO commissions(ticket_channel, customer_id, designer_id, category, status, progress, created_at, updated_at)
                 VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-            """, (ticket_channel.id, user.id, self.selected_designer, self.COMMISSION_NAME, "in_progress", 0, datetime.now().isoformat(), datetime.now().isoformat()))
+            """, (ticket_channel.id, user.id, self.selected_designer if self.selected_designer else 0, self.COMMISSION_NAME, "in_progress", 0, datetime.now().isoformat(), datetime.now().isoformat()))
             await db.commit()
 
         # 신청서 임베드 생성
@@ -159,50 +159,45 @@ class PurchaseModal(discord.ui.Modal):
             bonus_title = "🎁 3번째 작품 요구사항 (2+1 보너스)" if self.bundle_type == "2+1 묶음" else "🎁 4번째 작품 요구사항 (3+1 보너스)"
             embed.add_field(name=bonus_title, value=self.fourth_style.value, inline=False)
 
-        await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다.", embed=embed)
+        # 1. 신청서 전송 (하단에 [내가 담당하기] 버튼 View 부착)
+        await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다.", embed=embed, view=claim_view)
 
-        # 안내, 참고자료 전송
-        guide_embed = build_ticket_notice_embed() 
-        
-        ref_embed = discord.Embed(
-            title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
-            description=f"{user.mention}님, 원하시는 구도, 분위기, 색감, 참고용 이미지/파일을 구체적으로 올려주세요!",
-            color=0x5865F2
-        )
-        ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
+        # 2. 안내, 참고자료 전송
+        try:
+            guide_embed = build_ticket_notice_embed() 
+            ref_embed = discord.Embed(
+                title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
+                description=f"{user.mention}님, 원하시는 구도, 분위기, 색감, 참고용 이미지/파일을 구체적으로 올려주세요!",
+                color=0x5865F2
+            )
+            ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
+            await ticket_channel.send(embeds=[guide_embed, ref_embed])
+        except Exception as notice_err:
+            print(f"[안내 임베드 생성/전송 오류] {notice_err}")
 
-        await ticket_channel.send(embeds=[guide_embed, ref_embed])
+        # 3. 구매 로그 전송
+        try:
+            log_channel = discord.utils.get(
+                guild.text_channels,
+                name=LOG_CHANNEL_NAME
+            )
+            if log_channel:
+                await send_purchase_log(guild, content=(
+                    f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성\n"
+                    f"{ticket_channel.mention}\n"
+                    f"신청자 : {user.mention}"
+                ))
+        except Exception as log_err:
+            print(f"[로그 전송 실패] {log_err}")
 
-        # 진행 임베드 + 담당하기 버튼 전송
-        progress_embed = discord.Embed(
-            title="📌 커미션 진행",
-            description=(f"👨‍💻 담당 디자이너 : {designer_name}\n\n📌 상태 : 🟢 상담중\n📊 진행률 : 0%\n⏰ 예상 완료 : 미설정"),
-            color=discord.Color.green(),
-            timestamp=datetime.now()
-        )
-
-        progress_message = await ticket_channel.send(embed=progress_embed, view=claim_view)
-
-        # 구매 로그 전송
-        log_channel = discord.utils.get(
-            guild.text_channels,
-            name=LOG_CHANNEL_NAME
-        )
-        if log_channel:
-            await send_purchase_log(guild, content=(
-                f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성\n"
-                f"{ticket_channel.mention}\n"
-                f"신청자 : {user.mention}"
-            ))
-
-        # 담당 디자이너에게 DM으로 관리 버튼 개별 발송 (오류 분리 처리)
+        # 4. 담당 디자이너에게 DM으로 관리 버튼 개별 발송 (오류 분리 처리)
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
 
             if developer:
                 dm_blocked = False
 
-                # 1. 알림 메시지 발송
+                # 1) 알림 메시지 발송
                 try:
                     await developer.send(
                         f"🔔 새로운 커미션이 들어왔습니다.\n{ticket_channel.mention}"
@@ -212,16 +207,16 @@ class PurchaseModal(discord.ui.Modal):
                     dm_blocked = True
 
                 if not dm_blocked:
-                    # 2. 진행률 관리 버튼 발송
+                    # 2) 진행률 관리 버튼 발송
                     try:
                         await developer.send(
                             f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                            view=ProgressView(progress_message, self.selected_designer)
+                            view=ProgressView(None, self.selected_designer)
                         )
                     except Exception as e:
                         print(f"[DM 2단계(ProgressView) 전송 에러] {e}")
 
-                    # 3. 결제 및 티켓 관리 버튼 발송
+                    # 3) 결제 및 티켓 관리 버튼 발송
                     try:
                         await developer.send(
                             f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
@@ -230,7 +225,7 @@ class PurchaseModal(discord.ui.Modal):
                     except Exception as e:
                         print(f"[DM 3단계(PaymentView) 전송 에러] {e}")
 
-                    # 4. 티켓 종료/삭제 버튼 발송
+                    # 4) 티켓 종료/삭제 버튼 발송
                     try:
                         await developer.send(
                             f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
@@ -247,7 +242,7 @@ class PurchaseModal(discord.ui.Modal):
                     )
                     await ticket_channel.send(
                         "📊 진행률 관리",
-                        view=ProgressView(progress_message, self.selected_designer)
+                        view=ProgressView(None, self.selected_designer)
                     )
                     await ticket_channel.send(
                         "💳 결제 및 티켓 관리",
