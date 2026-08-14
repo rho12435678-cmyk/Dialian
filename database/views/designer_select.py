@@ -18,26 +18,31 @@ CATEGORY_LABELS = {
 }
 
 
-def get_role_designers(guild: discord.Guild, category: str):
+async def get_role_designers(guild: discord.Guild, category: str):
     role_id = DESIGNER_ROLE_IDS.get(category)
-
     if not role_id:
         return []
 
     role = guild.get_role(role_id)
-
     if role is None:
         return []
 
+    # 캐시된 멤버가 없거나 부족할 경우 안전하게 fetch 수행
+    members = role.members
+    if not members:
+        try:
+            members = [m async for m in guild.fetch_members(limit=None) if role in m.roles]
+        except Exception:
+            members = []
+
     return [
         member
-        for member in role.members
+        for member in members
         if not member.bot
     ]
 
 
-def get_designer_options(guild: discord.Guild, category: str):
-    # 맨 첫 번째 옵션으로 미지정 항목 추가
+async def get_designer_options(guild: discord.Guild, category: str):
     options = [
         discord.SelectOption(
             label="미지정 (추후 배정)",
@@ -47,9 +52,8 @@ def get_designer_options(guild: discord.Guild, category: str):
         )
     ]
 
-    # 서버 디자이너 목록 추가 (최대 24명까지)
-    designers = get_role_designers(guild, category)[:24]
-    for member in designers:
+    designers = await get_role_designers(guild, category)
+    for member in designers[:24]:
         options.append(
             discord.SelectOption(
                 label=member.display_name,
@@ -62,17 +66,15 @@ def get_designer_options(guild: discord.Guild, category: str):
 
 
 class DesignerSelect(discord.ui.Select):
-
-    def __init__(self, guild: discord.Guild, category: str):
+    def __init__(self, category: str, options: list):
         self.category = category
-
         label = CATEGORY_LABELS[category]
 
         super().__init__(
             placeholder=f"담당 {label} 디자이너를 선택하세요.",
             min_values=1,
             max_values=1,
-            options=get_designer_options(guild, category)
+            options=options
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -80,18 +82,14 @@ class DesignerSelect(discord.ui.Select):
             return
 
         selected_val = self.values[0]
-
         modal = MODALS[self.category]()
 
-        # '미지정'을 선택한 경우
         if selected_val == "none":
             modal.selected_designer = None
         else:
             selected_designer_id = int(selected_val)
-            valid_designer_ids = {
-                member.id
-                for member in get_role_designers(interaction.guild, self.category)
-            }
+            valid_designers = await get_role_designers(interaction.guild, self.category)
+            valid_designer_ids = {member.id for member in valid_designers}
 
             if selected_designer_id not in valid_designer_ids:
                 return await interaction.response.send_message(
@@ -105,8 +103,12 @@ class DesignerSelect(discord.ui.Select):
 
 
 class DesignerView(discord.ui.View):
-
-    def __init__(self, guild: discord.Guild, category: str):
+    def __init__(self):
         super().__init__(timeout=180)
 
-        self.add_item(DesignerSelect(guild, category))
+    @classmethod
+    async def create(cls, guild: discord.Guild, category: str):
+        view = cls()
+        options = await get_designer_options(guild, category)
+        view.add_item(DesignerSelect(category, options))
+        return view
