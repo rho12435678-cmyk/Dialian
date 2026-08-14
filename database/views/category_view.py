@@ -125,32 +125,9 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
 # 3. 담당 디자이너 선택 드롭다운 (Dynamic UI)
 # ==========================================
 class DesignerSelect(discord.ui.Select):
-    def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
+    def __init__(self, category: str, bundle_type: str, options: list):
         self.category = category
         self.bundle_type = bundle_type
-
-        options = [
-            discord.SelectOption(
-                label="미지정 (추후 배정)", 
-                value="none", 
-                description="담당자를 나중에 배정받습니다."
-            )
-        ]
-
-        role_key = "gfx" if category == "GFX" else "uniform"
-        role_id = DESIGNER_ROLE_IDS.get(role_key)
-
-        if guild and role_id:
-            role = guild.get_role(role_id)
-            if role:
-                for member in role.members:
-                    options.append(
-                        discord.SelectOption(
-                            label=member.display_name,
-                            value=str(member.id),
-                            description=f"{category} 담당 디자이너"
-                        )
-                    )
 
         super().__init__(
             placeholder="👨‍💻 담당 디자이너를 선택해주세요", 
@@ -171,9 +148,46 @@ class DesignerSelect(discord.ui.Select):
 
 
 class DesignerSelectView(discord.ui.View):
-    def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
+    def __init__(self, category: str, bundle_type: str):
         super().__init__(timeout=120)
-        self.add_item(DesignerSelect(category, bundle_type, guild))
+        self.category = category
+        self.bundle_type = bundle_type
+
+    @classmethod
+    async def create(cls, category: str, bundle_type: str, guild: discord.Guild):
+        view = cls(category, bundle_type)
+        
+        options = [
+            discord.SelectOption(
+                label="미지정 (추후 배정)", 
+                value="none", 
+                description="담당자를 나중에 배정받습니다."
+            )
+        ]
+
+        role_key = "gfx" if category == "GFX" else "uniform"
+        role_id = DESIGNER_ROLE_IDS.get(role_key)
+
+        if guild and role_id:
+            role = guild.get_role(role_id)
+            members = role.members if role else []
+            if not members and role:
+                try:
+                    members = [m async for m in guild.fetch_members(limit=None) if role in m.roles]
+                except Exception:
+                    members = []
+
+            for member in members:
+                options.append(
+                    discord.SelectOption(
+                        label=member.display_name,
+                        value=str(member.id),
+                        description=f"{category} 담당 디자이너"
+                    )
+                )
+
+        view.add_item(DesignerSelect(category, bundle_type, options))
+        return view
 
 
 # ==========================================
@@ -185,7 +199,7 @@ class BundleSelectView(discord.ui.View):
         self.category = category
 
     async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
-        view = DesignerSelectView(self.category, bundle_type, interaction.guild)
+        view = await DesignerSelectView.create(self.category, bundle_type, interaction.guild)
         await interaction.response.edit_message(
             content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
             view=view
