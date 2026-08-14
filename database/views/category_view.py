@@ -138,7 +138,6 @@ class DesignerSelectView(discord.ui.View):
             if guild and role_id:
                 role = guild.get_role(role_id)
                 if role:
-                    # 서버 과부하 및 타임아웃 방지를 위해 캐시된 멤버 중 최대 20명만 빠르게 추출
                     for member in list(role.members)[:20]:
                         options.append(discord.SelectOption(label=member.display_name[:25], value=str(member.id), description=f"{category} 담당"))
         except Exception as e:
@@ -157,15 +156,21 @@ class BundleSelectView(discord.ui.View):
         self.category = category
 
     async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
-        # 💡 핵심: 버튼 누르자마자 즉시 defer 처리하여 타임아웃 원천 차단
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-
         view = await DesignerSelectView.create(self.category, bundle_type, interaction.guild)
-        await interaction.edit_original_response(
-            content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
-            view=view
-        )
+        
+        # 기존 패널을 건드리지 않고 개인 메시지 창(ephemeral)으로 디자이너 선택 뷰 출력
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
+                view=view,
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
+                view=view,
+                ephemeral=True
+            )
 
     @discord.ui.button(label="1개 (단품)", style=discord.ButtonStyle.secondary, custom_id="bundle_single_btn")
     async def select_single(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -189,25 +194,20 @@ class CategoryView(discord.ui.View):
 
     @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 💡 핵심: 3초 타임아웃 방지를 위해 즉시 응답 지연
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-
         view = BundleSelectView(category="GFX")
-        await interaction.edit_original_response(
+        await interaction.response.send_message(
             content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
-            view=view
+            view=view,
+            ephemeral=True
         )
 
     @discord.ui.button(label="👕 복장 커미션", style=discord.ButtonStyle.secondary, custom_id="cat_uniform_btn")
     async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-
         view = BundleSelectView(category="복장")
-        await interaction.edit_original_response(
+        await interaction.response.send_message(
             content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
-            view=view
+            view=view,
+            ephemeral=True
         )
 
     @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.success, custom_id="cat_dev_apply_btn")
