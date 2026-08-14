@@ -34,7 +34,7 @@ from database.views.close_ticket import (
     delete_ticket_dm_messages,
     has_designer_role,
 )
-from database.views.designer_select import DesignerSelect
+from database.views.designer_select import DesignerSelect, DesignerView
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import VerifyView
@@ -141,110 +141,6 @@ async def init_extended_db():
             )
         """)
         await db.commit()
-
-
-# ==================== [커미션 수량 선택 모달] ====================
-
-class CommissionModal(ui.Modal):
-    def __init__(self, category: str, designer_id: int):
-        super().__init__(title=f"{category} 커미션 신청서")
-        self.category = category
-        self.designer_id = designer_id
-
-        self.quantity = ui.TextInput(
-            label="상품 수량 (세트 수)",
-            placeholder="예: 1 (2+1 묶음인 경우 개수 기재)",
-            required=True,
-            max_val=10
-        )
-        self.details = ui.TextInput(
-            label="상세 요청사항",
-            style=discord.TextStyle.paragraph,
-            placeholder="원하시는 컨셉, 참고 자료 링크, 캐릭터 등을 자세히 적어주세요.",
-            required=True
-        )
-        self.add_item(self.quantity)
-        self.add_item(self.details)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        user = interaction.user
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
-        }
-
-        designer = guild.get_member(self.designer_id)
-        if designer:
-            overwrites[designer] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True)
-
-        channel = await guild.create_text_channel(
-            name=f"티켓-{self.category.lower()}-{user.name}",
-            reason=f"{user.display_name} 님의 {self.category} 커미션 티켓",
-            overwrites=overwrites
-        )
-
-        embed = discord.Embed(
-            title=f"📩 {self.category} 커미션 신청 접수",
-            description=f"**주문 고객:** {user.mention} (`{user.id}`)\n**담당 디자이너:** {designer.mention if designer else '미배정'}",
-            color=0x5865F2,
-            timestamp=datetime.now()
-        )
-        embed.add_field(name="📦 신청 수량", value=f"{self.quantity.value} 개", inline=False)
-        embed.add_field(name="📝 상세 요청사항", value=self.details.value, inline=False)
-
-        await channel.send(content=f"{user.mention} {designer.mention if designer else ''} 님, 티켓이 생성되었습니다!", embed=embed, view=TicketCloseView())
-
-        data = {
-            "ticket_channel": channel.id,
-            "customer_id": user.id,
-            "designer_id": self.designer_id,
-            "category": self.category,
-            "status": "in_progress",
-            "progress": 0,
-            "created_at": datetime.now().isoformat(),
-            "completed_at": None,
-            "updated_at": datetime.now().isoformat(),
-        }
-        await upsert_commission_record(data)
-
-        await interaction.followup.send(f"✅ 티켓이 성공적으로 생성되었습니다! {channel.mention}", ephemeral=True)
-
-
-# ==================== [디자이너 선택 드롭다운 뷰 복원] ====================
-
-class DesignerSelectionDropdown(ui.Select):
-    def __init__(self, category: str, designers: list):
-        self.category = category
-        options = [
-            discord.SelectOption(label="랜덤 배정 (빠른 진행)", value="random", description="가능한 디자이너에게 랜덤으로 배정됩니다.")
-        ]
-        for d in designers:
-            options.append(discord.SelectOption(label=d.display_name, value=str(d.id), description=f"ID: {d.id}"))
-        super().__init__(placeholder="👨‍💻 담당하실 디자이너를 선택해주세요.", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        val = self.values[0]
-        if val == "random":
-            # GFX 또는 복장 역할 보유자 중 무작위 선택
-            role_id = DESIGNER_ROLE_IDS["gfx"] if "GFX" in self.category else DESIGNER_ROLE_IDS["uniform"]
-            guild = interaction.guild
-            designers = [m for m in guild.members if any(r.id == role_id for r in m.roles)]
-            chosen = random.choice(designers) if designers else None
-            designer_id = chosen.id if chosen else None
-        else:
-            designer_id = int(val)
-
-        await interaction.response.send_modal(CommissionModal(self.category, designer_id))
-
-
-class DynamicDesignerSelectView(ui.View):
-    def __init__(self, category: str, designers: list):
-        super().__init__(timeout=180)
-        self.add_item(DesignerSelectionDropdown(category, designers))
 
 
 # ==================== [티켓 지원 / 파트너 모달 및 뷰] ====================
@@ -356,17 +252,15 @@ class CategorySelectView(ui.View):
 
     @ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="ticket_gfx")
     async def btn_gfx(self, interaction: discord.Interaction, button: ui.Button):
-        role_id = DESIGNER_ROLE_IDS["gfx"]
-        designers = [m for m in interaction.guild.members if any(r.id == role_id for r in m.roles)]
+        view = await DesignerView.create(interaction.guild, "gfx")
         embed = discord.Embed(title="🎨 GFX 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
-        await interaction.response.send_message(embed=embed, view=DynamicDesignerSelectView("GFX", designers), ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @ui.button(label="👔 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="ticket_uniform")
     async def btn_uniform(self, interaction: discord.Interaction, button: ui.Button):
-        role_id = DESIGNER_ROLE_IDS["uniform"]
-        designers = [m for m in interaction.guild.members if any(r.id == role_id for r in m.roles)]
+        view = await DesignerView.create(interaction.guild, "uniform")
         embed = discord.Embed(title="👔 Roblox 복장 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
-        await interaction.response.send_message(embed=embed, view=DynamicDesignerSelectView("Roblox 복장", designers), ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply")
     async def btn_dev_apply(self, interaction: discord.Interaction, button: ui.Button):
@@ -1694,12 +1588,13 @@ async def setup_hook():
         except Exception as e:
             print(f"[자동번역 로드 실패] {e}")
 
+    # 영속성 뷰 등록 (DesignerView 추가 완료)
     default_views = [
         CombinedTicketOpenView,
         CategorySelectView,
         VerifyView,
         ClaimTicketView,
-        DesignerSelect,
+        DesignerView,
     ]
 
     for view_cls in default_views:
