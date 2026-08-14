@@ -78,16 +78,17 @@ class DesignerSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        # 1. 중복 티켓 검사
         if await block_if_ticket_exists(interaction):
             return
 
         selected_val = self.values[0]
-        modal = MODALS[self.category]()
+        
+        # 2. 선택된 디자이너 ID 매핑 (미지정인 경우 None)
+        selected_designer_id = None if selected_val == "none" else int(selected_val)
 
-        if selected_val == "none":
-            modal.selected_designer = None
-        else:
-            selected_designer_id = int(selected_val)
+        # 3. 유효성 검사 (선택된 디자이너가 실제 해당 역할을 가지고 있는지 확인)
+        if selected_designer_id is not None:
             valid_designers = await get_role_designers(interaction.guild, self.category)
             valid_designer_ids = {member.id for member in valid_designers}
 
@@ -97,8 +98,11 @@ class DesignerSelect(discord.ui.Select):
                     ephemeral=True
                 )
 
-            modal.selected_designer = selected_designer_id
+        # 4. 모달 클래스를 가져와서 bundle_type과 selected_designer를 인자로 전달하여 생성
+        modal_class = MODALS[self.category]
+        modal = modal_class(bundle_type="단품 (1개)", selected_designer=selected_designer_id)
 
+        # 5. 타임아웃이 발생하기 전에 즉시 모달 호출
         await interaction.response.send_modal(modal)
 
 
