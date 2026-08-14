@@ -236,3 +236,34 @@ class CategoryView(discord.ui.View):
     @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.secondary, custom_id="cat_partner_btn")
     async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PartnerApplyModal())
+
+
+# ==========================================
+# 5. 최종 메인 카테고리 선택 뷰 (4개 버튼)
+# ==========================================
+class CategoryView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None) # Persistent View
+
+    @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
+    async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 1. 3초 타임아웃 방지를 위해 즉시 응답 지연
+        await interaction.response.defer()
+        
+        view = await BundleSelectView.create(category="GFX") # 만약 BundleSelectView에 create 메서드가 없다면 아래 참고
+        await interaction.edit_original_response(content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", view=BundleSelectView(category="GFX"))
+
+    @discord.ui.button(label="👕 복장 커미션", style=discord.ButtonStyle.secondary, custom_id="cat_uniform_btn")
+    async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 1. 3초 타임아웃 방지를 위해 즉시 응답 지연
+        await interaction.response.defer()
+        
+        await interaction.edit_original_response(content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", view=BundleSelectView(category="복장"))
+
+    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.success, custom_id="cat_dev_apply_btn")
+    async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(DeveloperApplyModal())
+
+    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.secondary, custom_id="cat_partner_btn")
+    async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PartnerApplyModal())
