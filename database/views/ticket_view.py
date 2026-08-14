@@ -1,13 +1,15 @@
+import asyncio
 import discord
 import aiosqlite
 from discord.ui import View, button, Modal, TextInput
+
 from database.database import DATABASE
 from database.views.category_view import CategoryView
 from database.views.ticket_guard import block_if_ticket_exists
 
 
 # --------------------------------------------------
-# 1. 메인 티켓 오픈 View (기존 코드)
+# 1. 메인 티켓 오픈 View
 # --------------------------------------------------
 class TicketOpenView(discord.ui.View):
     def __init__(self):
@@ -23,6 +25,7 @@ class TicketOpenView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        # 이미 티켓이 존재하는지 확인
         if await block_if_ticket_exists(interaction):
             return
 
@@ -145,3 +148,12 @@ class DesignerDMControlView(View):
 
         await channel.send("🔒 **디자이너 요청으로 5초 후 티켓이 종료됩니다.**")
         await interaction.response.send_message("✅ 티켓 종료 안내 메시지를 전송했습니다.", ephemeral=True)
+
+        # 5초 카운트다운 후 실제 채널 삭제
+        await asyncio.sleep(5)
+        try:
+            await channel.delete(reason="디자이너 컨트롤 패널에 의한 티켓 종료")
+        except discord.NotFound:
+            pass
+        except discord.Forbidden:
+            print(f"[경고] {channel.name} 채널을 삭제할 권한이 부족합니다.")
