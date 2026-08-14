@@ -1,8 +1,8 @@
 import discord
 import aiosqlite
 from database.database import DATABASE
-from database.views.close_ticket import has_designer_role
-from database.views.progress_view import ProgressView
+from database.views.close_ticket import has_designer_role, TicketCloseView
+from database.views.payment_view import PaymentView
 
 
 class ClaimTicketView(discord.ui.View):
@@ -35,7 +35,7 @@ class ClaimTicketView(discord.ui.View):
             cursor = await db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
             row = await cursor.fetchone()
             
-            if row and row[0] is not None:
+            if row and row[0] is not None and row[0] != 0:
                 return await interaction.response.send_message(
                     f"❌ 이미 다른 디자이너(<@{row[0]}>)가 담당으로 지정되었습니다.",
                     ephemeral=True
@@ -49,58 +49,53 @@ class ClaimTicketView(discord.ui.View):
             await db.commit()
 
         # 디자이너 채널 권한 추가
-        await channel.set_permissions(member, read_messages=True, send_messages=True, attach_files=True)
+        await channel.set_permissions(member, read_messages=True, send_messages=True, attach_files=True, view_channel=True)
 
-        # 진행 임베드 갱신
-        async for msg in channel.history(limit=20, oldest_first=True):
-            if msg.author == interaction.client.user and msg.embeds:
-                embed = msg.embeds[0]
-                if embed.title == "📌 커미션 진행":
-                    lines = embed.description.splitlines() if embed.description else []
-                    new_lines = []
-                    for line in lines:
-                        if "담당 디자이너" in line:
-                            new_lines.append(f"👨‍💻 담당 디자이너 : {member.mention}")
-                        else:
-                            new_lines.append(line)
-                    
-                    embed.description = "\n".join(new_lines)
-                    
-                    button.disabled = True
-                    button.label = f"담당자: {member.display_name}"
-                    await msg.edit(embed=embed, view=self)
+        # 1. 버튼 상태 업데이트
+        button.disabled = True
+        button.label = f"담당자: {member.display_name}"
+        button.style = discord.ButtonStyle.secondary
+
+        # 2. 신청서 임베드의 '담당 디자이너' 항목 갱신
+        message = interaction.message
+        if message and message.embeds:
+            embed = message.embeds[0]
+            for i, field in enumerate(embed.fields):
+                if "담당 디자이너" in field.name:
+                    embed.set_field_at(i, name=field.name, value=member.mention, inline=field.inline)
                     break
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(view=self)
 
-        await interaction.response.send_message(
-            f"✅ {member.mention} 님이 해당 커미션의 담당 디자이너로 배정되었습니다!",
-            ephemeral=False
+        await interaction.followup.send(
+            f"✅ {member.mention} 님이 해당 커미션의 담당 디자이너로 배정되었습니다!"
         )
 
-        # --------------------------------------------------
-        # 📩 [수정] 담당 디자이너 DM으로 ProgressView 제어 패널 전송
-        # --------------------------------------------------
+        # 3. 📩 담당 디자이너 DM으로 관리 패널 전송 (결제 관리 & 티켓 종료)
         try:
-            dm_embed = discord.Embed(
-                title="🎨 커미션 담당자 제어 패널",
-                description=(
-                    f"🏷️ 티켓 채널 : {channel.mention}\n"
-                    f"📌 상태 : 🟢 상담중\n"
-                    f"📊 진행률 : 0%\n"
-                    f"⏰ 예상 완료 : 미설정\n\n"
-                    "아래 버튼을 통해 진행률을 즉시 변경할 수 있습니다."
-                ),
-                color=discord.Color.blue()
-            )
-            
-            # ProgressView를 연결하여 DM 발송
+            await member.send(f"🔔 {channel.mention} 티켓의 담당자로 배정되었습니다.")
             await member.send(
-                embed=dm_embed,
-                view=ProgressView(designer_id=member.id, active_progress=0)
+                f"💳 결제 및 티켓 관리\n티켓: {channel.mention}\nID: {channel.id}",
+                view=PaymentView(channel, member.id)
+            )
+            await member.send(
+                f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {channel.mention}\nID: {channel.id}",
+                view=TicketCloseView(channel)
             )
             
         except discord.Forbidden:
             await channel.send(
-                f"⚠️ {member.mention} 님의 DM이 닫혀 있어 제어 패널을 전송하지 못했습니다. 서버 멤버의 DM 수신 설정을 허용해주세요."
+                f"⚠️ {member.mention} 님의 DM이 닫혀 있어 채널에 관리 버튼을 전송합니다.",
+                allowed_mentions=discord.AllowedMentions(users=True)
+            )
+            await channel.send(
+                "💳 결제 및 티켓 관리",
+                view=PaymentView(channel, member.id)
+            )
+            await channel.send(
+                "🔒 티켓 종료 / 🗑️ 티켓 삭제",
+                view=TicketCloseView(channel)
             )
         except Exception as e:
             print(f"[DM 패널 발송 오류]: {e}")
