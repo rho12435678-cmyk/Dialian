@@ -1,6 +1,7 @@
 import discord
 from database.modal.gfx_modal import PurchaseModal
 
+
 class UniformModal(PurchaseModal):
     COMMISSION_NAME = "Roblox 복장"
 
@@ -49,7 +50,7 @@ class UniformModal(PurchaseModal):
             )
             self.add_item(self.fourth_style)
 
-        # 3. [단품 (1개)] - 깔끔하게 단일 입력칸
+        # 3. [단품 (1개)] - 단일 입력칸
         else:
             self.gfx_style = discord.ui.TextInput(
                 label="📝 원하는 스타일 및 설명",
@@ -63,6 +64,6 @@ class UniformModal(PurchaseModal):
             # 단품은 보너스 칸이 없으므로 None 처리
             self.fourth_style = None
 
-        # 부모 클래스(PurchaseModal) 참조 에러 방지용 기본값 지정
+        # 부모 클래스(PurchaseModal) 참조 에러 방지용 속성 초기화
         self.roblox_nickname = None
         self.gfx_genre = None
