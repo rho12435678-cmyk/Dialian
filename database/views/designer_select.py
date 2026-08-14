@@ -27,7 +27,6 @@ async def get_role_designers(guild: discord.Guild, category: str):
     if role is None:
         return []
 
-    # 3초 타임아웃 방지를 위해 캐시된 멤버만 안전하게 가져옴 (fetch 제거)
     members = role.members if role else []
 
     return [
@@ -60,9 +59,11 @@ async def get_designer_options(guild: discord.Guild, category: str):
     return options
 
 
+# 1️⃣ 디자이너 선택 및 모달 호출 클래스
 class DesignerSelect(discord.ui.Select):
-    def __init__(self, category: str, options: list):
+    def __init__(self, category: str, bundle_type: str, options: list):
         self.category = category
+        self.bundle_type = bundle_type
         label = CATEGORY_LABELS[category]
 
         super().__init__(
@@ -73,14 +74,11 @@ class DesignerSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # ⚠️ defer()를 사용하면 모달을 띄울 수 없으므로 제거했습니다.
-        
-        # 티켓 존재 여부 체크는 모달 내부나 가벼운 로직으로 처리해야 타임아웃을 피할 수 있습니다.
         selected_val = self.values[0]
         modal_class = MODALS[self.category]
 
         if selected_val == "none":
-            modal = modal_class(bundle_type="단품 (1개)", selected_designer=None)
+            modal = modal_class(bundle_type=self.bundle_type, selected_designer=None)
         else:
             selected_designer_id = int(selected_val)
             valid_designers = await get_role_designers(interaction.guild, self.category)
@@ -92,18 +90,45 @@ class DesignerSelect(discord.ui.Select):
                     ephemeral=True
                 )
 
-            modal = modal_class(bundle_type="단품 (1개)", selected_designer=selected_designer_id)
+            modal = modal_class(bundle_type=self.bundle_type, selected_designer=selected_designer_id)
 
-        # ✅ 지연 없이 즉시 모달을 호출하여 "Didn't respond in time" 오류를 해결합니다.
         await interaction.response.send_modal(modal)
 
 
 class DesignerView(discord.ui.View):
-    def __init__(self, category: str, options: list):
+    def __init__(self, category: str, bundle_type: str, options: list):
         super().__init__(timeout=None)
-        self.add_item(DesignerSelect(category, options))
+        self.add_item(DesignerSelect(category, bundle_type, options))
 
-    @classmethod
-    async def create(cls, guild: discord.Guild, category: str):
-        options = await get_designer_options(guild, category)
-        return cls(category, options)
+
+# 2️⃣ 수량을 먼저 선택하는 셀렉트 메뉴 클래스 추가
+class QuantitySelect(discord.ui.Select):
+    def __init__(self, category: str):
+        self.category = category
+        super().__init__(
+            placeholder="제작하실 수량(상품 유형)을 선택해주세요.",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(label="단품 (1개)", value="단품 (1개)", description="기본 단품 제작"),
+                discord.SelectOption(label="세트 / 패키지", value="세트 / 패키지", description="할인 패키지 상품"),
+            ]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        bundle_type = self.values[0]
+        options = await get_designer_options(interaction.guild, self.category)
+        
+        # 수량 선택 후 디자이너 선택 뷰로 교체 (또는 새로운 메시지로 전송)
+        view = DesignerView(self.category, bundle_type, options)
+        await interaction.response.edit_message(
+            content=f"선택하신 상품 유형: **{bundle_type}**\n담당 디자이너를 선택해주세요.",
+            view=view
+        )
+
+
+# 3️⃣ 최초에 호출되는 수량 선택 뷰
+class QuantitySelectView(discord.ui.View):
+    def __init__(self, category: str):
+        super().__init__(timeout=None)
+        self.add_item(QuantitySelect(category)))
