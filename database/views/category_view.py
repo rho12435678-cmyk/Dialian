@@ -170,12 +170,8 @@ class DesignerSelectView(discord.ui.View):
 
         if guild and role_id:
             role = guild.get_role(role_id)
+            # 타임아웃 방지를 위해 캐시된 멤버만 안전하게 가져옴
             members = role.members if role else []
-            if not members and role:
-                try:
-                    members = [m async for m in guild.fetch_members(limit=None) if role in m.roles]
-                except Exception:
-                    members = []
 
             for member in members:
                 options.append(
