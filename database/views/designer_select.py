@@ -96,3 +96,14 @@ class DesignerSelect(discord.ui.Select):
 
         # ✅ 지연 없이 즉시 모달을 호출하여 "Didn't respond in time" 오류를 해결합니다.
         await interaction.response.send_modal(modal)
+
+
+class DesignerView(discord.ui.View):
+    def __init__(self, category: str, options: list):
+        super().__init__(timeout=None)
+        self.add_item(DesignerSelect(category, options))
+
+    @classmethod
+    async def create(cls, guild: discord.Guild, category: str):
+        options = await get_designer_options(guild, category)
+        return cls(category, options)
