@@ -99,6 +99,12 @@ class DesignerView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(DesignerSelect(category, bundle_type, options))
 
+    @classmethod
+    async def create(cls, guild: discord.Guild, category: str, bundle_type: str = "단품 (1개)"):
+        """메인 파일(dial.py)에서 호출할 수 있도록 비동기 생성 메서드 추가"""
+        options = await get_designer_options(guild, category)
+        return cls(category, bundle_type, options)
+
 
 class QuantitySelect(discord.ui.Select):
     def __init__(self, category: str):
