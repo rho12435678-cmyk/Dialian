@@ -174,13 +174,14 @@ class SimpleTicketModal(discord.ui.Modal):
             inline=False
         )
 
-        # 1. 신청서 및 멘션 전송
+        # 1. 신청서 및 멘션 전송 (신청서 하단에 [내가 담당하기] 버튼 부착)
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
                 "신청이 접수되었습니다. 담당자가 확인 후 안내드릴 예정입니다."
             ),
-            embed=embed
+            embed=embed,
+            view=claim_view
         )
 
         # 2. 안내 및 참고자료 임베드 묶음 전송
@@ -199,22 +200,7 @@ class SimpleTicketModal(discord.ui.Modal):
         except Exception as notice_err:
             print(f"[안내 임베드 생성/전송 오류] {notice_err}")
 
-        # 3. 진행 임베드 전송 ([내가 담당하기] View 부착)
-        progress_embed = discord.Embed(
-            title="📌 커미션/문의 진행",
-            description=(
-                f"👨‍💻 담당 디자이너 : {designer_name}\n\n"
-                "📌 상태 : 🟢 상담중\n"
-                "📊 진행률 : 0%\n"
-                "⏰ 예상 완료 : 미설정"
-            ),
-            color=discord.Color.green(),
-            timestamp=datetime.now()
-        )
-
-        progress_message = await ticket_channel.send(embed=progress_embed, view=claim_view)
-
-        # 4. 구매/신청 로그 처리
+        # 3. 구매/신청 로그 처리
         try:
             log_channel_name = globals().get('LOG_CHANNEL_NAME', None)
             if log_channel_name:
@@ -228,7 +214,7 @@ class SimpleTicketModal(discord.ui.Modal):
         except Exception as log_err:
             print(f"[로그 전송 실패] {log_err}")
 
-        # 5. 지정 디자이너 DM 및 컨트롤러 제어
+        # 4. 지정 디자이너 DM 및 컨트롤러 제어
         if self.selected_designer:
             developer = guild.get_member(self.selected_designer)
 
@@ -241,7 +227,7 @@ class SimpleTicketModal(discord.ui.Modal):
 
                     await developer.send(
                         f"📊 진행률 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                        view=ProgressView(progress_message, self.selected_designer)
+                        view=ProgressView(None, self.selected_designer)
                     )
 
                     await developer.send(
@@ -265,7 +251,7 @@ class SimpleTicketModal(discord.ui.Modal):
                     )
                     await ticket_channel.send(
                         "📊 진행률 관리",
-                        view=ProgressView(progress_message, self.selected_designer)
+                        view=ProgressView(None, self.selected_designer)
                     )
                     await ticket_channel.send(
                         "💳 결제 및 티켓 관리",
