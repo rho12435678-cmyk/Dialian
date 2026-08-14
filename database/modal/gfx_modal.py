@@ -82,6 +82,10 @@ class PurchaseModal(discord.ui.Modal):
             self.fourth_style = None
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 1. 3초 타임아웃 방지를 위해 모달 제출 즉시 가장 먼저 defer 실행
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         ticket_lock = await acquire_ticket_creation_lock(interaction)
         if ticket_lock is None:
             return
@@ -98,10 +102,6 @@ class PurchaseModal(discord.ui.Modal):
             release_ticket_creation_lock(ticket_lock)
 
     async def create_ticket(self, interaction: discord.Interaction):
-        # 1. 디스코드 3초 타임아웃 방지를 위해 최상단에서 가장 먼저 defer 실행
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-
         guild = interaction.guild
         user = interaction.user
 
