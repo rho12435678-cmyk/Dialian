@@ -579,10 +579,9 @@ async def command_list(ctx):
         description=(
             "**[티켓 및 일반 서비스]**\n"
             "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널` `!담당 @유저`\n"
-            "`!진행 0|25|50|75|100` `!예상 1일|2일|3일` `!완료` `!청소 1~100`\n"
+            "`!진행 0|25|50|75|100` `!예상 [시간]` `!완료` `!티켓정보` `!고객` `!소유자변경 @유저` `!청소 1~100`\n"
             "`!계좌등록 @유저 은행 계좌번호 예금주` `!계좌목록` `!계좌삭제 @유저`\n"
-            "`!통계` `!통계동기화` `!진행티켓` `!통계수정 티켓ID 진행중|완료|취소 [진행률]`\n"
-            "`!진행티켓종료 티켓ID` `!진행티켓삭제 티켓ID`\n\n"
+            "`!통계` `!진행티켓` `!강제종료`\n\n"
             "**[패널 및 가이드 설정]**\n"
             "`!포인트안내` (포인트 적립 채널에 공지 임베드 전송)\n"
             "`!디자이너등급패널` (디자이너 등급 실시간 패널 생성)\n"
@@ -604,7 +603,6 @@ async def command_list(ctx):
 @bot.command(name="포인트안내")
 @commands.has_permissions(administrator=True)
 async def send_point_guide_embed(ctx):
-    """요구사항 3: 포인트 적립 및 이용 안내 일회용 임베드 송신"""
     target_channel = bot.get_channel(POINT_INFO_CHANNEL_ID) or ctx.channel
 
     embed = discord.Embed(
@@ -666,7 +664,6 @@ async def send_point_guide_embed(ctx):
 @bot.command(name="디자이너등급패널")
 @commands.has_permissions(administrator=True)
 async def setup_designer_tier_panel(ctx):
-    """요구사항 4: 디자이너 등급 채널 패널 생성"""
     if ctx.channel.id != DESIGNER_TIER_CHANNEL_ID:
         return await ctx.send(f"❌ <#{DESIGNER_TIER_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.", delete_after=5)
 
@@ -1017,6 +1014,14 @@ def is_ticket_or_archive_channel(channel):
 
 
 async def find_ticket_owner(channel):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
+        row = await cursor.fetchone()
+        if row and row[0]:
+            member = channel.guild.get_member(row[0])
+            if member:
+                return member
+
     try:
         if channel.topic:
             match = re.search(r"\d+", channel.topic)
@@ -1024,6 +1029,7 @@ async def find_ticket_owner(channel):
                 return channel.guild.get_member(int(match.group(0)))
     except (TypeError, ValueError):
         pass
+
     async for msg in channel.history(limit=5, oldest_first=True):
         if msg.mentions:
             return msg.mentions[0]
@@ -1031,6 +1037,12 @@ async def find_ticket_owner(channel):
 
 
 async def find_ticket_designer_id(channel):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
+        row = await cursor.fetchone()
+        if row and row[0]:
+            return row[0]
+
     async for msg in channel.history(limit=50, oldest_first=True):
         for embed in msg.embeds:
             for field in embed.fields:
@@ -1331,84 +1343,146 @@ async def delete_ticket_by_command(ctx):
     await delete_ticket_channel(channel, ctx.author)
 
 
+# ==================== [수정 및 추가된 알잘딱 티켓 커스텀 명령어] ====================
+
 @bot.command(name="진행")
-@commands.has_permissions(administrator=True)
 async def progress(ctx, percent: int):
+    """임베드 수정 방식 대신 DB 업데이트 및 깔끔한 공지 메시지 송신"""
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
     if percent not in [0, 25, 50, 75, 100]:
         return await ctx.send("사용법: `!진행 0|25|50|75|100`")
 
-    status = {0: "🟢 상담중", 25: "🟡 작업 시작", 50: "🟠 작업중", 75: "🔵 마무리 작업", 100: "✅ 완료"}[percent]
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 진행률을 수정할 수 있습니다.")
 
-    async for msg in ctx.channel.history(limit=30):
-        if msg.author != bot.user or not msg.embeds:
-            continue
-        embed = msg.embeds[0]
-        if embed.title != "📌 커미션 진행" or not embed.description:
-            continue
-        lines = embed.description.splitlines()
-        if len(lines) < 4:
-            continue
-        embed.description = f"{lines[0]}\n\n📌 상태 : {status}\n📊 진행률 : {percent}%\n{lines[3]}"
-        await msg.edit(embed=embed)
-        await update_commission_progress(ctx.channel, percent)
-        await ctx.send("✅ 진행률이 변경되었습니다.", delete_after=3)
-        return
-    await ctx.send("진행 패널을 찾지 못했습니다.")
+    status_labels = {0: "🟢 상담/대기중", 25: "🟡 작업 시작", 50: "🟠 작업 진행중", 75: "🔵 마무리 작업", 100: "✅ 완료"}
+    label = status_labels[percent]
+
+    await update_commission_progress(ctx.channel, percent)
+
+    embed = discord.Embed(
+        title="📊 커미션 진행 상황 업데이트",
+        description=f"📌 **상태:** {label}\n📈 **진행률:** `{percent}%`",
+        color=discord.Color.blue()
+    )
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="예상", aliases=["예상시간", "eta"])
-@commands.has_permissions(administrator=True)
 async def expected_time(ctx, *, time_str: str):
-    async for msg in ctx.channel.history(limit=30):
-        if msg.author != bot.user or not msg.embeds:
-            continue
-        embed = msg.embeds[0]
-        if embed.title != "📌 커미션 진행" or not embed.description:
-            continue
-        lines = embed.description.splitlines()
-        if len(lines) < 4:
-            continue
+    """임베드 수정 방식 대신 티켓 채널 안내 임베드 송신"""
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
-        new_lines = []
-        has_eta = False
-        for line in lines:
-            if "예상 완료" in line or "⏰" in line:
-                new_lines.append(f"⏰ 예상 완료 : {time_str}")
-                has_eta = True
-            else:
-                new_lines.append(line)
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 예상 시간을 설정할 수 있습니다.")
 
-        if not has_eta:
-            new_lines.append(f"⏰ 예상 완료 : {time_str}")
-
-        embed.description = "\n".join(new_lines)
-        await msg.edit(embed=embed)
-        await ctx.send("✅ 예상 완료 시간이 수정되었습니다.", delete_after=3)
-        return
-    await ctx.send("❌ 진행 패널을 찾지 못했습니다.")
+    embed = discord.Embed(
+        title="⏰ 예상 작업 완료 시간 안내",
+        description=f"담당 디자이너가 안내하는 예상 완료 일정: **{time_str}**",
+        color=discord.Color.gold()
+    )
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="완료")
-@commands.has_permissions(administrator=True)
 async def complete(ctx):
-    designer_id = None
-    async for msg in ctx.channel.history(limit=30):
-        if msg.author != bot.user or not msg.embeds:
-            continue
-        embed = msg.embeds[0]
-        if embed.title == "📌 커미션 진행":
-            if embed.description:
-                lines = embed.description.splitlines()
-                match = re.search(r"<@!?(\d+)>", lines[0]) if lines else None
-                if match:
-                    designer_id = int(match.group(1))
-            embed.description = f"{lines[0] if lines else ''}\n\n📌 상태 : ✅ 완료\n📊 진행률 : 100%\n⏰ 예상 완료 : 완료"
-            await msg.edit(embed=embed)
-            await update_commission_progress(ctx.channel, 100)
-            break
+    """작업 완료 처리 및 평가 뷰 송신"""
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
-    review_embed = discord.Embed(title="⭐ 작업이 완료되었습니다!", description="아래 버튼을 눌러 만족도를 평가해주세요.", color=discord.Color.gold())
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 완료 처리할 수 있습니다.")
+
+    await update_commission_progress(ctx.channel, 100)
+
+    review_embed = discord.Embed(
+        title="⭐ 작업이 완료되었습니다!",
+        description="모든 작업이 마무리되었습니다.\n아래 버튼을 눌러 담당 디자이너의 만족도를 평가해주세요!",
+        color=discord.Color.gold()
+    )
     await ctx.send(embed=review_embed, view=StarRatingView(designer_id))
+
+
+@bot.command(name="티켓정보", aliases=["티켓상태", "커미션정보"])
+async def ticket_info(ctx):
+    """현재 티켓 채널의 상세 정보를 조회"""
+    if not is_ticket_or_archive_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(
+            "SELECT customer_id, designer_id, category, status, progress, created_at FROM commissions WHERE ticket_channel = ?",
+            (ctx.channel.id,)
+        )
+        row = await cursor.fetchone()
+
+    if not row:
+        return await ctx.send("❌ 해당 티켓의 DB 정보가 존재하지 않습니다.")
+
+    customer_id, designer_id, category, status, progress, created_at = row
+    customer = ctx.guild.get_member(customer_id) if customer_id else None
+    designer = ctx.guild.get_member(designer_id) if designer_id else None
+
+    embed = discord.Embed(title=f"ℹ️ 티켓 정보 - #{ctx.channel.name}", color=discord.Color.blurple())
+    embed.add_field(name="👤 주문 고객", value=customer.mention if customer else f"`{customer_id}`", inline=True)
+    embed.add_field(name="👨‍💻 담당 디자이너", value=designer.mention if designer else "미배정", inline=True)
+    embed.add_field(name="📁 카테고리", value=category or "일반", inline=True)
+    embed.add_field(name="📊 진행률", value=f"`{progress}%` ({status})", inline=True)
+    embed.add_field(name="📅 생성 일시", value=created_at[:16].replace("T", " ") if created_at else "알 수 없음", inline=True)
+
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="고객", aliases=["손님", "주문자"])
+async def show_ticket_customer(ctx):
+    """티켓의 주문 고객이 누구인지 빠르게 확인"""
+    if not is_ticket_or_archive_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    customer = await find_ticket_owner(ctx.channel)
+    if customer:
+        await ctx.send(f"👤 이 티켓의 주문 고객님은 {customer.mention} (`{customer.id}`) 님입니다.")
+    else:
+        await ctx.send("❌ 티켓 주문 고객 정보를 찾을 수 없습니다.")
+
+
+@bot.command(name="소유자변경", aliases=["고객변경"])
+@commands.has_permissions(administrator=True)
+async def change_ticket_owner(ctx, new_owner: discord.Member):
+    """티켓 소유권(고객)을 다른 유저로 변경하고 권한 재설정"""
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            "UPDATE commissions SET customer_id = ?, updated_at = ? WHERE ticket_channel = ?",
+            (new_owner.id, datetime.now().isoformat(), ctx.channel.id)
+        )
+        await db.commit()
+
+    try:
+        await ctx.channel.set_permissions(new_owner, read_messages=True, send_messages=True, attach_files=True)
+    except Exception:
+        pass
+
+    await ctx.send(f"✅ 티켓 소유자(고객)가 {new_owner.mention} 님으로 변경되었습니다.")
+
+
+@bot.command(name="강제종료")
+@commands.has_permissions(administrator=True)
+async def force_close_ticket(ctx):
+    """DB 처리 없이 티켓 채널을 즉시 보관함으로 이동"""
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    await ctx.send("🚨 관리자 권한으로 티켓을 강제 종료하고 보관합니다.")
+    await archive_ticket_channel(ctx.channel)
 
 
 @bot.command(name="청소")
@@ -1432,7 +1506,6 @@ async def verify_panel(ctx):
 
 @tasks.loop(hours=12)
 async def auto_chat_guide_loop():
-    """요구사항 5: 12시간마다 한국어/영어 채팅방에 가이드 자동 공지 (멘션 없음)"""
     kr_channel = bot.get_channel(KR_CHAT_CHANNEL_ID)
     if kr_channel:
         embed_kr = discord.Embed(
