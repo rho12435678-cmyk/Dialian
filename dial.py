@@ -151,7 +151,8 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
     motive = ui.TextInput(label="지원 동기 및 각오", style=discord.TextStyle.paragraph, placeholder="간단한 지원 동기를 작성해주세요.", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         user = interaction.user
 
@@ -201,7 +202,8 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
     contact = ui.TextInput(label="기타 문의사항", style=discord.TextStyle.paragraph, placeholder="추가 문의사항이 있다면 입력해주세요.", required=False)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         user = interaction.user
 
@@ -252,15 +254,19 @@ class CategorySelectView(ui.View):
 
     @ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="ticket_gfx")
     async def btn_gfx(self, interaction: discord.Interaction, button: ui.Button):
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         view = await DesignerView.create(interaction.guild, "gfx")
         embed = discord.Embed(title="🎨 GFX 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     @ui.button(label="👔 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="ticket_uniform")
     async def btn_uniform(self, interaction: discord.Interaction, button: ui.Button):
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         view = await DesignerView.create(interaction.guild, "uniform")
         embed = discord.Embed(title="👔 Roblox 복장 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply")
     async def btn_dev_apply(self, interaction: discord.Interaction, button: ui.Button):
@@ -277,12 +283,14 @@ class CombinedTicketOpenView(ui.View):
 
     @ui.button(label="📩 티켓 문의하기", style=discord.ButtonStyle.primary, custom_id="open_ticket_main_btn")
     async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(
             title="🎯 원하시는 문의 유형을 선택해주세요",
             description="아래 버튼 중 진행하고 싶으신 종류를 클릭해주세요.",
             color=discord.Color.blurple()
         )
-        await interaction.response.send_message(embed=embed, view=CategorySelectView(), ephemeral=True)
+        await interaction.followup.send(embed=embed, view=CategorySelectView(), ephemeral=True)
 
 
 # ==================== [디자이너 등급 패널 로직] ====================
@@ -576,7 +584,7 @@ async def send_point_guide_embed(ctx):
     embed.add_field(
         name="1️⃣ 포인트 적립 방법 (채널별 안내)",
         value=(
-            "• <#1532599012316938321> **작품 공유**\n"
+            f"• <#{POINT_RANKING_CHANNEL_ID}> **작품 공유**\n"
             "  - 이미지 첨부 + 20자 이상 작성 시 ➡️ **+15P** *(하루 최대 3회)*\n\n"
             "• **피드백 채널**\n"
             "  - 메시지에 반응(이모지 등) 남길 시 ➡️ **+10P** *(하루 최대 3회, 본인 제외)*\n\n"
@@ -1476,17 +1484,17 @@ async def auto_chat_guide_loop():
             value=(
                 "• <#1505102694917079132> : 커미션 주문 및 문의/지원 신청\n"
                 "• <#1505178799950532720> : 디자이너 샘플 및 예시작 감상\n"
-                "• <#1537806140711239760> : 디자이너 등급 및 분야 현황\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황\n"
                 "• <#1521001578239361155> : 디자이너 작업 완료 통계\n"
-                "• <#1506517440463638581> : 실제 이용 고객님들의 솔직한 후기"
+                f"• <#{FEEDBACK_CHANNEL_ID}> : 실제 이용 고객님들의 솔직한 후기"
             ),
             inline=False
         )
         embed_kr.add_field(
             name="🪙 포인트 & 혜택 시스템",
             value=(
-                "• <#1532599012316938321> : 포인트 실시간 랭킹 확인\n"
-                "• <#1532373833783316610> : 포인트 적립 방법 및 단골(15% 할인) 혜택 안내"
+                f"• <#{POINT_RANKING_CHANNEL_ID}> : 포인트 실시간 랭킹 확인\n"
+                f"• <#{POINT_INFO_CHANNEL_ID}> : 포인트 적립 방법 및 단골(15% 할인) 혜택 안내"
             ),
             inline=False
         )
@@ -1511,17 +1519,17 @@ async def auto_chat_guide_loop():
             value=(
                 "• <#1505102694917079132> : Order commissions & Partner/Dev inquiries\n"
                 "• <#1505178799950532720> : Designer portfolio & sample showcase\n"
-                "• <#1537806140711239760> : Designer ranks & categories\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories\n"
                 "• <#1521001578239361155> : Designer completion statistics\n"
-                "• <#1506517440463638581> : Customer reviews & feedback"
+                f"• <#{FEEDBACK_CHANNEL_ID}> : Customer reviews & feedback"
             ),
             inline=False
         )
         embed_en.add_field(
             name="🪙 Points & Rewards",
             value=(
-                "• <#1532599012316938321> : Real-time Point Leaderboard\n"
-                "• <#1532373833783316610> : How to earn points & VIP perks (15% OFF)"
+                f"• <#{POINT_RANKING_CHANNEL_ID}> : Real-time Point Leaderboard\n"
+                f"• <#{POINT_INFO_CHANNEL_ID}> : How to earn points & VIP perks (15% OFF)"
             ),
             inline=False
         )
