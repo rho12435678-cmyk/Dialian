@@ -1,8 +1,8 @@
 import discord
-from config import DESIGNER_ROLE_IDS  # config.py에서 역할 ID 불러오기
+from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
-
+from database.modal.simple_ticket_modal import SimpleTicketModal  # 파트너 문의 모달 import
 
 # ==========================================
 # 개발자 지원 모달 (Modal)
@@ -19,13 +19,12 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
         label="자기소개 및 지원 동기",
         style=discord.TextStyle.paragraph,
         placeholder="자기소개와 각오를 적어주세요.",
-        required=True,
-        max_length=500
+        required=0
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 지원서를 수신할 채널 ID (실제 채널 ID로 변경해 주세요)
-        APPLY_CHANNEL_ID = 123456789012345678  
+        # 지원서를 수신할 채널 ID (관리자 채널)
+        APPLY_CHANNEL_ID = 1537806140711239760  # 실제 관리자 채널 ID로 변경 필수
 
         channel = interaction.guild.get_channel(APPLY_CHANNEL_ID)
         
@@ -46,14 +45,13 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
 
 
 # ==========================================
-# 4단계: 담당 디자이너 선택 드롭다운 (Dynamic UI)
+# 담당 디자이너 선택 드롭다운 (Dynamic UI)
 # ==========================================
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
         self.category = category
         self.bundle_type = bundle_type
 
-        # 기본 옵션: 미지정
         options = [
             discord.SelectOption(
                 label="미지정 (추후 배정)", 
@@ -62,24 +60,21 @@ class DesignerSelect(discord.ui.Select):
             )
         ]
 
-        # 카테고리에 맞는 역할 ID 추출 ("GFX" -> "gfx", 그 외 -> "uniform")
         role_key = "gfx" if category == "GFX" else "uniform"
         role_id = DESIGNER_ROLE_IDS.get(role_key)
 
-        # 서버에서 해당 역할을 가진 멤버들을 찾아서 드롭다운 옵션에 동적 추가
         if guild and role_id:
             role = guild.get_role(role_id)
             if role:
                 for member in role.members:
                     options.append(
                         discord.SelectOption(
-                            label=member.display_name,  # 서버 닉네임
-                            value=str(member.id),       # 유저 ID
+                            label=member.display_name,
+                            value=str(member.id),
                             description=f"{category} 담당 디자이너"
                         )
                     )
 
-        # Discord UI Select는 최대 25개까지 지원
         super().__init__(
             placeholder="👨‍💻 담당 디자이너를 선택해주세요", 
             options=options[:25], 
@@ -105,7 +100,7 @@ class DesignerSelectView(discord.ui.View):
 
 
 # ==========================================
-# 3단계: 묶음(수량) 선택 뷰
+# 묶음(수량) 선택 뷰
 # ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
@@ -113,7 +108,6 @@ class BundleSelectView(discord.ui.View):
         self.category = category
 
     async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
-        # interaction.guild를 전달하여 서버 멤버 데이터를 실시간으로 가져옵니다.
         view = DesignerSelectView(self.category, bundle_type, interaction.guild)
         await interaction.response.edit_message(
             content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
@@ -134,51 +128,26 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 1 & 2단계: 티켓 생성 후 최초로 뜨는 카테고리 선택 뷰 (TicketOpenView와 연동)
+# 최종 메인 카테고리 선택 뷰
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
-        # Persistent View 요구조건: timeout=None으로 설정
-        super().__init__(timeout=None)
+        super().__init__(timeout=None) # Persistent View
 
-    @discord.ui.button(
-        label="🎨 GFX 커미션",
-        style=discord.ButtonStyle.primary,
-        custom_id="cat_gfx_btn"
-    )
-    async def select_gfx(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await interaction.response.edit_message(
-            content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.",
-            view=BundleSelectView(category="GFX")
-        )
+    @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
+    async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", view=BundleSelectView(category="GFX"))
 
-    @discord.ui.button(
-        label="👕 복장 커미션",
-        style=discord.ButtonStyle.secondary,
-        custom_id="cat_uniform_btn"
-    )
-    async def select_uniform(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await interaction.response.edit_message(
-            content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.",
-            view=BundleSelectView(category="복장")
-        )
+    @discord.ui.button(label="👕 복장 커미션", style=discord.ButtonStyle.secondary, custom_id="cat_uniform_btn")
+    async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", view=BundleSelectView(category="복장"))
 
-    @discord.ui.button(
-        label="💻 개발자 지원",
-        style=discord.ButtonStyle.success,
-        custom_id="cat_dev_apply_btn"
-    )
-    async def select_dev_apply(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.success, custom_id="cat_dev_apply_btn")
+    async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DeveloperApplyModal())
+
+    # [요구사항 4] 4번째 파트너 문의 버튼 추가
+    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.secondary, custom_id="cat_partner_btn")
+    async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 파트너 문의 전용 모달 호출 (SimpleTicketModal 사용)
+        await interaction.response.send_modal(SimpleTicketModal(ticket_type="파트너 문의"))
