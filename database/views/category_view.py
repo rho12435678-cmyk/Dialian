@@ -2,10 +2,10 @@ import discord
 from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
-from database.views.close_ticket import TicketCloseView  # 티켓 관리 버튼(티켓닫기 등) Import
+from database.views.close_ticket import TicketCloseView
 
 # ==========================================
-# 1. 개발자 지원 모달 (제출 시 티켓 채널 생성)
+# 1. 개발자 지원 모달
 # ==========================================
 class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청서"):
     portfolio = discord.ui.TextInput(
@@ -34,9 +34,8 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
         }
 
         clean_username = user.name.lower().replace(" ", "-")
-        channel_name = f"지원-{clean_username}"
         channel = await guild.create_text_channel(
-            name=channel_name,
+            name=f"지원-{clean_username}",
             topic=f"💻 개발자 지원 티켓 | 신청자: {user.name} ({user.id})",
             overwrites=overwrites
         )
@@ -48,11 +47,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
         )
         embed.add_field(name="지원자", value=f"{user.mention} (`{user.id}`)", inline=False)
         embed.add_field(name="포트폴리오 / 경력", value=self.portfolio.value, inline=False)
-        embed.add_field(
-            name="자기소개 및 동기", 
-            value=self.introduction.value if self.introduction.value else "작성 안 함", 
-            inline=False
-        )
+        embed.add_field(name="자기소개 및 동기", value=self.introduction.value if self.introduction.value else "작성 안 함", inline=False)
         embed.set_footer(text="담당 관리자가 확인 후 답변드릴 예정입니다.")
 
         await channel.send(content=f"{user.mention} 님의 개발자 지원 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView())
@@ -60,7 +55,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
 
 
 # ==========================================
-# 2. 파트너 문의 모달 (제출 시 티켓 채널 생성)
+# 2. 파트너 문의 모달
 # ==========================================
 class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서"):
     partner_name = discord.ui.TextInput(
@@ -88,9 +83,8 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
         }
 
         clean_username = user.name.lower().replace(" ", "-")
-        channel_name = f"파트너-{clean_username}"
         channel = await guild.create_text_channel(
-            name=channel_name,
+            name=f"파트너-{clean_username}",
             topic=f"🤝 파트너 문의 티켓 | 신청자: {user.name} ({user.id})",
             overwrites=overwrites
         )
@@ -110,28 +104,20 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
 
 
 # ==========================================
-# 3. 담당 디자이너 선택 드롭다운 (Dynamic UI)
+# 3. 담당 디자이너 선택 드롭다운 (초고속 안전 처리)
 # ==========================================
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, options: list):
         self.category = category
         self.bundle_type = bundle_type
-
-        super().__init__(
-            placeholder="👨‍💻 담당 디자이너를 선택해주세요", 
-            options=options[:25], 
-            min_values=1, 
-            max_values=1
-        )
+        super().__init__(placeholder="👨‍💻 담당 디자이너를 선택해주세요", options=options[:25], min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
         designer_id = None if self.values[0] == "none" else int(self.values[0])
-        
         if self.category == "GFX":
             modal = PurchaseModal(bundle_type=self.bundle_type, selected_designer=designer_id)
         else:
             modal = UniformModal(bundle_type=self.bundle_type, selected_designer=designer_id)
-            
         await interaction.response.send_modal(modal)
 
 
@@ -144,37 +130,26 @@ class DesignerSelectView(discord.ui.View):
     @classmethod
     async def create(cls, category: str, bundle_type: str, guild: discord.Guild):
         view = cls(category, bundle_type)
-        
-        options = [
-            discord.SelectOption(
-                label="미지정 (추후 배정)", 
-                value="none", 
-                description="담당자를 나중에 배정받습니다."
-            )
-        ]
+        options = [discord.SelectOption(label="미지정 (추후 배정)", value="none", description="담당자를 나중에 배정받습니다.")]
 
-        role_key = "gfx" if category == "GFX" else "uniform"
-        role_id = DESIGNER_ROLE_IDS.get(role_key)
-
-        if guild and role_id:
-            role = guild.get_role(role_id)
-            members = role.members if role else []
-
-            for member in members[:24]:  # 최대 24명 제한
-                options.append(
-                    discord.SelectOption(
-                        label=member.display_name,
-                        value=str(member.id),
-                        description=f"{category} 담당 디자이너"
-                    )
-                )
+        try:
+            role_key = "gfx" if category == "GFX" else "uniform"
+            role_id = DESIGNER_ROLE_IDS.get(role_key)
+            if guild and role_id:
+                role = guild.get_role(role_id)
+                if role:
+                    # 서버 과부하 및 타임아웃 방지를 위해 캐시된 멤버 중 최대 20명만 빠르게 추출
+                    for member in list(role.members)[:20]:
+                        options.append(discord.SelectOption(label=member.display_name[:25], value=str(member.id), description=f"{category} 담당"))
+        except Exception as e:
+            print(f"[디자이너 목록 로드 중 예외 발생] {e}")
 
         view.add_item(DesignerSelect(category, bundle_type, options))
         return view
 
 
 # ==========================================
-# 4. 묶음(수량) 선택 뷰
+# 4. 묶음 선택 뷰
 # ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
@@ -182,8 +157,10 @@ class BundleSelectView(discord.ui.View):
         self.category = category
 
     async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
-        # 여기도 3초 타임아웃 방지를 위해 defer 처리
-        await interaction.response.defer()
+        # 💡 핵심: 버튼 누르자마자 즉시 defer 처리하여 타임아웃 원천 차단
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
         view = await DesignerSelectView.create(self.category, bundle_type, interaction.guild)
         await interaction.edit_original_response(
             content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
@@ -204,17 +181,18 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 5. 최종 메인 카테고리 선택 뷰 (중복 제거 및 최신화 완료)
+# 5. 최종 메인 카테고리 선택 뷰
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # Persistent View
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 1. 3초 타임아웃 방지를 위해 즉시 응답 지연
-        await interaction.response.defer()
-        
+        # 💡 핵심: 3초 타임아웃 방지를 위해 즉시 응답 지연
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
         view = BundleSelectView(category="GFX")
         await interaction.edit_original_response(
             content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
@@ -223,9 +201,9 @@ class CategoryView(discord.ui.View):
 
     @discord.ui.button(label="👕 복장 커미션", style=discord.ButtonStyle.secondary, custom_id="cat_uniform_btn")
     async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 1. 3초 타임아웃 방지를 위해 즉시 응답 지연
-        await interaction.response.defer()
-        
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
         view = BundleSelectView(category="복장")
         await interaction.edit_original_response(
             content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
