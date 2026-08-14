@@ -11,7 +11,7 @@ from database.views.ticket_guard import (
 from database.purchase_log import send_purchase_log
 
 
-# 개발자 지원 티켓을 확인할 관리자 계정
+# 개발자 지원 티켓을 확인할 관리자 계정 ID 목록
 ADMIN_IDS = [
     727462527235260427,
     1468584582113919129,
@@ -88,7 +88,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
 
     field = discord.ui.TextInput(
         label="지원 분야",
-        placeholder="예: GFX / Roblox 복장",
+        placeholder="예: GFX / Roblox 복장 / 프로그래밍",
         required=True,
         max_length=30
     )
@@ -102,7 +102,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
 
     program = discord.ui.TextInput(
         label="사용 가능 프로그램",
-        placeholder="예: Blender, Photoshop",
+        placeholder="예: Blender, Photoshop, Studio",
         required=True,
         max_length=100
     )
@@ -147,6 +147,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
 
         bot_member = guild.me or guild.get_member(interaction.client.user.id)
 
+        # 권한 설정: 기본 구성원 차단 / 지원자 및 관리자 허용
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             user: discord.PermissionOverwrite(
@@ -180,8 +181,12 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
                     embed_links=True
                 )
 
+        # 개발자 지원 전용 카테고리가 있다면 지정, 없으면 기본 생성
+        category = discord.utils.get(guild.categories, name="💻 개발자 지원")
+
         ticket_channel = await guild.create_text_channel(
-            name=f"개발자지원-{user.id}",
+            name=f"개발자지원-{user.name}",
+            category=category,
             overwrites=overwrites,
             topic=str(user.id),
             reason=f"{user}의 개발자 지원 티켓"
@@ -189,7 +194,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
 
         now = datetime.now().isoformat()
 
-        # DB 저장 (designer_id에 None 대신 0 지정하여 NOT NULL 제약조건 방지)
+        # DB 기록 (designer_id = 0 으로 NOT NULL 우회)
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute(
                 """
@@ -218,8 +223,9 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
             )
             await db.commit()
 
+        # 제출 내용 정리 임베드 생성
         embed = discord.Embed(
-            title="🛠️ 개발자 지원서",
+            title="🛠️ 개발자 지원서 접수",
             color=discord.Color.blue(),
             timestamp=datetime.now()
         )
@@ -229,11 +235,11 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
         embed.add_field(name="사용 가능 프로그램", value=self.program.value, inline=False)
         embed.set_footer(text=f"지원자: {user}")
 
-        # 심사 전용 버튼 View 부착 전송
+        # 심사 버튼과 함께 전송
         await ticket_channel.send(
             content=(
                 f"{user.mention}\n"
-                "✅ 개발자 지원서가 접수되었습니다. "
+                "✅ 개발자 지원서가 성공적으로 접수되었습니다. "
                 "관리자가 확인 후 아래 심사 버튼 또는 메시지로 안내해 드리겠습니다."
             ),
             embed=embed,
@@ -245,16 +251,16 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
             "📎 포트폴리오, 작업물, 증명 자료는 이 티켓에 첨부파일로 자유롭게 올려주세요."
         )
 
-        # 로그 알림 전송 에러 시에도 티켓 생성이 중단되지 않도록 보호
+        # 구매/신청 로그 채널로 알림 전송
         try:
             await send_purchase_log(
                 guild,
-                content=f"개발자 지원 티켓 생성\n{ticket_channel.mention}\n신청자: {user.mention}",
+                content=f"💻 개발자 지원 티켓 생성\n{ticket_channel.mention}\n신청자: {user.mention}",
             )
         except Exception as log_error:
-            print(f"[구매 로그 전송 실패] {log_error}")
+            print(f"[로그 전송 실패] {log_error}")
 
         await interaction.followup.send(
-            f"✅ 지원서가 제출되었습니다.\n{ticket_channel.mention}",
+            f"✅ 지원서가 정상 제출되었으며, 전용 티켓이 생성되었습니다.\n{ticket_channel.mention}",
             ephemeral=True
         )
