@@ -2,10 +2,10 @@ import discord
 from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
-from database.modal.simple_ticket_modal import SimpleTicketModal  # 파트너 문의 모달 import
+from database.views.close_ticket import TicketCloseView  # 티켓 관리 버튼(티켓닫기 등) Import
 
 # ==========================================
-# 개발자 지원 모달 (Modal)
+# 1. 개발자 지원 모달 (제출 시 티켓 채널 생성)
 # ==========================================
 class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청서"):
     portfolio = discord.ui.TextInput(
@@ -19,33 +19,110 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
         label="자기소개 및 지원 동기",
         style=discord.TextStyle.paragraph,
         placeholder="자기소개와 각오를 적어주세요.",
-        required=0
+        required=False,
+        max_length=1000
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 지원서를 수신할 채널 ID (관리자 채널)
-        APPLY_CHANNEL_ID = 1537806140711239760  # 실제 관리자 채널 ID로 변경 필수
+        guild = interaction.guild
+        user = interaction.user
 
-        channel = interaction.guild.get_channel(APPLY_CHANNEL_ID)
-        
+        # 개인 전용 지원 티켓 채널 권한 설정
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+
+        # 지원 티켓 채널 생성
+        clean_username = user.name.lower().replace(" ", "-")
+        channel_name = f"지원-{clean_username}"
+        channel = await guild.create_text_channel(
+            name=channel_name,
+            topic=f"💻 개발자 지원 티켓 | 신청자: {user.name} ({user.id})",
+            overwrites=overwrites
+        )
+
+        # 지원 신청서 임베드 작성
         embed = discord.Embed(
             title="📩 새로운 개발자 지원서 접수",
-            color=discord.Color.green(),
+            color=discord.Color.blue(),
             timestamp=interaction.created_at
         )
-        embed.add_field(name="지원자", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
+        embed.add_field(name="지원자", value=f"{user.mention} (`{user.id}`)", inline=False)
         embed.add_field(name="포트폴리오 / 경력", value=self.portfolio.value, inline=False)
-        embed.add_field(name="자기소개 및 동기", value=self.introduction.value, inline=False)
+        embed.add_field(
+            name="자기소개 및 동기", 
+            value=self.introduction.value if self.introduction.value else "작성 안 함", 
+            inline=False
+        )
+        embed.set_footer(text="담당 관리자가 확인 후 답변드릴 예정입니다.")
 
-        if channel:
-            await channel.send(embed=embed)
-            await interaction.response.send_message("✅ 개발자 지원서가 성공적으로 접수되었습니다!", ephemeral=True)
-        else:
-            await interaction.response.send_message("✅ 지원서 작성이 완료되었습니다. (관리자 수신 채널 설정 필요)", ephemeral=True)
+        # 생성된 채널에 임베드 및 티켓 닫기 버튼 전송
+        await channel.send(content=f"{user.mention} 님의 개발자 지원 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView())
+        
+        # 유저에게 응답 (ephemeral)
+        await interaction.response.send_message(f"✅ 개발자 지원서가 접수되었습니다! 생성된 채널: {channel.mention}", ephemeral=True)
 
 
 # ==========================================
-# 담당 디자이너 선택 드롭다운 (Dynamic UI)
+# 2. 파트너 문의 모달 (제출 시 티켓 채널 생성)
+# ==========================================
+class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서"):
+    partner_name = discord.ui.TextInput(
+        label="파트너(서버/브랜드) 이름",
+        placeholder="서버 이름 또는 브랜드명을 입력해주세요.",
+        required=True,
+        max_length=100
+    )
+    details = discord.ui.TextInput(
+        label="제안 내용 및 조건",
+        style=discord.TextStyle.paragraph,
+        placeholder="협업 제안 내용이나 상세 조건을 적어주세요.",
+        required=True,
+        max_length=1000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+
+        # 개인 전용 파트너 티켓 채널 권한 설정
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+
+        # 파트너 티켓 채널 생성
+        clean_username = user.name.lower().replace(" ", "-")
+        channel_name = f"파트너-{clean_username}"
+        channel = await guild.create_text_channel(
+            name=channel_name,
+            topic=f"🤝 파트너 문의 티켓 | 신청자: {user.name} ({user.id})",
+            overwrites=overwrites
+        )
+
+        # 파트너 문의 임베드 작성
+        embed = discord.Embed(
+            title="🤝 새로운 파트너 문의 접수",
+            color=discord.Color.purple(),
+            timestamp=interaction.created_at
+        )
+        embed.add_field(name="신청자", value=f"{user.mention} (`{user.id}`)", inline=False)
+        embed.add_field(name="파트너/브랜드명", value=self.partner_name.value, inline=False)
+        embed.add_field(name="제안 및 협업 내용", value=self.details.value, inline=False)
+        embed.set_footer(text="담당자가 확인 후 답변드릴 예정입니다.")
+
+        # 생성된 채널에 임베드 및 티켓 닫기 버튼 전송
+        await channel.send(content=f"{user.mention} 님의 파트너 문의 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView())
+
+        # 유저에게 응답 (ephemeral)
+        await interaction.response.send_message(f"✅ 파트너 문의가 접수되었습니다! 생성된 채널: {channel.mention}", ephemeral=True)
+
+
+# ==========================================
+# 3. 담당 디자이너 선택 드롭다운 (Dynamic UI)
 # ==========================================
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, guild: discord.Guild):
@@ -100,7 +177,7 @@ class DesignerSelectView(discord.ui.View):
 
 
 # ==========================================
-# 묶음(수량) 선택 뷰
+# 4. 묶음(수량) 선택 뷰
 # ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
@@ -128,7 +205,7 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 최종 메인 카테고리 선택 뷰
+# 5. 최종 메인 카테고리 선택 뷰 (4개 버튼)
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
@@ -146,8 +223,6 @@ class CategoryView(discord.ui.View):
     async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DeveloperApplyModal())
 
-    # [요구사항 4] 4번째 파트너 문의 버튼 추가
     @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.secondary, custom_id="cat_partner_btn")
     async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 파트너 문의 전용 모달 호출 (SimpleTicketModal 사용)
-        await interaction.response.send_modal(SimpleTicketModal(ticket_type="파트너 문의"))
+        await interaction.response.send_modal(PartnerApplyModal())
