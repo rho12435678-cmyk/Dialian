@@ -36,7 +36,6 @@ from database.views.close_ticket import (
 )
 from database.views.designer_select import DesignerSelectView
 from database.views.payment_view import PaymentView
-from database.views.progress_view import ProgressView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import VerifyView
 
@@ -1650,7 +1649,6 @@ async def setup_hook():
 
     optional_arg_views = [
         ("StarRatingView", lambda: StarRatingView(designer_id=None)),
-        ("ProgressView", lambda: ProgressView()),
         ("PaymentView", lambda: PaymentView()),
         ("TicketCloseView", lambda: TicketCloseView()),
     ]
