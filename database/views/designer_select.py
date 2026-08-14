@@ -27,13 +27,8 @@ async def get_role_designers(guild: discord.Guild, category: str):
     if role is None:
         return []
 
-    # 캐시된 멤버가 없거나 부족할 경우 안전하게 fetch 수행
-    members = role.members
-    if not members:
-        try:
-            members = [m async for m in guild.fetch_members(limit=None) if role in m.roles]
-        except Exception:
-            members = []
+    # 3초 타임아웃 방지를 위해 캐시된 멤버만 안전하게 가져옴 (fetch 제거)
+    members = role.members if role else []
 
     return [
         member
@@ -78,15 +73,10 @@ class DesignerSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # 1. 3초 타임아웃 방지를 위해 가장 먼저 응답 지연(defer) 처리
-        await interaction.response.defer(ephemeral=True)
-
-        if await block_if_ticket_exists(interaction):
-            return
-
-        selected_val = self.values[0]
+        # ⚠️ defer()를 사용하면 모달을 띄울 수 없으므로 제거했습니다.
         
-        # 2. 모달 생성 시 인자 누락 방지를 위해 클래스 초기화 시 인자 전달
+        # 티켓 존재 여부 체크는 모달 내부나 가벼운 로직으로 처리해야 타임아웃을 피할 수 있습니다.
+        selected_val = self.values[0]
         modal_class = MODALS[self.category]
 
         if selected_val == "none":
@@ -97,12 +87,12 @@ class DesignerSelect(discord.ui.Select):
             valid_designer_ids = {member.id for member in valid_designers}
 
             if selected_designer_id not in valid_designer_ids:
-                return await interaction.followup.send(
+                return await interaction.response.send_message(
                     "❌ 선택한 디자이너 권한이 변경되었습니다. 다시 선택해주세요.",
                     ephemeral=True
                 )
 
             modal = modal_class(bundle_type="단품 (1개)", selected_designer=selected_designer_id)
 
-        # 3. 모달은 interaction.response.send_modal로 띄워야 하므로, 
-        # 이미 defer를 쓴 경우 send_modal 대신 다른 방식으로 모달을 열 수 없으므로 구조를 아래와 같이 조정합니다.
+        # ✅ 지연 없이 즉시 모달을 호출하여 "Didn't respond in time" 오류를 해결합니다.
+        await interaction.response.send_modal(modal)
