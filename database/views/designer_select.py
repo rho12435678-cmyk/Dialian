@@ -114,11 +114,17 @@ class QuantitySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        # ⚠️ 3초 타임아웃 방지를 위한 응답 지연 처리
+        await interaction.response.defer(ephemeral=True)
+
         bundle_type = self.values[0]
         options = await get_designer_options(interaction.guild, self.category)
         
         view = DesignerView(self.category, bundle_type, options)
-        await interaction.response.edit_message(
+        
+        # followup을 이용해 안전하게 메시지 수정
+        await interaction.followup.edit_message(
+            message_id=interaction.message.id,
             content=f"선택하신 상품 유형: **{bundle_type}**\n담당 디자이너를 선택해주세요.",
             view=view
         )
