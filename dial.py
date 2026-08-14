@@ -34,7 +34,7 @@ from database.views.close_ticket import (
     delete_ticket_dm_messages,
     has_designer_role,
 )
-from database.views.designer_select import DesignerSelectView
+from database.views.designer_select import DesignerSelect
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import VerifyView
@@ -290,7 +290,7 @@ class CategorySelectView(ui.View):
             color=0x5865F2
         )
 
-        await channel.send(embed=embed, view=DesignerSelectView())
+        await channel.send(embed=embed, view=DesignerSelect())
 
         data = {
             "ticket_channel": channel.id,
@@ -1638,7 +1638,7 @@ async def setup_hook():
         CategorySelectView,
         VerifyView,
         ClaimTicketView,
-        DesignerSelectView,
+        DesignerSelect,
     ]
 
     for view_cls in default_views:
