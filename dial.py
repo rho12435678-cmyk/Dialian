@@ -574,7 +574,7 @@ async def send_point_guide_embed(ctx):
     embed.add_field(
         name="1️⃣ 포인트 적립 방법 (채널별 안내)",
         value=(
-            f"• <#{POINT_RANKING_CHANNEL_ID}> **작품 공유**\n"
+            f"• <#{WORK_SHARE_CHANNEL_ID}> **작품 공유**\n"  # 👈 채널 ID 버그 수정 완료 (WORK_SHARE_CHANNEL_ID 참조)
             "  - 이미지 첨부 + 20자 이상 작성 시 ➡️ **+15P** *(하루 최대 3회)*\n\n"
             "• **피드백 채널**\n"
             "  - 메시지에 반응(이모지 등) 남길 시 ➡️ **+10P** *(하루 최대 3회, 본인 제외)*\n\n"
