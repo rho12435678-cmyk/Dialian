@@ -119,7 +119,8 @@ class DesignerSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         designer_id = None if self.values[0] == "none" else int(self.values[0])
         
-        if self.category == "GFX":
+        # 카테고리 판별 (GFX 인지 Uniform 인지)
+        if self.category.lower() in ["gfx", "gfx 커미션"]:
             modal = PurchaseModal(bundle_type=self.bundle_type, selected_designer=designer_id)
         else:
             modal = UniformModal(bundle_type=self.bundle_type, selected_designer=designer_id)
@@ -145,26 +146,27 @@ class BundleSelectView(discord.ui.View):
         options = [discord.SelectOption(label="미지정 (추후 배정)", value="none", description="담당자를 나중에 배정받습니다.")]
         
         try:
-            role_key = "gfx" if self.category == "GFX" else "uniform"
+            role_key = "gfx" if self.category.lower() in ["gfx", "gfx 커미션"] else "uniform"
             role_id = DESIGNER_ROLE_IDS.get(role_key)
             if interaction.guild and role_id:
                 role = interaction.guild.get_role(role_id)
                 if role:
                     for member in role.members[:20]:
-                        options.append(discord.SelectOption(
-                            label=member.display_name[:25], 
-                            value=str(member.id), 
-                            description=f"{self.category} 담당"
-                        ))
+                        if not member.bot:
+                            options.append(discord.SelectOption(
+                                label=member.display_name[:25], 
+                                value=str(member.id), 
+                                description=f"{self.category} 담당"
+                            ))
         except Exception as e:
             print(f"[디자이너 목록 로드 예외] {e}")
 
         view = DesignerSelectView(self.category, bundle_type, options)
         
-        await interaction.response.send_message(
-            content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
-            view=view,
-            ephemeral=True
+        # 💡 핵심 수정: send_message 대신 기존 메시지를 자연스럽게 수정(edit_message)
+        await interaction.response.edit_message(
+            content=f"👨‍💻 **{self.category} [{bundle_type}]**\n작업을 진행할 담당 디자이너를 선택해주세요.",
+            view=view
         )
 
     @discord.ui.button(label="1개 (단품)", style=discord.ButtonStyle.secondary, custom_id="bundle_single_btn")
@@ -189,7 +191,6 @@ class CategoryView(discord.ui.View):
 
     @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # BundleSelectView를 정상적으로 호출
         await interaction.response.send_message(
             content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
             view=BundleSelectView(category="GFX"),
@@ -198,10 +199,9 @@ class CategoryView(discord.ui.View):
 
     @discord.ui.button(label="👕 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="cat_uniform_btn")
     async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # BundleSelectView를 정상적으로 호출
         await interaction.response.send_message(
             content="📦 **Roblox 복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
-            view=BundleSelectView(category="복장"),
+            view=BundleSelectView(category="uniform"),
             ephemeral=True
         )
 
