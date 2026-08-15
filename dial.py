@@ -303,8 +303,9 @@ async def build_designer_tier_embed(guild):
     gfx_members = [m for m in guild.members if any(r.id == gfx_role_id for r in m.roles)]
     uniform_members = [m for m in guild.members if any(r.id == uniform_role_id for r in m.roles)]
 
-    def classify_by_tier(members):
-        high, mid, low, normal = [], [], [], []
+    # GFX 전용 등급 분류 함수
+    def classify_gfx_tiers(members):
+        high, mid, low = [], [], []
         for m in members:
             role_names = [r.name for r in m.roles]
             if any("상급" in name for name in role_names):
@@ -313,12 +314,9 @@ async def build_designer_tier_embed(guild):
                 mid.append(m.mention)
             elif any("초급" in name for name in role_names):
                 low.append(m.mention)
-            else:
-                normal.append(m.mention)
-        return high, mid, low, normal
+        return high, mid, low
 
-    gfx_high, gfx_mid, gfx_low, gfx_nor = classify_by_tier(gfx_members)
-    uni_high, uni_mid, uni_low, uni_nor = classify_by_tier(uniform_members)
+    gfx_high, gfx_mid, gfx_low = classify_gfx_tiers(gfx_members)
 
     embed = discord.Embed(
         title="🎨 Dialian 디자이너 등급 현황",
@@ -330,25 +328,22 @@ async def build_designer_tier_embed(guild):
     def fmt(lst):
         return ", ".join(lst) if lst else "없음"
 
+    # 1. GFX 디자이너 목록 (일반 디자이너 제거)
     embed.add_field(
         name="🖼️ GFX 디자이너 목록",
         value=(
             f"🥇 **상급 디자이너**: {fmt(gfx_high)}\n"
             f"🥈 **중급 디자이너**: {fmt(gfx_mid)}\n"
-            f"🥉 **초급 디자이너**: {fmt(gfx_low)}\n"
-            f"🔹 **일반 디자이너**: {fmt(gfx_nor)}"
+            f"🥉 **초급 디자이너**: {fmt(gfx_low)}"
         ),
         inline=False
     )
 
+    # 2. Roblox 복장 디자이너 목록 (등급 없이 전체 디자이너 목록만 표시)
+    uni_mentions = [m.mention for m in uniform_members]
     embed.add_field(
         name="👔 Roblox 복장 디자이너 목록",
-        value=(
-            f"🥇 **상급 디자이너**: {fmt(uni_high)}\n"
-            f"🥈 **중급 디자이너**: {fmt(uni_mid)}\n"
-            f"🥉 **초급 디자이너**: {fmt(uni_low)}\n"
-            f"🔹 **일반 디자이너**: {fmt(uni_nor)}"
-        ),
+        value=f"🧵 **복장 디자이너**: {fmt(uni_mentions)}",
         inline=False
     )
 
