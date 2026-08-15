@@ -140,6 +140,15 @@ async def init_extended_db():
                 updated_at TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS daily_activity_limits (
+                user_id INTEGER,
+                action_type TEXT,
+                date TEXT,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, action_type, date)
+            )
+        """)
         await db.commit()
 
 
@@ -446,15 +455,6 @@ async def check_command_channel(ctx):
 async def check_and_increment_daily_limit(user_id: int, action_type: str, max_limit: int = DAILY_ACTION_LIMIT):
     today = datetime.now().strftime("%Y-%m-%d")
     async with aiosqlite.connect(DATABASE) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS daily_activity_limits (
-                user_id INTEGER,
-                action_type TEXT,
-                date TEXT,
-                count INTEGER DEFAULT 0,
-                PRIMARY KEY (user_id, action_type, date)
-            )
-        """)
         cursor = await db.execute("""
             SELECT count FROM daily_activity_limits
             WHERE user_id = ? AND action_type = ? AND date = ?
@@ -574,9 +574,9 @@ async def send_point_guide_embed(ctx):
     embed.add_field(
         name="1️⃣ 포인트 적립 방법 (채널별 안내)",
         value=(
-            f"• <#{WORK_SHARE_CHANNEL_ID}> **작품 공유**\n"  # 👈 채널 ID 버그 수정 완료 (WORK_SHARE_CHANNEL_ID 참조)
+            f"• <#{WORK_SHARE_CHANNEL_ID}> **작품 공유**\n"
             "  - 이미지 첨부 + 20자 이상 작성 시 ➡️ **+15P** *(하루 최대 3회)*\n\n"
-            "• **피드백 채널**\n"
+            f"• <#{FEEDBACK_CHANNEL_ID}> **피드백 채널**\n"
             "  - 메시지에 반응(이모지 등) 남길 시 ➡️ **+10P** *(하루 최대 3회, 본인 제외)*\n\n"
             "• **후기 작성**\n"
             "  - GFX / 복장 단품 구매 후기: **30P**\n"
