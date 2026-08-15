@@ -18,7 +18,7 @@ class TicketOpenView(discord.ui.View):
     @discord.ui.button(
         label="📩 티켓 생성",
         style=discord.ButtonStyle.green,
-        custom_id="open_ticket"
+        custom_id="open_ticket_btn"
     )
     async def open_ticket(
         self,
@@ -61,15 +61,17 @@ class ProgressModal(Modal, title="📊 진행률 설정"):
         if not val.isdigit() or not (0 <= int(val) <= 100):
             return await interaction.response.send_message("❌ 0에서 100 사이의 숫자를 입력해 주세요.", ephemeral=True)
 
+        int_val = int(val)
+
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute(
                 "UPDATE commissions SET progress = ? WHERE ticket_channel = ?",
-                (f"{val}%", channel.id)
+                (int_val, channel.id) # DB 타입 통일을 위해 정수(INTEGER) 저장
             )
             await db.commit()
 
-        await channel.send(f"📊 **{interaction.user.mention}** 님이 진행률을 **{val}%**로 변경했습니다.")
-        await interaction.response.send_message(f"✅ 진행률이 **{val}%**로 변경되었습니다.", ephemeral=True)
+        await channel.send(f"📊 **{interaction.user.mention}** 님이 진행률을 **{int_val}%**로 변경했습니다.")
+        await interaction.response.send_message(f"✅ 진행률이 **{int_val}%**로 변경되었습니다.", ephemeral=True)
 
 
 class StatusModal(Modal, title="📌 커미션 상태 변경"):
@@ -109,11 +111,11 @@ class DesignerDMControlView(View):
         super().__init__(timeout=None)
         self.ticket_channel_id = ticket_channel_id
 
-    @button(label="📊 진행률 설정", style=discord.ButtonStyle.primary, custom_id="dm_btn_progress")
+    @button(label="📊 진행률 설정", style=discord.ButtonStyle.primary)
     async def set_progress(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ProgressModal(self.ticket_channel_id))
 
-    @button(label="💳 계좌 전송", style=discord.ButtonStyle.success, custom_id="dm_btn_account")
+    @button(label="💳 계좌 전송", style=discord.ButtonStyle.success)
     async def send_account(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = interaction.client.get_channel(self.ticket_channel_id)
         if not channel:
@@ -122,11 +124,11 @@ class DesignerDMControlView(View):
         await channel.send("💳 **입금 계좌 안내**\n`카카오뱅크 3333-XX-XXXXXX (예금주: Dial)`\n입금 후 입금자명을 채널에 남겨주세요!")
         await interaction.response.send_message("✅ 티켓 채널에 계좌 안내를 전송했습니다.", ephemeral=True)
 
-    @button(label="📌 상태 변경", style=discord.ButtonStyle.secondary, custom_id="dm_btn_status")
+    @button(label="📌 상태 변경", style=discord.ButtonStyle.secondary)
     async def change_status(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(StatusModal(self.ticket_channel_id))
 
-    @button(label="✅ 작업 완료", style=discord.ButtonStyle.success, custom_id="dm_btn_complete")
+    @button(label="✅ 작업 완료", style=discord.ButtonStyle.success)
     async def complete_job(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = interaction.client.get_channel(self.ticket_channel_id)
         if not channel:
@@ -140,7 +142,7 @@ class DesignerDMControlView(View):
         await channel.send(embed=embed)
         await interaction.response.send_message("✅ 티켓 채널에 작업 완료 알림을 전송했습니다.", ephemeral=True)
 
-    @button(label="🔒 티켓 닫기", style=discord.ButtonStyle.danger, custom_id="dm_btn_close")
+    @button(label="🔒 티켓 닫기", style=discord.ButtonStyle.danger)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = interaction.client.get_channel(self.ticket_channel_id)
         if not channel:
@@ -149,7 +151,15 @@ class DesignerDMControlView(View):
         await channel.send("🔒 **디자이너 요청으로 5초 후 티켓이 종료됩니다.**")
         await interaction.response.send_message("✅ 티켓 종료 안내 메시지를 전송했습니다.", ephemeral=True)
 
-        # 5초 카운트다운 후 실제 채널 삭제
+        # DB 상에서 티켓 상태를 closed로 먼저 업데이트
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute(
+                "UPDATE commissions SET status = 'closed' WHERE ticket_channel = ?",
+                (channel.id,)
+            )
+            await db.commit()
+
+        # 5초 후 실제 채널 삭제
         await asyncio.sleep(5)
         try:
             await channel.delete(reason="디자이너 컨트롤 패널에 의한 티켓 종료")
