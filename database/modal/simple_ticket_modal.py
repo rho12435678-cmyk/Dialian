@@ -3,7 +3,7 @@ import aiosqlite
 from datetime import datetime
 
 from config import *
-from database.database import DATABASE 
+from database.database import DATABASE
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
 from database.views.claim_view import ClaimTicketView
@@ -43,7 +43,7 @@ class SimpleTicketModal(discord.ui.Modal):
         self.add_item(self.content)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. 디스코드 3초 타임아웃 방지를 위해 지연 응답 처리
+        # 1. 3초 타임아웃 방지를 위한 defer 선제 처리
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
@@ -54,7 +54,7 @@ class SimpleTicketModal(discord.ui.Modal):
         try:
             await self.create_ticket(interaction)
         except discord.Forbidden:
-            await interaction.followup.send("❌ 티켓을 생성할 권한이 없습니다. 봇 권한을 확인해 주세요.", ephemeral=True)
+            await interaction.followup.send("❌ 티켓을 생성할 권한이 없습니다. 봇 권한을 확인해주세요.", ephemeral=True)
         except Exception as error:
             print(f"[Simple ticket creation failed] {type(error).__name__}: {error}")
             await interaction.followup.send("❌ 문의 티켓을 생성하는 중 오류가 발생했습니다.", ephemeral=True)
@@ -65,7 +65,7 @@ class SimpleTicketModal(discord.ui.Modal):
         guild = interaction.guild
         user = interaction.user
 
-        # 이미 열린 티켓이 있는지 검사
+        # 2. 이미 열린 티켓 검사
         if get_open_ticket_channel(guild, user):
             return await interaction.followup.send("❌ 이미 생성된 티켓이 있습니다.", ephemeral=True)
 
@@ -143,11 +143,10 @@ class SimpleTicketModal(discord.ui.Modal):
         except Exception as log_err:
             print(f"[로그 전송 실패] {log_err}")
 
-        # 디자이너 컨트롤러 DM 처리
+        # 디자이너 컨트롤러 DM 발송 (ProgressView 완전히 제거됨)
         if developer:
             try:
                 await developer.send(f"🔔 새로운 문의가 들어왔습니다.\n{ticket_channel.mention}")
-                )
                 await developer.send(
                     f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                     view=PaymentView(ticket_channel, self.selected_designer)
@@ -157,9 +156,9 @@ class SimpleTicketModal(discord.ui.Modal):
                     view=TicketCloseView(ticket_channel)
                 )
             except Exception as e:
-                print(f"[DM 전송 실패 -> 채널 백업 전송] developer={developer} error={e}")
+                print(f"[DM 전송 실패] designer_id={self.selected_designer} error={e}")
                 await ticket_channel.send(
-                    f"{developer.mention} DM 전송 실패로 인해 티켓 채널에 관리용 버튼을 생성합니다.",
+                    f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
                     allowed_mentions=discord.AllowedMentions(users=True)
                 )
                 await ticket_channel.send("💳 결제 및 티켓 관리", view=PaymentView(ticket_channel, self.selected_designer))
