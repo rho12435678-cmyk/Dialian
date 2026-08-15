@@ -3,6 +3,7 @@ import os
 import random
 import re
 import subprocess
+import traceback
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -412,7 +413,7 @@ async def build_point_ranking_embed(guild):
         medals = ["🥇 1위", "🥈 2위", "🥉 3위"]
         ranking_list = []
         for idx, (user_id, points) in enumerate(rows, start=1):
-            member = guild.get_member(user_id) if guild else None
+            member = await fetch_member_or_none(guild, user_id) if guild else None
             user_display = member.mention if member else f"알 수 없는 유저(`{user_id}`)"
             rank_tag = medals[idx - 1] if idx <= 3 else f"**{idx}위**"
             ranking_list.append(f"{rank_tag} | {user_display} — **`{points:,} P`**")
@@ -971,7 +972,9 @@ async def update_bot(ctx):
 # ==================== [보안 및 유틸리티 헬퍼] ====================
 
 def parse_mention_id(text):
-    match = re.search(r"<@!?(\d+)>", text or "")
+    if not text:
+        return None
+    match = re.search(r"<@!?(\d+)>", str(text))
     return int(match.group(1)) if match else None
 
 
@@ -988,7 +991,7 @@ async def find_ticket_owner(channel):
         cursor = await db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
         row = await cursor.fetchone()
         if row and row[0]:
-            member = channel.guild.get_member(row[0])
+            member = await fetch_member_or_none(channel.guild, row[0])
             if member:
                 return member
 
@@ -996,7 +999,7 @@ async def find_ticket_owner(channel):
         if channel.topic:
             match = re.search(r"\d+", channel.topic)
             if match:
-                return channel.guild.get_member(int(match.group(0)))
+                return await fetch_member_or_none(channel.guild, int(match.group(0)))
     except (TypeError, ValueError):
         pass
 
@@ -1020,9 +1023,10 @@ async def find_ticket_designer_id(channel):
                     designer_id = parse_mention_id(field.value)
                     if designer_id:
                         return designer_id
-            designer_id = parse_mention_id(embed.description)
-            if designer_id:
-                return designer_id
+            if embed.description:
+                designer_id = parse_mention_id(embed.description)
+                if designer_id:
+                    return designer_id
     return None
 
 
@@ -1392,8 +1396,8 @@ async def ticket_info(ctx):
         return await ctx.send("❌ 해당 티켓의 DB 정보가 존재하지 않습니다.")
 
     customer_id, designer_id, category, status, progress, created_at = row
-    customer = ctx.guild.get_member(customer_id) if customer_id else None
-    designer = ctx.guild.get_member(designer_id) if designer_id else None
+    customer = await fetch_member_or_none(ctx.guild, customer_id) if customer_id else None
+    designer = await fetch_member_or_none(ctx.guild, designer_id) if designer_id else None
 
     embed = discord.Embed(title=f"ℹ️ 티켓 정보 - #{ctx.channel.name}", color=discord.Color.blurple())
     embed.add_field(name="👤 주문 고객", value=customer.mention if customer else f"`{customer_id}`", inline=True)
@@ -1581,6 +1585,7 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
     print(f"[명령어 에러] {ctx.command}: {error}")
+    traceback.print_exception(type(error), error, error.__traceback__)
 
 
 # ==================== [봇 초기화 및 실행] ====================
@@ -1596,12 +1601,12 @@ async def setup_hook():
         except Exception as e:
             print(f"[자동번역 로드 실패] {e}")
 
+    # 인자 없이 생성이 확실한 클래스들만 기본 매핑
     default_views = [
         CombinedTicketOpenView,
         CategorySelectView,
         VerifyView,
         ClaimTicketView,
-        DesignerView,
     ]
 
     for view_cls in default_views:
