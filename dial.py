@@ -4,7 +4,7 @@ import random
 import re
 import subprocess
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import aiosqlite
 import discord
@@ -30,12 +30,11 @@ from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
     archive_ticket_channel,
-    delete_all_bot_dm_messages,
     delete_ticket_channel,
     delete_ticket_dm_messages,
     has_designer_role,
 )
-from database.views.designer_select import DesignerSelect, DesignerView
+from database.views.designer_select import DesignerView
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import VerifyView
@@ -85,7 +84,7 @@ PROCESSED_TABLES = {
 }
 
 
-async def claim_once(table_name, message_id):
+async def claim_once(table_name: str, message_id: int) -> bool:
     if table_name not in PROCESSED_TABLES:
         raise ValueError("허용되지 않은 처리 기록 테이블입니다.")
 
@@ -193,7 +192,6 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
             "updated_at": datetime.now().isoformat(),
         }
         await upsert_commission_record(data)
-
         await interaction.followup.send(f"✅ 지원 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -245,7 +243,6 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
             "updated_at": datetime.now().isoformat(),
         }
         await upsert_commission_record(data)
-
         await interaction.followup.send(f"✅ 파트너 문의 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -303,7 +300,6 @@ async def build_designer_tier_embed(guild):
     gfx_members = [m for m in guild.members if any(r.id == gfx_role_id for r in m.roles)]
     uniform_members = [m for m in guild.members if any(r.id == uniform_role_id for r in m.roles)]
 
-    # GFX 전용 등급 분류 함수
     def classify_gfx_tiers(members):
         high, mid, low = [], [], []
         for m in members:
@@ -328,7 +324,6 @@ async def build_designer_tier_embed(guild):
     def fmt(lst):
         return ", ".join(lst) if lst else "없음"
 
-    # 1. GFX 디자이너 목록 (일반 디자이너 제거)
     embed.add_field(
         name="🖼️ GFX 디자이너 목록",
         value=(
@@ -339,7 +334,6 @@ async def build_designer_tier_embed(guild):
         inline=False
     )
 
-    # 2. Roblox 복장 디자이너 목록 (등급 없이 전체 디자이너 목록만 표시)
     uni_mentions = [m.mention for m in uniform_members]
     embed.add_field(
         name="👔 Roblox 복장 디자이너 목록",
@@ -488,7 +482,7 @@ async def on_message(message):
         return
 
     if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
-        can_earn, count = await check_and_increment_daily_limit(message.author.id, "work_share")
+        can_earn, _ = await check_and_increment_daily_limit(message.author.id, "work_share")
         if can_earn:
             success = await check_and_add_share_points(message.guild, message.author, message)
             if success:
@@ -524,7 +518,7 @@ async def on_raw_reaction_add(payload):
     if message.author.id == payload.user_id or message.author.bot:
         return
 
-    can_earn, count = await check_and_increment_daily_limit(payload.user_id, "feedback_react")
+    can_earn, _ = await check_and_increment_daily_limit(payload.user_id, "feedback_react")
     if can_earn:
         user = guild.get_member(payload.user_id)
         if user:
@@ -1036,7 +1030,7 @@ def can_manage_ticket(member, user_id, designer_id):
 
 
 async def fetch_member_or_none(guild, member_id):
-    if not member_id:
+    if not member_id or not guild:
         return None
     member = guild.get_member(member_id)
     if member:
@@ -1229,11 +1223,11 @@ async def send_bank_to_ticket(ctx, member: discord.Member = None):
     if not is_ticket_channel(ctx.channel):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
-    author = ctx.guild.get_member(ctx.author.id)
+    author = ctx.guild.get_member(ctx.author.id) if ctx.guild else None
     is_admin = author and author.guild_permissions.administrator
     designer_id = member.id if member else await find_ticket_designer_id(ctx.channel)
 
-    if designer_id is None and has_designer_role(author):
+    if designer_id is None and author and has_designer_role(author):
         designer_id = ctx.author.id
 
     if designer_id is None:
@@ -1277,7 +1271,7 @@ async def close_ticket_by_command(ctx):
     channel = ctx.channel
     guild = ctx.guild
     designer_id = await find_ticket_designer_id(channel)
-    closer = guild.get_member(ctx.author.id)
+    closer = guild.get_member(ctx.author.id) if guild else None
 
     if not can_manage_ticket(closer, ctx.author.id, designer_id):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.")
@@ -1302,7 +1296,7 @@ async def delete_ticket_by_command(ctx):
     channel = ctx.channel
     guild = ctx.guild
     designer_id = await find_ticket_designer_id(channel)
-    deleter = guild.get_member(ctx.author.id)
+    deleter = guild.get_member(ctx.author.id) if guild else None
 
     if not can_manage_ticket(deleter, ctx.author.id, designer_id):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.")
@@ -1596,7 +1590,6 @@ async def setup_hook():
         except Exception as e:
             print(f"[자동번역 로드 실패] {e}")
 
-    # 인자 없이 생성이 확실한 클래스들만 기본 매핑
     default_views = [
         CombinedTicketOpenView,
         CategorySelectView,
@@ -1627,7 +1620,7 @@ async def setup_hook():
 
 @bot.event
 async def on_ready():
-    global update_notice_sent, daily_notice
+    global daily_notice
 
     print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
 
