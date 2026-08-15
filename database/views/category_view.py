@@ -104,47 +104,36 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
 
 
 # ==========================================
-# 3. 담당 디자이너 선택 드롭다운 (초고속 안전 처리)
+# 3. 담당 디자이너 선택 드롭다운
 # ==========================================
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, options: list):
         self.category = category
         self.bundle_type = bundle_type
-        super().__init__(placeholder="👨‍💻 담당 디자이너를 선택해주세요", options=options[:25], min_values=1, max_values=1)
+        super().__init__(
+            placeholder="👨‍💻 담당 디자이너를 선택해주세요",
+            options=options[:25],
+            min_values=1,
+            max_values=1,
+            custom_id=f"designer_select_{category}_{bundle_type}"
+        )
 
     async def callback(self, interaction: discord.Interaction):
+        # 모달 출력 시에는 절대로 미리 defer()나 response를 하지 않고 바로 send_modal을 호출해야 합니다!
         designer_id = None if self.values[0] == "none" else int(self.values[0])
+        
         if self.category == "GFX":
             modal = PurchaseModal(bundle_type=self.bundle_type, selected_designer=designer_id)
         else:
             modal = UniformModal(bundle_type=self.bundle_type, selected_designer=designer_id)
+            
         await interaction.response.send_modal(modal)
 
 
 class DesignerSelectView(discord.ui.View):
-    def __init__(self, category: str, bundle_type: str):
-        super().__init__(timeout=120)
-        self.category = category
-        self.bundle_type = bundle_type
-
-    @classmethod
-    async def create(cls, category: str, bundle_type: str, guild: discord.Guild):
-        view = cls(category, bundle_type)
-        options = [discord.SelectOption(label="미지정 (추후 배정)", value="none", description="담당자를 나중에 배정받습니다.")]
-
-        try:
-            role_key = "gfx" if category == "GFX" else "uniform"
-            role_id = DESIGNER_ROLE_IDS.get(role_key)
-            if guild and role_id:
-                role = guild.get_role(role_id)
-                if role:
-                    for member in list(role.members)[:20]:
-                        options.append(discord.SelectOption(label=member.display_name[:25], value=str(member.id), description=f"{category} 담당"))
-        except Exception as e:
-            print(f"[디자이너 목록 로드 중 예외 발생] {e}")
-
-        view.add_item(DesignerSelect(category, bundle_type, options))
-        return view
+    def __init__(self, category: str, bundle_type: str, options: list):
+        super().__init__(timeout=300) # 유저가 선택할 시간을 충분히 부여
+        self.add_item(DesignerSelect(category, bundle_type, options))
 
 
 # ==========================================
@@ -152,21 +141,39 @@ class DesignerSelectView(discord.ui.View):
 # ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
-        super().__init__(timeout=120)
+        super().__init__(timeout=300)
         self.category = category
 
     async def prompt_designer(self, interaction: discord.Interaction, bundle_type: str):
-        view = await DesignerSelectView.create(self.category, bundle_type, interaction.guild)
+        # 1. 디자이너 목록 동적 생성
+        options = [discord.SelectOption(label="미지정 (추후 배정)", value="none", description="담당자를 나중에 배정받습니다.")]
         
-        # 기존 패널을 건드리지 않고 개인 메시지 창(ephemeral)으로 디자이너 선택 뷰 출력
-        if interaction.response.is_done():
-            await interaction.followup.send(
+        try:
+            role_key = "gfx" if self.category == "GFX" else "uniform"
+            role_id = DESIGNER_ROLE_IDS.get(role_key)
+            if interaction.guild and role_id:
+                role = interaction.guild.get_role(role_id)
+                if role:
+                    for member in list(role.members)[:20]:
+                        options.append(discord.SelectOption(
+                            label=member.display_name[:25], 
+                            value=str(member.id), 
+                            description=f"{self.category} 담당"
+                        ))
+        except Exception as e:
+            print(f"[디자이너 목록 로드 예외] {e}")
+
+        # 2. 뷰 생성 후 메시지 전송
+        view = DesignerSelectView(self.category, bundle_type, options)
+        
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
                 content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
                 view=view,
                 ephemeral=True
             )
         else:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
                 view=view,
                 ephemeral=True
@@ -186,11 +193,11 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 5. 최종 메인 카테고리 선택 뷰
+# 5. 최종 메인 카테고리 선택 뷰 (영속성 적용)
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=None) # 봇 재시작 후에도 작동하도록 timeout=None 설정
 
     @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
