@@ -113,7 +113,7 @@ class DesignerSelect(discord.ui.Select):
             options=options[:25],
             min_values=1,
             max_values=1,
-            custom_id=f"designer_select_{category}_{bundle_type}"
+            custom_id=f"designer_select_{category}_{bundle_type.replace(' ', '_')}"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -134,7 +134,7 @@ class DesignerSelectView(discord.ui.View):
 
 
 # ==========================================
-# 4. 묶음 선택 뷰
+# 4. 묶음 선택 뷰 (수량 선택)
 # ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
@@ -161,19 +161,11 @@ class BundleSelectView(discord.ui.View):
 
         view = DesignerSelectView(self.category, bundle_type, options)
         
-        # 확실한 인터랙션 응답 처리
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
-                view=view,
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
-                view=view,
-                ephemeral=True
-            )
+        await interaction.response.send_message(
+            content=f"👨‍💻 **{self.category} [{bundle_type}]** - 작업을 진행할 담당 디자이너를 선택해주세요.",
+            view=view,
+            ephemeral=True
+        )
 
     @discord.ui.button(label="1개 (단품)", style=discord.ButtonStyle.secondary, custom_id="bundle_single_btn")
     async def select_single(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -189,7 +181,7 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 5. 최종 메인 카테고리 선택 뷰 (영속성 적용)
+# 5. 메인 카테고리 선택 뷰
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
@@ -197,26 +189,26 @@ class CategoryView(discord.ui.View):
 
     @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = BundleSelectView(category="GFX")
+        # BundleSelectView를 정상적으로 호출
         await interaction.response.send_message(
             content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
-            view=view,
+            view=BundleSelectView(category="GFX"),
             ephemeral=True
         )
 
-    @discord.ui.button(label="👕 복장 커미션", style=discord.ButtonStyle.secondary, custom_id="cat_uniform_btn")
+    @discord.ui.button(label="👕 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="cat_uniform_btn")
     async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = BundleSelectView(category="복장")
+        # BundleSelectView를 정상적으로 호출
         await interaction.response.send_message(
-            content="📦 **복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
-            view=view,
+            content="📦 **Roblox 복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
+            view=BundleSelectView(category="복장"),
             ephemeral=True
         )
 
-    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.success, custom_id="cat_dev_apply_btn")
+    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_apply_btn")
     async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DeveloperApplyModal())
 
-    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.secondary, custom_id="cat_partner_btn")
+    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="cat_partner_btn")
     async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PartnerApplyModal())
