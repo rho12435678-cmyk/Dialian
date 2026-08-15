@@ -3,8 +3,7 @@ import aiosqlite
 from datetime import datetime
 
 from config import *
-from database.database import DATABASE
-from database.views.progress_view import ProgressView
+from database.database import DATABASE 
 from database.views.payment_view import PaymentView
 from database.views.close_ticket import TicketCloseView
 from database.views.claim_view import ClaimTicketView
