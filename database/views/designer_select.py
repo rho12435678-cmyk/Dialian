@@ -55,48 +55,10 @@ async def get_designer_options(guild: discord.Guild, category: str):
     return options
 
 
-# 1. 수량/상품유형 선택 드롭다운 & 뷰
-class QuantitySelect(discord.ui.Select):
-    def __init__(self, category: str):
-        self.category = category
-        super().__init__(
-            placeholder="제작하실 수량(상품 유형)을 선택해주세요.",
-            min_values=1,
-            max_values=1,
-            options=[
-                discord.SelectOption(label="단품 (1개)", value="단품 (1개)", description="기본 단품 제작"),
-                discord.SelectOption(label="세트 / 패키지", value="세트 / 패키지", description="할인 패키지 상품"),
-            ]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        bundle_type = self.values[0]
-        options = await get_designer_options(interaction.guild, self.category)
-        
-        # 선택된 bundle_type을 전달하며 DesignerView 생성
-        view = DesignerView(self.category, bundle_type, options)
-        
-        embed = discord.Embed(
-            title=f"👨‍💻 {CATEGORY_LABELS.get(self.category, '')} 디자이너 선택",
-            description=f"선택하신 상품 유형: **{bundle_type}**\n원하시는 담당 디자이너를 선택해주세요.",
-            color=0x5865F2
-        )
-        
-        # 메시지를 디자이너 선택 단계로 전환
-        await interaction.response.edit_message(content=None, embed=embed, view=view)
-
-
-class QuantitySelectView(discord.ui.View):
-    def __init__(self, category: str):
-        super().__init__(timeout=None)
-        self.add_item(QuantitySelect(category))
-
-
-# 2. 디자이너 선택 드롭다운 & 뷰
+# 1. 디자이너 선택 드롭다운 & 뷰 (1단계: 디자이너 고르고 -> 수량 선택으로)
 class DesignerSelect(discord.ui.Select):
-    def __init__(self, category: str, bundle_type: str, options: list):
+    def __init__(self, category: str, options: list):
         self.category = category
-        self.bundle_type = bundle_type
         label = CATEGORY_LABELS.get(category, "디자이너")
 
         super().__init__(
@@ -108,13 +70,9 @@ class DesignerSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         selected_val = self.values[0]
-        modal_class = MODALS.get(self.category)
-
-        if not modal_class:
-            return await interaction.response.send_message("❌ 올바르지 않은 카테고리입니다.", ephemeral=True)
 
         if selected_val == "none":
-            modal = modal_class(bundle_type=self.bundle_type, selected_designer=None)
+            selected_designer_id = None
         else:
             selected_designer_id = int(selected_val)
             valid_designers = await get_role_designers(interaction.guild, self.category)
@@ -126,18 +84,56 @@ class DesignerSelect(discord.ui.Select):
                     ephemeral=True
                 )
 
-            modal = modal_class(bundle_type=self.bundle_type, selected_designer=selected_designer_id)
-
-        # ⚠️ Modal을 띄울 때는 interaction.response.send_modal을 바로 사용해야 합니다.
-        await interaction.response.send_modal(modal)
+        # 디자이너 선택 후 -> '수량 선택 뷰(QuantitySelectView)'로 전환!
+        view = QuantitySelectView(self.category, selected_designer_id)
+        embed = discord.Embed(
+            title="🛒 제작 수량 선택",
+            description="원하시는 제작 수량(상품 유형)을 선택해 주세요.",
+            color=0x5865F2
+        )
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
 class DesignerView(discord.ui.View):
-    def __init__(self, category: str, bundle_type: str, options: list):
+    def __init__(self, category: str, options: list):
         super().__init__(timeout=None)
-        self.add_item(DesignerSelect(category, bundle_type, options))
+        self.add_item(DesignerSelect(category, options))
 
     @classmethod
-    async def create(cls, guild: discord.Guild, category: str, bundle_type: str = "단품 (1개)"):
+    async def create(cls, guild: discord.Guild, category: str):
         options = await get_designer_options(guild, category)
-        return cls(category, bundle_type, options)
+        return cls(category, options)
+
+
+# 2. 수량/상품유형 선택 드롭다운 & 뷰 (2단계: 수량 고르고 -> Modal 팝업)
+class QuantitySelect(discord.ui.Select):
+    def __init__(self, category: str, selected_designer: int = None):
+        self.category = category
+        self.selected_designer = selected_designer
+        super().__init__(
+            placeholder="제작하실 수량(상품 유형)을 선택해주세요.",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(label="단품 (1개)", value="단품 (1개)", description="기본 단품 제작"),
+                discord.SelectOption(label="2+1 묶음", value="2+1 묶음", description="2개 구매 시 1개 추가 제공"),
+                discord.SelectOption(label="3+1 묶음", value="3+1 묶음", description="3개 구매 시 1개 추가 제공"),
+            ]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        bundle_type = self.values[0]
+        modal_class = MODALS.get(self.category)
+
+        if not modal_class:
+            return await interaction.response.send_message("❌ 올바르지 않은 카테고리입니다.", ephemeral=True)
+
+        # 수량까지 완벽히 선택했으므로 신청서 Modal 띄우기!
+        modal = modal_class(bundle_type=bundle_type, selected_designer=self.selected_designer)
+        await interaction.response.send_modal(modal)
+
+
+class QuantitySelectView(discord.ui.View):
+    def __init__(self, category: str, selected_designer: int = None):
+        super().__init__(timeout=None)
+        self.add_item(QuantitySelect(category, selected_designer))
