@@ -1,20 +1,16 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 import os
 import random
 import re
 import subprocess
 import traceback
-from datetime import datetime, timedelta
 
 import aiosqlite
-import discord
-from discord import ui
-from discord.ext import commands, tasks
-
 from config import *
+from database.DailyNotice import DailyNotice
 from database.backups import backup_database
 from database.database import DATABASE, create_tables
-from database.DailyNotice import DailyNotice
 from database.monthly_stats import (
     build_monthly_stats_embed,
     save_monthly_stats_message,
@@ -38,6 +34,9 @@ from database.views.designer_select import DesignerView
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import VerifyView
+import discord
+from discord import ui
+from discord.ext import commands, tasks
 
 TOKEN = os.getenv("TOKEN")
 
@@ -49,7 +48,7 @@ DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
 KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
-# 🔒 뒷매 및 보안 로그가 전송될 관리자 전용 보안 채널 ID
+# 🔒 보안 로그 전송 채널 ID
 SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
 
 DESIGNER_ROLE_IDS = {
@@ -58,7 +57,7 @@ DESIGNER_ROLE_IDS = {
 }
 
 # ----------------------------------------------------
-# 🛡️ 보안 감지 설정 및 필터링 리스트
+# 🛡️ 통합 보안 설정 및 패턴 리스트
 # ----------------------------------------------------
 user_message_tracker = {}  # 도배 감지용 변수
 admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수
@@ -73,6 +72,7 @@ MASS_CHANNEL_LIMIT = 3
 MASS_ROLE_LIMIT = 3
 MASS_KICK_LIMIT = 3
 MASS_BAN_LIMIT = 3
+MASS_WEBHOOK_LIMIT = 2
 
 DISCORD_INVITE_REGEX = r"(discord\.gg|discord\.com/invite|discordapp\.com/invite)"
 
@@ -82,6 +82,18 @@ DM_TRADE_KEYWORDS = [
     "싸게 해드림", "개인 커미션", "사적으로", "따로 연락",
     "개인메시지", "개인 메세지", "뒷거래"
 ]
+
+# ⚠️ 파일 보안: 위험 파일 확장자 리스트
+DANGEROUS_EXTENSIONS = (
+    '.exe', '.bat', '.ps1', '.scr', '.vbs', '.cmd', '.jar', '.html', '.htm',
+    '.pif', '.application', '.gadget', '.msi', '.msp', '.com', '.hta', '.cpl',
+    '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2', '.zip', '.rar', '.7z'
+)
+
+# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
+DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
+PHONE_REGEX = r"01[016789]-?\d{3,4}-?\d{4}"
+RRN_REGEX = r"\d{6}-[1-4]\d{6}" # 주민등록번호
 
 
 def get_bot_version():
@@ -458,6 +470,30 @@ async def update_designer_tier_panel_message(bot_instance):
         print(f"[디자이너 등급 패널 갱신 오류] {e}")
 
 
+# ==================== [🛡️ 멤버/권한/웹훅 이벤트 & 보안 감지] ====================
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    guild = member.guild
+
+    # 1. Anti-Bot: 승인되지 않은 봇 차단
+    if member.bot:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
+            if entry.target.id == member.id and entry.user.id != guild.owner_id:
+                try:
+                    await member.kick(reason="승인되지 않은 봇 무단 추가")
+                except Exception:
+                    pass
+                await log_security_event(
+                    guild,
+                    "🤖 승인되지 않은 봇 차단",
+                    f"**초대된 봇:** {member.mention} (`{member.id}`)\n**초대한 유저:** <@{entry.user.id}>",
+                    discord.Color.red()
+                )
+                await check_and_punish_mass_action(guild, entry.user.id, "무단 봇 초대", 1)
+                return
+
+
 @bot.event
 async def on_member_update(before, after):
     if before.roles != after.roles:
@@ -483,7 +519,43 @@ async def on_member_ban(guild, user):
             await check_and_punish_mass_action(guild, entry.user.id, "Ban(차단)", MASS_BAN_LIMIT)
 
 
-# ==================== [🛡️ 대량 채널 / 역할 조작 감사 로그 감지] ====================
+@bot.event
+async def on_webhooks_update(channel):
+    # Anti-Webhook: 대량 웹훅 생성 실시간 감지
+    guild = channel.guild
+    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
+        if (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+            await check_and_punish_mass_action(guild, entry.user.id, "웹훅 생성", MASS_WEBHOOK_LIMIT)
+
+
+@bot.event
+async def on_guild_role_update(before, after):
+    # Permission Guard: @everyone 역할 위험 권한 부여 차단
+    if after.is_default():
+        dangerous_perms = ['administrator', 'manage_roles', 'manage_channels', 'kick_members', 'ban_members', 'mention_everyone']
+        before_perms = dict(before.permissions)
+        after_perms = dict(after.permissions)
+        
+        has_violation = False
+        for perm in dangerous_perms:
+            if not before_perms.get(perm) and after_perms.get(perm):
+                has_violation = True
+                break
+                
+        if has_violation:
+            try:
+                await after.edit(permissions=before.permissions, reason="Permission Guard: @everyone 위험 권한 자동 박탈")
+            except Exception:
+                pass
+            
+            async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
+                await log_security_event(
+                    after.guild,
+                    "🛡️ [Permission Guard] 위험 권한 자동 회수",
+                    f"**수행자:** <@{entry.user.id}>\n**내용:** `@everyone` 역할에 위험 권한 추가 감지 ➔ 권한 원복 집행",
+                    discord.Color.dark_red()
+                )
+
 
 @bot.event
 async def on_guild_channel_delete(channel):
@@ -614,6 +686,45 @@ async def on_message(message):
 
     author = message.author
     guild = message.guild
+
+    # ----------------------------------------------------
+    # 🛡️ File Security: 위험 파일 확장자 첨부 차단 (관리자 포함 적용)
+    # ----------------------------------------------------
+    if message.attachments:
+        for attachment in message.attachments:
+            if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                await message.channel.send(
+                    f"🚨 {author.mention}님, 보안 위험 확장자 파일(`{attachment.filename}`)은 업로드할 수 없습니다.",
+                    delete_after=6
+                )
+                await log_security_event(
+                    guild,
+                    "⚠️ 위험 파일 업로드 차단",
+                    f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**채널:** {message.channel.mention}",
+                    discord.Color.red()
+                )
+                return
+
+    # ----------------------------------------------------
+    # 🔒 PII Guard: 개인정보/토큰 유출 차단
+    # ----------------------------------------------------
+    if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.channel.send(f"🔒 {author.mention}님, 토큰 및 민감한 개인정보 보호를 위해 메시지가 삭제되었습니다.", delete_after=5)
+        await log_security_event(
+            guild,
+            "🔒 민감 정보 유출 차단 (PII Guard)",
+            f"**유저:** {author.mention} (`{author.id}`)\n**채널:** {message.channel.mention}",
+            discord.Color.gold()
+        )
+        return
 
     # ----------------------------------------------------
     # 🛡️ 통합 서버 보안 및 뒷매 차단 시스템 (소유자 면책)
