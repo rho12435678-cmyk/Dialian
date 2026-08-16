@@ -90,10 +90,10 @@ DANGEROUS_EXTENSIONS = (
     '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2', '.zip', '.rar', '.7z'
 )
 
-# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
+# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식 (하이픈 미포함 패턴 강화)
 DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
 PHONE_REGEX = r"01[016789]-?\d{3,4}-?\d{4}"
-RRN_REGEX = r"\d{6}-[1-4]\d{6}" # 주민등록번호
+RRN_REGEX = r"\d{6}-?[1-4]\d{6}" # 주민등록번호 (하이픈 유무 모두 포함)
 
 
 def get_bot_version():
@@ -129,6 +129,8 @@ PROCESSED_TABLES = {
 
 async def log_security_event(guild: discord.Guild, title: str, description: str, color=discord.Color.red()):
     """보안 로그 채널에 즉시 경고 알림 송신"""
+    if not guild:
+        return
     sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
     if sec_channel:
         embed = discord.Embed(
@@ -137,12 +139,15 @@ async def log_security_event(guild: discord.Guild, title: str, description: str,
             color=color,
             timestamp=datetime.now()
         )
-        await sec_channel.send(embed=embed)
+        try:
+            await sec_channel.send(embed=embed)
+        except Exception as e:
+            print(f"[보안 로그 전송 실패] {e}")
 
 
 async def check_and_punish_mass_action(guild: discord.Guild, user_id: int, action_type: str, limit: int):
     """소유자를 제외한 관리자의 대량 조작(Raid/Nuke) 감지 및 권한 회수"""
-    if user_id == guild.owner_id:
+    if not guild or user_id == guild.owner_id:
         return  # 👑 소유자 면책
 
     now = datetime.now()
@@ -478,20 +483,23 @@ async def on_member_join(member: discord.Member):
 
     # 1. Anti-Bot: 승인되지 않은 봇 차단
     if member.bot:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
-            if entry.target.id == member.id and entry.user.id != guild.owner_id:
-                try:
-                    await member.kick(reason="승인되지 않은 봇 무단 추가")
-                except Exception:
-                    pass
-                await log_security_event(
-                    guild,
-                    "🤖 승인되지 않은 봇 차단",
-                    f"**초대된 봇:** {member.mention} (`{member.id}`)\n**초대한 유저:** <@{entry.user.id}>",
-                    discord.Color.red()
-                )
-                await check_and_punish_mass_action(guild, entry.user.id, "무단 봇 초대", 1)
-                return
+        try:
+            async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
+                if entry.target.id == member.id and entry.user.id != guild.owner_id:
+                    try:
+                        await member.kick(reason="승인되지 않은 봇 무단 추가")
+                    except Exception:
+                        pass
+                    await log_security_event(
+                        guild,
+                        "🤖 승인되지 않은 봇 차단",
+                        f"**초대된 봇:** {member.mention} (`{member.id}`)\n**초대한 유저:** <@{entry.user.id}>",
+                        discord.Color.red()
+                    )
+                    await check_and_punish_mass_action(guild, entry.user.id, "무단 봇 초대", 1)
+                    return
+        except discord.Forbidden:
+            pass
 
 
 @bot.event
@@ -506,26 +514,35 @@ async def on_member_remove(member):
     
     # 대량 추방(Kick) 감지
     guild = member.guild
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
-        if entry.target.id == member.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "Kick(추방)", MASS_KICK_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
+            if entry.target.id == member.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "Kick(추방)", MASS_KICK_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 @bot.event
 async def on_member_ban(guild, user):
     # 대량 차단(Ban) 감지
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
-        if entry.target.id == user.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "Ban(차단)", MASS_BAN_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+            if entry.target.id == user.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "Ban(차단)", MASS_BAN_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 @bot.event
 async def on_webhooks_update(channel):
     # Anti-Webhook: 대량 웹훅 생성 실시간 감지
     guild = channel.guild
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
-        if (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "웹훅 생성", MASS_WEBHOOK_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
+            if (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "웹훅 생성", MASS_WEBHOOK_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 @bot.event
@@ -548,45 +565,60 @@ async def on_guild_role_update(before, after):
             except Exception:
                 pass
             
-            async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
-                await log_security_event(
-                    after.guild,
-                    "🛡️ [Permission Guard] 위험 권한 자동 회수",
-                    f"**수행자:** <@{entry.user.id}>\n**내용:** `@everyone` 역할에 위험 권한 추가 감지 ➔ 권한 원복 집행",
-                    discord.Color.dark_red()
-                )
+            try:
+                async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
+                    await log_security_event(
+                        after.guild,
+                        "🛡️ [Permission Guard] 위험 권한 자동 회수",
+                        f"**수행자:** <@{entry.user.id}>\n**내용:** `@everyone` 역할에 위험 권한 추가 감지 ➔ 권한 원복 집행",
+                        discord.Color.dark_red()
+                    )
+            except discord.Forbidden:
+                pass
 
 
 @bot.event
 async def on_guild_channel_delete(channel):
     guild = channel.guild
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.target.id == channel.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "채널 삭제", MASS_CHANNEL_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+            if entry.target.id == channel.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "채널 삭제", MASS_CHANNEL_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 @bot.event
 async def on_guild_channel_create(channel):
     guild = channel.guild
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.target.id == channel.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "채널 생성", MASS_CHANNEL_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+            if entry.target.id == channel.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "채널 생성", MASS_CHANNEL_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 @bot.event
 async def on_guild_role_delete(role):
     guild = role.guild
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-        if entry.target.id == role.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "역할 삭제", MASS_ROLE_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+            if entry.target.id == role.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "역할 삭제", MASS_ROLE_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 @bot.event
 async def on_guild_role_create(role):
     guild = role.guild
-    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-        if entry.target.id == role.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
-            await check_and_punish_mass_action(guild, entry.user.id, "역할 생성", MASS_ROLE_LIMIT)
+    try:
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+            if entry.target.id == role.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+                await check_and_punish_mass_action(guild, entry.user.id, "역할 생성", MASS_ROLE_LIMIT)
+    except discord.Forbidden:
+        pass
 
 
 # ==================== [포인트 랭킹 패널 헬퍼] ====================
@@ -712,7 +744,7 @@ async def on_message(message):
     # ----------------------------------------------------
     # 🔒 PII Guard: 개인정보/토큰 유출 차단
     # ----------------------------------------------------
-    if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content):
+    if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content) or re.search(PHONE_REGEX, message.content):
         try:
             await message.delete()
         except Exception:
@@ -1896,127 +1928,24 @@ async def auto_chat_guide_loop():
             ),
             inline=False
         )
-        embed_en.set_footer(text="Auto Guide Notice | Updates every 12 hours")
+        embed_en.set_footer(text="Auto Guide Notice | 12h Cycle")
         try:
             await en_channel.send(embed=embed_en)
         except Exception as e:
             print(f"[영챗 공지 실패] {e}")
 
 
-@tasks.loop(minutes=30)
-async def monthly_stats_updater():
-    try:
-        await update_monthly_stats_message(bot)
-    except Exception as e:
-        print(f"[월간 통계 갱신 실패] {e}")
-
-
-@tasks.loop(hours=6)
-async def point_ranking_updater():
-    await update_point_ranking_message(bot)
-
-
-@tasks.loop(hours=1)
-async def monthly_point_reset_task():
-    now = datetime.now()
-    if now.day == 1:
-        current_ym = now.strftime("%Y-%m")
-        async with aiosqlite.connect(DATABASE) as db:
-            cursor = await db.execute("SELECT year_month FROM point_reset_logs WHERE year_month = ?", (current_ym,))
-            if not await cursor.fetchone():
-                await db.execute("UPDATE user_points SET points = 0")
-                await db.execute("INSERT INTO point_reset_logs (year_month) VALUES (?)", (current_ym,))
-                await db.commit()
-                await update_point_ranking_message(bot)
-
-
-@tasks.loop(hours=24)
-async def database_backup_task():
-    try:
-        await backup_database()
-    except Exception as error:
-        print(f"[DB 백업 실패] {error}")
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    error = getattr(error, "original", error)
-    if isinstance(error, commands.CommandNotFound):
-        return
-    print(f"[명령어 에러] {ctx.command}: {error}")
-    traceback.print_exception(type(error), error, error.__traceback__)
-
-
-# ==================== [봇 초기화 및 실행] ====================
-
-@bot.event
-async def setup_hook():
-    await create_tables()
-    await init_extended_db()
-
-    if os.getenv("OPENAI_API_KEY"):
-        try:
-            await bot.load_extension("database.services.auto_translator")
-        except Exception as e:
-            print(f"[자동번역 로드 실패] {e}")
-
-    default_views = [
-        CombinedTicketOpenView,
-        CategorySelectView,
-        VerifyView,
-        ClaimTicketView,
-    ]
-
-    for view_cls in default_views:
-        try:
-            bot.add_view(view_cls())
-        except Exception as e:
-            print(f"❌ 영속성 뷰 등록 실패 ({view_cls.__name__}): {e}")
-
-    optional_arg_views = [
-        ("StarRatingView", lambda: StarRatingView(designer_id=None)),
-        ("PaymentView", lambda: PaymentView()),
-        ("TicketCloseView", lambda: TicketCloseView()),
-    ]
-
-    for name, view_factory in optional_arg_views:
-        try:
-            bot.add_view(view_factory())
-        except Exception as e:
-            print(f"⚠️ {name} 영속성 뷰 등록 실패: {e}")
-
-    print("✨ 영속성 뷰 및 DB 로드 완료!")
-
-
 @bot.event
 async def on_ready():
-    global daily_notice
-
-    print(f"🚀 로그인 성공: {bot.user.name} ({bot.user.id})")
-
-    if daily_notice is None:
-        daily_notice = DailyNotice(bot)
-
-    if not monthly_stats_updater.is_running():
-        monthly_stats_updater.start()
-    if not point_ranking_updater.is_running():
-        point_ranking_updater.start()
-    if not monthly_point_reset_task.is_running():
-        monthly_point_reset_task.start()
-    if not database_backup_task.is_running():
-        database_backup_task.start()
+    print(f"🤖 {bot.user.name} 봇 준비 완료 (ID: {bot.user.id})")
+    await create_tables()
+    await init_extended_db()
     if not auto_chat_guide_loop.is_running():
         auto_chat_guide_loop.start()
-
-    try:
-        await update_monthly_stats_message(bot)
-        await update_designer_tier_panel_message(bot)
-    except Exception:
-        pass
 
 
 if __name__ == "__main__":
     if TOKEN:
         bot.run(TOKEN)
     else:
-        print("❌ TOKEN 환경변수를 찾을 수 없습니다.")
+        print("❌ TOKEN 환경 변수가 설정되어 있지 않습니다.")
