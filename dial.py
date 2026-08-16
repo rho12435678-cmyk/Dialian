@@ -3,8 +3,10 @@ import os
 import random
 import re
 import subprocess
+import time
 import traceback
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 import aiosqlite
 import discord
@@ -49,7 +51,7 @@ DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
 KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
-# 🔒 뒷매 및 보안 로그가 전송될 관리자 전용 보안 채널 ID (본인 서버의 채널 ID로 수정)
+# 🔒 뒷매 및 Anti-Nuke 보안 로그가 전송될 관리자 전용 보안 채널 ID
 SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
 
 DESIGNER_ROLE_IDS = {
@@ -58,21 +60,26 @@ DESIGNER_ROLE_IDS = {
 }
 
 # ----------------------------------------------------
-# 🛡️ 보안 감지 설정 및 필터링 리스트
+# 🛡️ 보안 감지 설정 및 필터링 데이터
 # ----------------------------------------------------
-user_message_tracker = {} # 도배 감지용 변수
+user_message_tracker = {} # 도배 감지용
+USER_ACTIONS = defaultdict(list) # Anti-Nuke 관리자 행동 추적용
 
 SPAM_MESSAGE_LIMIT = 4       # 감지 시간 내 허용 메시지 수
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
 MAX_MENTION_LIMIT = 5        # 한 메시지 당 최대 허용 멘션 수
 
+ANTI_NUKE_LIMIT = 3          # 대량 삭제/밴 제한 횟수
+ANTI_NUKE_TIME_WINDOW = 10   # 대량 행위 감지 시간 (초)
+
 DISCORD_INVITE_REGEX = r"(discord\.gg|discord\.com/invite|discordapp\.com/invite)"
+PHISHING_DOMAINS = ["discord-gift", "free-nitro", "steamcommunitu", "dlscord", "gift-discord"]
 
 DM_TRADE_KEYWORDS = [
     "디엠주세요", "디엠 주세요", "dm주세요", "dm 주세요",
     "뒷디", "개인톡", "카톡주세요", "카톡 주세요",
     "싸게 해드림", "개인 커미션", "사적으로", "따로 연락",
-    "개인메시지", "개인 메세지", "뒷거래"
+    "개인메시지", "개인 메세지", "뒷거래", "카카오페이", "토스", "문상", "계좌직거래"
 ]
 
 
@@ -506,49 +513,76 @@ async def on_message(message):
     guild = message.guild
 
     # ----------------------------------------------------
-    # 🛡️ 통합 서버 보안 및 뒷매 차단 시스템
+    # 🛡️ 통합 서버 보안 및 악성 링크 / 뒷매 차단 시스템
     # ----------------------------------------------------
     is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
     if not is_staff and author.id != guild.owner_id:
         
-        # 1. 뒷매 / 사적 유인 키워드 감지
-        msg_content = message.content.replace(" ", "").lower()
-        found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
-
-        if found_keyword:
+        # 1. 악성 피싱 도메인 감지
+        msg_content_raw = message.content.lower()
+        if any(p_domain in msg_content_raw for p_domain in PHISHING_DOMAINS):
             try:
                 await message.delete()
             except Exception:
                 pass
 
             embed = discord.Embed(
-                title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 금지",
-                description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
+                title="🚨 [보안 경고] 악성/피싱 도메인 차단",
+                description=f"{author.mention}님, 의심스러운 피싱 및 악성 링크 유포가 감지되었습니다.",
                 color=discord.Color.red()
             )
-            await message.channel.send(embed=embed, delete_after=7)
+            await message.channel.send(embed=embed, delete_after=5)
 
-            # 보안 채널 비밀 알림 전송
             security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
             if security_channel:
                 log_embed = discord.Embed(
-                    title="🕵️‍♂️ [뒷매 의심 감지 로그]",
-                    description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
-                                f"**적발 키워드:** `{found_keyword[0]}`\n"
-                                f"**원본 메시지:** {message.content}\n"
-                                f"**발생 채널:** {message.channel.mention}",
-                    color=discord.Color.dark_orange(),
+                    title="🚨 [피싱 링크 감지 로그]",
+                    description=f"**유저:** {author.mention} (`{author.id}`)\n**내용:** {message.content}\n**채널:** {message.channel.mention}",
+                    color=discord.Color.red(),
                     timestamp=datetime.now()
                 )
                 await security_channel.send(embed=log_embed)
-
-            try:
-                await author.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=30), reason="뒷매/사적 유인 키워드 적발")
-            except Exception:
-                pass
             return
 
-        # 2. 외부 초대 링크 차단
+        # 2. 뒷매 / 사적 유인 키워드 감지 (티켓 채널은 제외)
+        is_ticket_ch = is_ticket_channel(message.channel)
+        if not is_ticket_ch:
+            msg_content = message.content.replace(" ", "").lower()
+            found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
+
+            if found_keyword:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+
+                embed = discord.Embed(
+                    title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 금지",
+                    description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
+                    color=discord.Color.red()
+                )
+                await message.channel.send(embed=embed, delete_after=7)
+
+                security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+                if security_channel:
+                    log_embed = discord.Embed(
+                        title="🕵️‍♂️ [뒷매 의심 감지 로그]",
+                        description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
+                                    f"**적발 키워드:** `{found_keyword[0]}`\n"
+                                    f"**원본 메시지:** {message.content}\n"
+                                    f"**발생 채널:** {message.channel.mention}",
+                        color=discord.Color.dark_orange(),
+                        timestamp=datetime.now()
+                    )
+                    await security_channel.send(embed=log_embed)
+
+                try:
+                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=30), reason="뒷매/사적 유인 키워드 적발")
+                except Exception:
+                    pass
+                return
+
+        # 3. 외부 초대 링크 차단
         if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
             try:
                 await message.delete()
@@ -563,12 +597,12 @@ async def on_message(message):
             await message.channel.send(embed=embed, delete_after=5)
 
             try:
-                await author.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=10), reason="외부 초대 링크 유포")
+                await author.timeout(discord.utils.utcnow() + timedelta(minutes=10), reason="외부 초대 링크 유포")
             except Exception:
                 pass
             return
 
-        # 3. 대량 멘션 차단
+        # 4. 대량 멘션 차단
         total_mentions = len(message.mentions) + len(message.role_mentions)
         if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
             try:
@@ -584,12 +618,12 @@ async def on_message(message):
             await message.channel.send(embed=embed)
 
             try:
-                await author.timeout(discord.utils.utcnow() + datetime.timedelta(hours=1), reason="대량 멘션 시도")
+                await author.timeout(discord.utils.utcnow() + timedelta(hours=1), reason="대량 멘션 시도")
             except Exception:
                 pass
             return
 
-        # 4. 도배 (Anti-Spam) 실시간 감지
+        # 5. 도배 (Anti-Spam) 실시간 감지
         now = datetime.now()
         timestamps = user_message_tracker.get(author.id, [])
         timestamps = [t for t in timestamps if (now - t).total_seconds() < SPAM_TIME_WINDOW]
@@ -603,7 +637,7 @@ async def on_message(message):
                 pass
 
             try:
-                await author.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=5), reason="채팅 도배(Spam) 감지")
+                await author.timeout(discord.utils.utcnow() + timedelta(minutes=5), reason="채팅 도배(Spam) 감지")
             except Exception:
                 pass
 
@@ -629,6 +663,69 @@ async def on_message(message):
                     pass
 
     await bot.process_commands(message)
+
+
+# ==================== [Anti-Nuke: 관리자 테러 실시간 감지] ====================
+
+@bot.event
+async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
+    """관리자 계정에 의한 대량 채널 삭제 테러 방지 모듈"""
+    guild = channel.guild
+    async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
+        executor = entry.user
+        if executor.bot or executor.id == guild.owner_id:
+            return
+
+        now = time.time()
+        USER_ACTIONS[f"channel_{executor.id}"].append(now)
+        USER_ACTIONS[f"channel_{executor.id}"] = [t for t in USER_ACTIONS[f"channel_{executor.id}"] if now - t < ANTI_NUKE_TIME_WINDOW]
+
+        if len(USER_ACTIONS[f"channel_{executor.id}"]) >= ANTI_NUKE_LIMIT:
+            try:
+                member = await guild.fetch_member(executor.id)
+                await member.edit(roles=[], reason="[Anti-Nuke] 대량 채널 삭제 감지 (계정 해킹/테러 의심)")
+                
+                sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+                if sec_channel:
+                    embed = discord.Embed(
+                        title="🚨 [Anti-Nuke] 관리자 권한 강제 박탈",
+                        description=f"**대상:** {executor.mention} (`{executor.id}`)\n**사유:** 짧은 시간 내 대량 채널 삭제 감지",
+                        color=discord.Color.red(),
+                        timestamp=datetime.now()
+                    )
+                    await sec_channel.send(embed=embed)
+            except Exception as e:
+                print(f"[Anti-Nuke 채널 삭제 방지 실패] {e}")
+
+
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    """관리자 계정에 의한 대량 Ban 테러 방지 모듈"""
+    async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=1):
+        executor = entry.user
+        if executor.bot or executor.id == guild.owner_id:
+            return
+
+        now = time.time()
+        USER_ACTIONS[f"ban_{executor.id}"].append(now)
+        USER_ACTIONS[f"ban_{executor.id}"] = [t for t in USER_ACTIONS[f"ban_{executor.id}"] if now - t < ANTI_NUKE_TIME_WINDOW]
+
+        if len(USER_ACTIONS[f"ban_{executor.id}"]) >= ANTI_NUKE_LIMIT:
+            try:
+                member = await guild.fetch_member(executor.id)
+                await member.edit(roles=[], reason="[Anti-Nuke] 대량 멤버 Ban 감지 (계정 해킹/테러 의심)")
+                
+                sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+                if sec_channel:
+                    embed = discord.Embed(
+                        title="🚨 [Anti-Nuke] 관리자 권한 강제 박탈",
+                        description=f"**대상:** {executor.mention} (`{executor.id}`)\n**사유:** 짧은 시간 내 대량 Ban 처리 감지",
+                        color=discord.Color.red(),
+                        timestamp=datetime.now()
+                    )
+                    await sec_channel.send(embed=embed)
+            except Exception as e:
+                print(f"[Anti-Nuke Ban 방지 실패] {e}")
 
 
 @bot.event
