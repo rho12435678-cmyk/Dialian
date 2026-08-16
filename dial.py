@@ -49,10 +49,31 @@ DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
 KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
+# 🔒 뒷매 및 보안 로그가 전송될 관리자 전용 보안 채널 ID (본인 서버의 채널 ID로 수정)
+SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
+
 DESIGNER_ROLE_IDS = {
     "gfx": 1518906536095776868,
     "uniform": 1522539025691312168,
 }
+
+# ----------------------------------------------------
+# 🛡️ 보안 감지 설정 및 필터링 리스트
+# ----------------------------------------------------
+user_message_tracker = {} # 도배 감지용 변수
+
+SPAM_MESSAGE_LIMIT = 4       # 감지 시간 내 허용 메시지 수
+SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
+MAX_MENTION_LIMIT = 5        # 한 메시지 당 최대 허용 멘션 수
+
+DISCORD_INVITE_REGEX = r"(discord\.gg|discord\.com/invite|discordapp\.com/invite)"
+
+DM_TRADE_KEYWORDS = [
+    "디엠주세요", "디엠 주세요", "dm주세요", "dm 주세요",
+    "뒷디", "개인톡", "카톡주세요", "카톡 주세요",
+    "싸게 해드림", "개인 커미션", "사적으로", "따로 연락",
+    "개인메시지", "개인 메세지", "뒷거래"
+]
 
 
 def get_bot_version():
@@ -474,13 +495,129 @@ async def check_and_increment_daily_limit(user_id: int, action_type: str, max_li
         return True, current_count + 1
 
 
-# ==================== [포인트 감지 이벤트] ====================
+# ==================== [메시지 이벤트 & 보안 검사] ====================
 
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
+    author = message.author
+    guild = message.guild
+
+    # ----------------------------------------------------
+    # 🛡️ 통합 서버 보안 및 뒷매 차단 시스템
+    # ----------------------------------------------------
+    is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
+    if not is_staff and author.id != guild.owner_id:
+        
+        # 1. 뒷매 / 사적 유인 키워드 감지
+        msg_content = message.content.replace(" ", "").lower()
+        found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
+
+        if found_keyword:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            embed = discord.Embed(
+                title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 금지",
+                description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
+                color=discord.Color.red()
+            )
+            await message.channel.send(embed=embed, delete_after=7)
+
+            # 보안 채널 비밀 알림 전송
+            security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+            if security_channel:
+                log_embed = discord.Embed(
+                    title="🕵️‍♂️ [뒷매 의심 감지 로그]",
+                    description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
+                                f"**적발 키워드:** `{found_keyword[0]}`\n"
+                                f"**원본 메시지:** {message.content}\n"
+                                f"**발생 채널:** {message.channel.mention}",
+                    color=discord.Color.dark_orange(),
+                    timestamp=datetime.now()
+                )
+                await security_channel.send(embed=log_embed)
+
+            try:
+                await author.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=30), reason="뒷매/사적 유인 키워드 적발")
+            except Exception:
+                pass
+            return
+
+        # 2. 외부 초대 링크 차단
+        if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            
+            embed = discord.Embed(
+                title="🚨 [보안 경고] 외부 초대 링크 유포 차단",
+                description=f"{author.mention}님, 서버 내 외부 디스코드 초대 링크 유포는 금지되어 있습니다.",
+                color=discord.Color.red()
+            )
+            await message.channel.send(embed=embed, delete_after=5)
+
+            try:
+                await author.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=10), reason="외부 초대 링크 유포")
+            except Exception:
+                pass
+            return
+
+        # 3. 대량 멘션 차단
+        total_mentions = len(message.mentions) + len(message.role_mentions)
+        if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            embed = discord.Embed(
+                title="🚨 [보안 경고] 대량 멘션 시도 차단",
+                description=f"{author.mention}님, 무단 대량 멘션으로 인해 **1시간 동안 채팅이 금지**됩니다.",
+                color=discord.Color.dark_red()
+            )
+            await message.channel.send(embed=embed)
+
+            try:
+                await author.timeout(discord.utils.utcnow() + datetime.timedelta(hours=1), reason="대량 멘션 시도")
+            except Exception:
+                pass
+            return
+
+        # 4. 도배 (Anti-Spam) 실시간 감지
+        now = datetime.now()
+        timestamps = user_message_tracker.get(author.id, [])
+        timestamps = [t for t in timestamps if (now - t).total_seconds() < SPAM_TIME_WINDOW]
+        timestamps.append(now)
+        user_message_tracker[author.id] = timestamps
+
+        if len(timestamps) >= SPAM_MESSAGE_LIMIT:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            try:
+                await author.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=5), reason="채팅 도배(Spam) 감지")
+            except Exception:
+                pass
+
+            embed = discord.Embed(
+                title="⚠️ [도배 경고] 채팅 속도 제한",
+                description=f"{author.mention}님, 너무 빠른 속도로 메시지를 도배하여 **5분간 채팅 제한** 조치되었습니다.",
+                color=discord.Color.orange()
+            )
+            await message.channel.send(embed=embed, delete_after=7)
+            return
+
+    # ----------------------------------------------------
+    # 기존 포인트 감지 로직
+    # ----------------------------------------------------
     if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
         can_earn, _ = await check_and_increment_daily_limit(message.author.id, "work_share")
         if can_earn:
