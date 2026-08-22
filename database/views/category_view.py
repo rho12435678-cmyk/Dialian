@@ -100,56 +100,6 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
         await channel.send(content=f"{user.mention} 님의 파트너 문의 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView(channel))
         await interaction.response.send_message(f"✅ 파트너 문의가 접수되었습니다! 생성된 채널: {channel.mention}", ephemeral=True)
 
-
-# ==========================================
-# 3. 모작 콘테스트 제출 모달 (신규 추가)
-# ==========================================
-class EventApplyModal(discord.ui.Modal, title="🎨 모작 콘테스트 작품 제출"):
-    roblox_name = discord.ui.TextInput(
-        label="로블록스 닉네임",
-        placeholder="로블록스 닉네임을 적어주세요. (예: Dialian)",
-        required=True,
-        max_length=50
-    )
-    description = discord.ui.TextInput(
-        label="작품 한 줄 설명",
-        style=discord.TextStyle.paragraph,
-        placeholder="작품에 대한 간단한 설명을 적어주세요.",
-        required=False,
-        max_length=500
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        user = interaction.user
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
-        }
-
-        channel = await guild.create_text_channel(
-            name=f"모작제출-{user.id}",
-            topic=f"🎨 모작 콘테스트 티켓 | 제출자: {user.name} ({user.id})",
-            overwrites=overwrites
-        )
-
-        embed = discord.Embed(
-            title="🎨 모작 콘테스트 작품 제출 티켓",
-            description="이 채널에 **작품 이미지 파일(PNG/JPG)**을 업로드해 주세요!",
-            color=discord.Color.gold(),
-            timestamp=interaction.created_at
-        )
-        embed.add_field(name="제출자", value=f"{user.mention} (`{user.id}`)", inline=False)
-        embed.add_field(name="로블록스 닉네임", value=self.roblox_name.value, inline=False)
-        embed.add_field(name="작품 설명", value=self.description.value if self.description.value else "설명 없음", inline=False)
-        embed.set_footer(text="이미지를 꼭 업로드해 주세요! 중복 제출 시 마지막 제출작이 인정됩니다.")
-
-        await channel.send(content=f"{user.mention} 님의 모작 제출 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView(channel))
-        await interaction.response.send_message(f"✅ 모작 제출 티켓이 생성되었습니다! 생성된 채널: {channel.mention}", ephemeral=True)
-
-
 # ==========================================
 # 4. 담당 디자이너 선택 드롭다운
 # ==========================================
@@ -253,11 +203,7 @@ class CategoryView(discord.ui.View):
             view=BundleSelectView(category="uniform"),
             ephemeral=True
         )
-
-    @discord.ui.button(label="🎨 모작 제출", style=discord.ButtonStyle.primary, custom_id="cat_event_apply_btn")
-    async def select_event_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EventApplyModal())
-
+        
     @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_apply_btn")
     async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DeveloperApplyModal())
