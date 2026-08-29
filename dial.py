@@ -67,8 +67,8 @@ DESIGNER_ROLE_IDS = {
 # ----------------------------------------------------
 # 🛡️ 통합 보안 설정 및 패턴 리스트
 # ----------------------------------------------------
-user_message_tracker = {}  # 도배 감지용 변수
-admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수
+user_message_tracker = {}  # 도배 감지용 변수 (메모리 누수 방지 적용)
+admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수 (메모리 누수 방지 적용)
 
 SPAM_MESSAGE_LIMIT = 4       # 감지 시간 내 허용 메시지 수
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
@@ -160,6 +160,15 @@ async def check_and_punish_mass_action(guild: discord.Guild, user_id: int, actio
 
     now = datetime.now()
     tracker_key = f"{user_id}:{action_type}"
+    
+    # 🧹 [메모리 누수 해결] 만료된 관리자 추적 데이터 및 빈 키 정리
+    for k, ts_list in list(admin_action_tracker.items()):
+        valid_ts = [t for t in ts_list if (now - t).total_seconds() < MASS_ACTION_WINDOW * 2]
+        if valid_ts:
+            admin_action_tracker[k] = valid_ts
+        else:
+            admin_action_tracker.pop(k, None)
+
     timestamps = admin_action_tracker.get(tracker_key, [])
     timestamps = [t for t in timestamps if (now - t).total_seconds() < MASS_ACTION_WINDOW]
     timestamps.append(now)
@@ -508,23 +517,25 @@ async def on_member_join(member: discord.Member):
             )
             return
 
-    # 1. Anti-Bot: 승인되지 않은 봇 차단
+    # 1. Anti-Bot: 승인되지 않은 봇 차단 (Audit Log 지연 고려: 1초 대기 및 15초 윈도우, limit=5)
     if member.bot:
         try:
-            async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
+            await asyncio.sleep(1.0)
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
                 if entry.target.id == member.id and entry.user.id != guild.owner_id:
-                    try:
-                        await member.kick(reason="승인되지 않은 봇 무단 추가")
-                    except Exception:
-                        pass
-                    await log_security_event(
-                        guild,
-                        "🤖 승인되지 않은 봇 차단",
-                        f"**초대된 봇:** {member.mention} (`{member.id}`)\n**초대한 유저:** <@{entry.user.id}>",
-                        discord.Color.red()
-                    )
-                    await check_and_punish_mass_action(guild, entry.user.id, "무단 봇 초대", 1)
-                    return
+                    if (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
+                        try:
+                            await member.kick(reason="승인되지 않은 봇 무단 추가")
+                        except Exception:
+                            pass
+                        await log_security_event(
+                            guild,
+                            "🤖 승인되지 않은 봇 차단",
+                            f"**초대된 봇:** {member.mention} (`{member.id}`)\n**초대한 유저:** <@{entry.user.id}>",
+                            discord.Color.red()
+                        )
+                        await check_and_punish_mass_action(guild, entry.user.id, "무단 봇 초대", 1)
+                        return
         except discord.Forbidden:
             pass
 
@@ -541,9 +552,11 @@ async def on_member_remove(member):
     
     guild = member.guild
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
-            if entry.target.id == member.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+            if entry.target.id == member.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "Kick(추방)", MASS_KICK_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -551,9 +564,11 @@ async def on_member_remove(member):
 @bot.event
 async def on_member_ban(guild, user):
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
-            if entry.target.id == user.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+            if entry.target.id == user.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "Ban(차단)", MASS_BAN_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -562,9 +577,11 @@ async def on_member_ban(guild, user):
 async def on_webhooks_update(channel):
     guild = channel.guild
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
-            if (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.webhook_create):
+            if (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "웹훅 생성", MASS_WEBHOOK_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -589,13 +606,16 @@ async def on_guild_role_update(before, after):
                 pass
             
             try:
-                async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
-                    await log_security_event(
-                        after.guild,
-                        "🛡️ [Permission Guard] 위험 권한 자동 회수",
-                        f"**수행자:** <@{entry.user.id}>\n**내용:** `@everyone` 역할에 위험 권한 추가 감지 ➔ 권한 원복 집행",
-                        discord.Color.dark_red()
-                    )
+                await asyncio.sleep(1.0)
+                async for entry in after.guild.audit_logs(limit=5, action=discord.AuditLogAction.role_update):
+                    if entry.target.id == after.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
+                        await log_security_event(
+                            after.guild,
+                            "🛡️ [Permission Guard] 위험 권한 자동 회수",
+                            f"**수행자:** <@{entry.user.id}>\n**내용:** `@everyone` 역할에 위험 권한 추가 감지 ➔ 권한 원복 집행",
+                            discord.Color.dark_red()
+                        )
+                        break
             except discord.Forbidden:
                 pass
 
@@ -604,9 +624,11 @@ async def on_guild_role_update(before, after):
 async def on_guild_channel_delete(channel):
     guild = channel.guild
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-            if entry.target.id == channel.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_delete):
+            if entry.target.id == channel.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "채널 삭제", MASS_CHANNEL_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -615,9 +637,11 @@ async def on_guild_channel_delete(channel):
 async def on_guild_channel_create(channel):
     guild = channel.guild
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-            if entry.target.id == channel.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
+            if entry.target.id == channel.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "채널 생성", MASS_CHANNEL_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -626,9 +650,11 @@ async def on_guild_channel_create(channel):
 async def on_guild_role_delete(role):
     guild = role.guild
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-            if entry.target.id == role.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_delete):
+            if entry.target.id == role.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "역할 삭제", MASS_ROLE_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -637,9 +663,11 @@ async def on_guild_role_delete(role):
 async def on_guild_role_create(role):
     guild = role.guild
     try:
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-            if entry.target.id == role.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
+        await asyncio.sleep(1.0)
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_create):
+            if entry.target.id == role.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                 await check_and_punish_mass_action(guild, entry.user.id, "역할 생성", MASS_ROLE_LIMIT)
+                break
     except discord.Forbidden:
         pass
 
@@ -742,164 +770,176 @@ async def on_message(message):
     author = message.author
     guild = message.guild
 
-    # ----------------------------------------------------
-    # 🛡️ File Security: 위험 파일 확장자 첨부 차단
-    # ----------------------------------------------------
-    if message.attachments:
-        for attachment in message.attachments:
-            if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
+    try:
+        # ----------------------------------------------------
+        # 🛡️ File Security: 위험 파일 확장자 첨부 차단
+        # ----------------------------------------------------
+        if message.attachments:
+            for attachment in message.attachments:
+                if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
+                    await message.channel.send(
+                        f"🚨 {author.mention}님, 보안 위험 확장자 파일(`{attachment.filename}`)은 업로드할 수 없습니다.",
+                        delete_after=6
+                    )
+                    await log_security_event(
+                        guild,
+                        "⚠️ 위험 파일 업로드 차단",
+                        f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**채널:** {message.channel.mention}",
+                        discord.Color.red()
+                    )
+                    return
+
+        # ----------------------------------------------------
+        # 🔒 PII Guard: 개인정보/토큰 유출 차단
+        # ----------------------------------------------------
+        if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content) or re.search(PHONE_REGEX, message.content):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await message.channel.send(f"🔒 {author.mention}님, 토큰 및 민감한 개인정보 보호를 위해 메시지가 삭제되었습니다.", delete_after=5)
+            await log_security_event(
+                guild,
+                "🔒 민감 정보 유출 차단 (PII Guard)",
+                f"**유저:** {author.mention} (`{author.id}`)\n**채널:** {message.channel.mention}",
+                discord.Color.gold()
+            )
+            return
+
+        # ----------------------------------------------------
+        # 🛡️ 통합 서버 보안 및 뒷매 차단 시스템 (소유자 면책)
+        # ----------------------------------------------------
+        is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
+        if not is_staff and author.id != guild.owner_id:
+            
+            # 1. 뒷매 / 사적 유인 키워드 감지
+            msg_content = message.content.replace(" ", "").lower()
+            found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
+
+            if found_keyword:
                 try:
                     await message.delete()
                 except Exception:
                     pass
-                await message.channel.send(
-                    f"🚨 {author.mention}님, 보안 위험 확장자 파일(`{attachment.filename}`)은 업로드할 수 없습니다.",
-                    delete_after=6
+
+                embed = discord.Embed(
+                    title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 금지",
+                    description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
+                    color=discord.Color.red()
                 )
-                await log_security_event(
-                    guild,
-                    "⚠️ 위험 파일 업로드 차단",
-                    f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**채널:** {message.channel.mention}",
-                    discord.Color.red()
-                )
+                await message.channel.send(embed=embed, delete_after=7)
+
+                security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+                if security_channel:
+                    log_embed = discord.Embed(
+                        title="🕵️‍♂️ [뒷매 의심 감지 로그]",
+                        description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
+                                    f"**적발 키워드:** `{found_keyword[0]}`\n"
+                                    f"**원본 메시지:** {message.content}\n"
+                                    f"**발생 채널:** {message.channel.mention}",
+                        color=discord.Color.dark_orange(),
+                        timestamp=datetime.now()
+                    )
+                    await security_channel.send(embed=log_embed)
+
+                try:
+                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=30), reason="뒷매/사적 유인 키워드 적발")
+                except Exception:
+                    pass
                 return
 
-    # ----------------------------------------------------
-    # 🔒 PII Guard: 개인정보/토큰 유출 차단
-    # ----------------------------------------------------
-    if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content) or re.search(PHONE_REGEX, message.content):
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        await message.channel.send(f"🔒 {author.mention}님, 토큰 및 민감한 개인정보 보호를 위해 메시지가 삭제되었습니다.", delete_after=5)
-        await log_security_event(
-            guild,
-            "🔒 민감 정보 유출 차단 (PII Guard)",
-            f"**유저:** {author.mention} (`{author.id}`)\n**채널:** {message.channel.mention}",
-            discord.Color.gold()
-        )
-        return
-
-    # ----------------------------------------------------
-    # 🛡️ 통합 서버 보안 및 뒷매 차단 시스템 (소유자 면책)
-    # ----------------------------------------------------
-    is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
-    if not is_staff and author.id != guild.owner_id:
-        
-        # 1. 뒷매 / 사적 유인 키워드 감지
-        msg_content = message.content.replace(" ", "").lower()
-        found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
-
-        if found_keyword:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
-            embed = discord.Embed(
-                title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 금지",
-                description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
-                color=discord.Color.red()
-            )
-            await message.channel.send(embed=embed, delete_after=7)
-
-            security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
-            if security_channel:
-                log_embed = discord.Embed(
-                    title="🕵️‍♂️ [뒷매 의심 감지 로그]",
-                    description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
-                                f"**적발 키워드:** `{found_keyword[0]}`\n"
-                                f"**원본 메시지:** {message.content}\n"
-                                f"**발생 채널:** {message.channel.mention}",
-                    color=discord.Color.dark_orange(),
-                    timestamp=datetime.now()
-                )
-                await security_channel.send(embed=log_embed)
-
-            try:
-                await author.timeout(discord.utils.utcnow() + timedelta(minutes=30), reason="뒷매/사적 유인 키워드 적발")
-            except Exception:
-                pass
-            return
-
-        # 2. 외부 초대 링크 차단
-        if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            
-            embed = discord.Embed(
-                title="🚨 [보안 경고] 외부 초대 링크 유포 차단",
-                description=f"{author.mention}님, 서버 내 외부 디스코드 초대 링크 유포는 금지되어 있습니다.",
-                color=discord.Color.red()
-            )
-            await message.channel.send(embed=embed, delete_after=5)
-
-            try:
-                await author.timeout(discord.utils.utcnow() + timedelta(minutes=10), reason="외부 초대 링크 유포")
-            except Exception:
-                pass
-            return
-
-        # 3. 대량 멘션 차단
-        total_mentions = len(message.mentions) + len(message.role_mentions)
-        if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
-            embed = discord.Embed(
-                title="🚨 [보안 경고] 대량 멘션 시도 차단",
-                description=f"{author.mention}님, 무단 대량 멘션으로 인해 **1시간 동안 채팅이 금지**됩니다.",
-                color=discord.Color.dark_red()
-            )
-            await message.channel.send(embed=embed)
-
-            try:
-                await author.timeout(discord.utils.utcnow() + timedelta(hours=1), reason="대량 멘션 시도")
-            except Exception:
-                pass
-            return
-
-        # 4. 도배 (Anti-Spam) 실시간 감지
-        now = datetime.now()
-        timestamps = user_message_tracker.get(author.id, [])
-        timestamps = [t for t in timestamps if (now - t).total_seconds() < SPAM_TIME_WINDOW]
-        timestamps.append(now)
-        user_message_tracker[author.id] = timestamps
-
-        if len(timestamps) >= SPAM_MESSAGE_LIMIT:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
-            try:
-                await author.timeout(discord.utils.utcnow() + timedelta(minutes=5), reason="채팅 도배(Spam) 감지")
-            except Exception:
-                pass
-
-            embed = discord.Embed(
-                title="⚠️ [도배 경고] 채팅 속도 제한",
-                description=f"{author.mention}님, 너무 빠른 속도로 메시지를 도배하여 **5분간 채팅 제한** 조치되었습니다.",
-                color=discord.Color.orange()
-            )
-            await message.channel.send(embed=embed, delete_after=7)
-            return
-
-    if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
-        can_earn, _ = await check_and_increment_daily_limit(message.author.id, "work_share")
-        if can_earn:
-            success = await check_and_add_share_points(message.guild, message.author, message)
-            if success:
+            # 2. 외부 초대 링크 차단
+            if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
                 try:
-                    await message.add_reaction("🪙")
+                    await message.delete()
+                except Exception:
+                    pass
+                
+                embed = discord.Embed(
+                    title="🚨 [보안 경고] 외부 초대 링크 유포 차단",
+                    description=f"{author.mention}님, 서버 내 외부 디스코드 초대 링크 유포는 금지되어 있습니다.",
+                    color=discord.Color.red()
+                )
+                await message.channel.send(embed=embed, delete_after=5)
+
+                try:
+                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=10), reason="외부 초대 링크 유포")
+                except Exception:
+                    pass
+                return
+
+            # 3. 대량 멘션 차단
+            total_mentions = len(message.mentions) + len(message.role_mentions)
+            if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
+                try:
+                    await message.delete()
                 except Exception:
                     pass
 
+                embed = discord.Embed(
+                    title="🚨 [보안 경고] 대량 멘션 시도 차단",
+                    description=f"{author.mention}님, 무단 대량 멘션으로 인해 **1시간 동안 채팅이 금지**됩니다.",
+                    color=discord.Color.dark_red()
+                )
+                await message.channel.send(embed=embed)
+
+                try:
+                    await author.timeout(discord.utils.utcnow() + timedelta(hours=1), reason="대량 멘션 시도")
+                except Exception:
+                    pass
+                return
+
+            # 4. 도배 (Anti-Spam) 실시간 감지 (메모리 누수 해결 적용)
+            now = datetime.now()
+            for k, ts_list in list(user_message_tracker.items()):
+                valid_ts = [t for t in ts_list if (now - t).total_seconds() < SPAM_TIME_WINDOW]
+                if valid_ts:
+                    user_message_tracker[k] = valid_ts
+                else:
+                    user_message_tracker.pop(k, None)
+
+            timestamps = user_message_tracker.get(author.id, [])
+            timestamps.append(now)
+            user_message_tracker[author.id] = timestamps
+
+            if len(timestamps) >= SPAM_MESSAGE_LIMIT:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+
+                try:
+                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=5), reason="채팅 도배(Spam) 감지")
+                except Exception:
+                    pass
+
+                embed = discord.Embed(
+                    title="⚠️ [도배 경고] 채팅 속도 제한",
+                    description=f"{author.mention}님, 너무 빠른 속도로 메시지를 도배하여 **5분간 채팅 제한** 조치되었습니다.",
+                    color=discord.Color.orange()
+                )
+                await message.channel.send(embed=embed, delete_after=7)
+                return
+
+        if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
+            can_earn, _ = await check_and_increment_daily_limit(message.author.id, "work_share")
+            if can_earn:
+                success = await check_and_add_share_points(message.guild, message.author, message)
+                if success:
+                    try:
+                        await message.add_reaction("🪙")
+                    except Exception:
+                        pass
+
+    except Exception as e:
+        print(f"[on_message 보안 및 이벤트 처리 중 예외 발생] {e}")
+        traceback.print_exc()
+
+    # 🛡️ [예외 발생 시 명령어 미작동 문제 해결] 보안 검사 중 오류가 나더라도 명령어 처리가 정상 실행되도록 보장
     await bot.process_commands(message)
 
 
