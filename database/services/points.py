@@ -85,7 +85,7 @@ async def process_daily_attendance(guild, member) -> tuple[bool, int, int]:
     new_total = await add_user_points(guild, member, 10)
     return True, 10, new_total
 
-async def add_review_points_by_bundle(guild, member, bundle_type: str = "단품 (1개)") -> tuple[int, int]:
+async def add_review_points_by_bundle(guild, member, bundle_type: str = "단품") -> tuple[int, int]:
     """후기 작성 시 묶음 종류에 따라 포인트를 차등 적립 (50P / 100P / 150P)"""
     if "2+1" in bundle_type:
         points_to_add = 100
@@ -121,6 +121,63 @@ class PointsCog(commands.Cog):
         target = member or ctx.author
         pts = await get_user_points(target.id)
         await ctx.send(f"🪙 **{target.display_name}**님의 현재 보유 포인트: **{pts:,}P**")
+
+    @commands.command(name="포인트안내", aliases=["포인트안내문", "안내"])
+    async def point_guide_cmd(self, ctx):
+        """수정된 포인트 적립 기준 안내 임베드 출력"""
+        embed = discord.Embed(
+            title="💼 [ 포인트 적립 및 이용 안내 ]",
+            description="서버 활동을 통해 포인트를 쌓고, 다양한 혜택과 재미를 즐겨보세요! ✨",
+            color=discord.Color.blue()
+        )
+
+        embed.add_field(
+            name="1️⃣ 포인트 적립 방법 안내",
+            value=(
+                "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
+                "• **후기 작성**\n"
+                "  - 단품 구매 후기: **50P**\n"
+                "  - 2+1 묶음 구매 후기: **100P**\n"
+                "  - 3+1 묶음 구매 후기: **150P**"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="2️⃣ 단골 손님 혜택 (15% 자동 할인)",
+            value=(
+                f"**{TARGET_REGULAR_POINTS:,}P** 달성 시 `@Regular Customer/단골 손님` 역할 자동 지급!\n"
+                "*(이후 주문하는 모든 커미션에 15% 자동 할인 혜택이 적용됩니다.)*"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="3️⃣ 포인트 관련 명령어 & 미니오락실 (봇명령어 채널)",
+            value=(
+                "```text\n"
+                "[ 포인트 확인 & 출석체크 ]\n"
+                "!출석체크 (또는 !출석, !출체) - 매일 1회 10P 적립\n"
+                "!포인트 (또는 !마일리지, !p) [@유저 선택]\n"
+                "- 보유 포인트 및 티어/혜택 현황 확인\n\n"
+                "[ 포인트 오락실 & 미니게임 ]\n"
+                "!뽑기 (또는 !가챠, !럭키드로우)\n"
+                "- 20P 소모 / 최대 300P 잭팟!\n\n"
+                "!가위바위보 [가위/바위/보] [배팅포인트]\n"
+                "- 최소 배팅 10P 이상 / 승리 시 1.95배 지급!\n\n"
+                "!묵찌빠 [가위/바위/보] [배팅포인트]\n"
+                "- 최소 배팅 20P 이상 / 묵찌빠 심리전 대결!\n\n"
+                "[ 관리자 전용 ]\n"
+                "!포인트지급 [@유저] [금액]\n"
+                "!포인트차감 [@유저] [금액]\n"
+                "!포인트리셋 [@유저]\n"
+                "```"
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="DDS Point System | 즐거운 서버 활동 되세요!")
+        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(PointsCog(bot))
