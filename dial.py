@@ -53,6 +53,7 @@ COMMAND_CHANNEL_ID = 1505102694917079132
 
 # 포인트 및 미니게임 설정 상수
 GACHA_COST = 20
+ATTENDANCE_REWARD = 10
 DAILY_ACTION_LIMIT = 3
 
 DESIGNER_ROLE_IDS = {
@@ -1000,6 +1001,7 @@ async def command_list(ctx):
             "**[시스템 & 관리]**\n"
             "`!업데이트확인` `!업데이트` (최신 Git Pull 반영)\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
+            "`!출석체크` (매일 1회 출석 체크 시 **+10P** 지급!)\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
             "`!뽑기` - 20P 소모\n"
@@ -1102,6 +1104,7 @@ async def send_point_guide_embed(ctx):
     embed.add_field(
         name="1️⃣ 포인트 적립 방법 안내",
         value=(
+            "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
             "• **후기 작성**\n"
             "  - GFX / 복장 단품 구매 후기: **30P**\n"
             "  - 2 + 1 묶음 구매 후기: **45P**\n"
@@ -1120,7 +1123,8 @@ async def send_point_guide_embed(ctx):
         name="3️⃣ 포인트 관련 명령어 & 미니오락실 (봇명령 채널)",
         value=(
             "```\n"
-            "[ 포인트 확인 ]\n"
+            "[ 포인트 확인 & 출석체크 ]\n"
+            "!출석체크 (또는 !출석, !출체) - 매일 1회 10P 적립\n"
             "!포인트 (또는 !마일리지, !p) [@유저 선택]\n"
             "- 보유 포인트 및 티어/혜택 현황 확인\n\n"
             "[ 포인트 오락실 & 미니게임 ]\n"
@@ -1168,6 +1172,36 @@ async def setup_designer_tier_panel(ctx):
         await ctx.message.delete()
     except Exception:
         pass
+
+
+# ==================== [📅 출석체크 및 포인트 명령어] ====================
+
+@bot.command(name="출석체크", aliases=["출석", "출체", "checkin"])
+async def attendance_check(ctx):
+    if not await check_command_channel(ctx):
+        return
+
+    # 매일 1회만 가능하도록 일일 제한 검사
+    success, current_count = await check_and_increment_daily_limit(ctx.author.id, "attendance", max_limit=1)
+    if not success:
+        return await ctx.send(f"❌ {ctx.author.mention}님, 이미 오늘 출석체크를 완료하셨습니다! 내일 다시 시도해주세요. 📅")
+
+    reward = ATTENDANCE_REWARD
+    new_points = await add_user_points(ctx.guild, ctx.author, reward)
+    
+    # 포인트 변동에 따른 랭킹 패널 동기화
+    await update_point_ranking_message(bot)
+
+    embed = discord.Embed(
+        title="📅 출석체크 완료!",
+        description=f"{ctx.author.mention}님, 출석체크가 정상적으로 처리되었습니다!\n🎁 출석 보상으로 **+{reward} P**가 적립되었습니다.",
+        color=discord.Color.green(),
+        timestamp=discord.utils.utcnow()
+    )
+    embed.add_field(name="현재 보유 포인트", value=f"`{new_points:,} P`", inline=False)
+    embed.set_footer(text="매일 UTC 00:00(한국 시간 오전 9:00) 기준 초기화")
+
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="포인트", aliases=["마일리지", "p"])
@@ -1230,6 +1264,7 @@ async def point_gacha(ctx):
 
     await add_user_points(ctx.guild, ctx.author, result)
     final_points = await get_user_points(ctx.author.id)
+    await update_point_ranking_message(bot)
 
     if result == 2:
         color, title, desc = discord.Color.dark_grey(), "😭 아쉬운 꽝!", "위로 포인트 **2P**를 받으셨습니다."
@@ -1301,6 +1336,7 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
             color=discord.Color.red()
         )
 
+    await update_point_ranking_message(bot)
     embed.add_field(name="현재 보유 포인트", value=f"`{final_points} P`", inline=False)
     await ctx.send(embed=embed)
 
@@ -1375,6 +1411,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 봇의 압박을 버티지 못하고 `{bet}P`를 잃었습니다.", inline=False)
             embed.color = discord.Color.red()
 
+    await update_point_ranking_message(bot)
     embed.add_field(name="현재 보유 포인트", value=f"`{final_points} P`", inline=False)
     await ctx.send(embed=embed)
 
@@ -1387,6 +1424,7 @@ async def give_points(ctx, member: discord.Member, amount: int):
         return await ctx.send("❌ 1회에 최대 50,000 P 까지만 지급할 수 있습니다.")
 
     new_points = await add_user_points(ctx.guild, member, amount)
+    await update_point_ranking_message(bot)
     await ctx.send(f"✅ {member.mention} 님에게 `{amount} P`를 지급했습니다. (현재: `{new_points} P`)")
     await log_security_event(ctx.guild, "포인트 강제 지급", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n지급액: `{amount}P`", discord.Color.blue())
 
@@ -1395,6 +1433,7 @@ async def give_points(ctx, member: discord.Member, amount: int):
 @commands.has_permissions(administrator=True)
 async def remove_points(ctx, member: discord.Member, amount: int):
     new_points = await add_user_points(ctx.guild, member, -amount)
+    await update_point_ranking_message(bot)
     await ctx.send(f"✅ {member.mention} 님의 포인트를 `{amount} P` 차감했습니다. (현재: `{new_points} P`)")
     await log_security_event(ctx.guild, "포인트 강제 차감", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n차감액: `{amount}P`", discord.Color.orange())
 
@@ -1405,6 +1444,7 @@ async def reset_points(ctx, member: discord.Member):
     current_points = await get_user_points(member.id)
     if current_points > 0:
         await add_user_points(ctx.guild, member, -current_points)
+    await update_point_ranking_message(bot)
     await ctx.send(f"🔄 {member.mention} 님의 포인트를 `0 P`로 초기화했습니다.")
     await log_security_event(ctx.guild, "포인트 리셋", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n리셋 전 포인트: `{current_points}P`", discord.Color.red())
 
