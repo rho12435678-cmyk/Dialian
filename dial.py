@@ -48,7 +48,8 @@ DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
 KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
-SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
+# 🔒 보안실 채널 ID 수정 반영 (1505122707098828806)
+SECURITY_LOG_CHANNEL_ID = 1505122707098828806 
 COMMAND_CHANNEL_ID = 1531287070281040054 
 
 # 포인트 및 미니게임 설정 상수
@@ -336,10 +337,23 @@ PROCESSED_TABLES = {
 
 # ==================== [🛡️ 보안 & 로그 헬퍼 함수] ====================
 
+async def get_security_channel(guild: discord.Guild):
+    """보안실 채널을 캐시 또는 API 조회를 통해 정확히 가져오는 헬퍼 함수"""
+    if not guild:
+        return None
+    sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+    if not sec_channel:
+        try:
+            sec_channel = await bot.fetch_channel(SECURITY_LOG_CHANNEL_ID)
+        except Exception:
+            sec_channel = None
+    return sec_channel
+
+
 async def log_security_event(guild: discord.Guild, title: str, description: str, color=discord.Color.red()):
     if not guild:
         return
-    sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+    sec_channel = await get_security_channel(guild)
     if sec_channel:
         embed = discord.Embed(
             title=f"🛡️ [보안 경고] {title}",
@@ -830,7 +844,7 @@ async def on_message(message):
 
     author = message.author
     guild = message.guild
-    sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID) or message.channel
+    sec_channel = await get_security_channel(guild)
 
     try:
         # 1. 실행 파일 감지
@@ -842,13 +856,14 @@ async def on_message(message):
                     except Exception:
                         pass
                     
-                    embed = discord.Embed(
-                        title="🚨 [보안 경고] 위험 실행 파일 업로드 감지",
-                        description=f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**발생 채널:** {message.channel.mention}",
-                        color=discord.Color.red(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    await sec_channel.send(embed=embed)
+                    if sec_channel:
+                        embed = discord.Embed(
+                            title="🚨 [보안 경고] 위험 실행 파일 업로드 감지",
+                            description=f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**발생 채널:** {message.channel.mention}",
+                            color=discord.Color.red(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        await sec_channel.send(embed=embed)
                     return
 
         # 2. 민감한 개인정보/토큰 보호
@@ -859,13 +874,14 @@ async def on_message(message):
             except Exception:
                 pass
             
-            embed = discord.Embed(
-                title="🔒 [보안 경고] 민감 정보 유출 차단 (PII Guard)",
-                description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 토큰/개인정보 유출 위험 메시지 즉시 삭제",
-                color=discord.Color.gold(),
-                timestamp=discord.utils.utcnow()
-            )
-            await sec_channel.send(embed=embed)
+            if sec_channel:
+                embed = discord.Embed(
+                    title="🔒 [보안 경고] 민감 정보 유출 차단 (PII Guard)",
+                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 토큰/개인정보 유출 위험 메시지 즉시 삭제",
+                    color=discord.Color.gold(),
+                    timestamp=discord.utils.utcnow()
+                )
+                await sec_channel.send(embed=embed)
             return
 
         is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
@@ -881,16 +897,17 @@ async def on_message(message):
                 except Exception:
                     pass
 
-                embed = discord.Embed(
-                    title="🕵️‍♂️ [보안 경고] 뒷매 의심 키워드 감지",
-                    description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
-                                f"**적발 키워드:** `{found_keyword[0]}`\n"
-                                f"**원본 메시지:** {message.content}\n"
-                                f"**발생 채널:** {message.channel.mention}",
-                    color=discord.Color.orange(),
-                    timestamp=discord.utils.utcnow()
-                )
-                await sec_channel.send(embed=embed)
+                if sec_channel:
+                    embed = discord.Embed(
+                        title="🕵️‍♂️ [보안 경고] 뒷매 의심 키워드 감지",
+                        description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
+                                    f"**적발 키워드:** `{found_keyword[0]}`\n"
+                                    f"**원본 메시지:** {message.content}\n"
+                                    f"**발생 채널:** {message.channel.mention}",
+                        color=discord.Color.orange(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    await sec_channel.send(embed=embed)
                 return
 
             # 4. 외부 디스코드 초대 링크 유포 차단
@@ -900,13 +917,14 @@ async def on_message(message):
                 except Exception:
                     pass
                 
-                embed = discord.Embed(
-                    title="🚨 [보안 경고] 외부 초대 링크 유포 감지",
-                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}",
-                    color=discord.Color.orange(),
-                    timestamp=discord.utils.utcnow()
-                )
-                await sec_channel.send(embed=embed)
+                if sec_channel:
+                    embed = discord.Embed(
+                        title="🚨 [보안 경고] 외부 초대 링크 유포 감지",
+                        description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}",
+                        color=discord.Color.orange(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    await sec_channel.send(embed=embed)
                 return
 
             # 5. 무단 대량 멘션 감지
@@ -917,13 +935,14 @@ async def on_message(message):
                 except Exception:
                     pass
 
-                embed = discord.Embed(
-                    title="🚨 [보안 경고] 대량 멘션 시도 감지",
-                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**멘션 수:** {total_mentions}회",
-                    color=discord.Color.orange(),
-                    timestamp=discord.utils.utcnow()
-                )
-                await sec_channel.send(embed=embed)
+                if sec_channel:
+                    embed = discord.Embed(
+                        title="🚨 [보안 경고] 대량 멘션 시도 감지",
+                        description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**멘션 수:** {total_mentions}회",
+                        color=discord.Color.orange(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    await sec_channel.send(embed=embed)
                 return
 
             # 6. 유연한 채팅 도배(Spam) 감지
@@ -945,13 +964,14 @@ async def on_message(message):
                 except Exception:
                     pass
 
-                embed = discord.Embed(
-                    title="⚠️ [보안 경고] 도배 행위 감지",
-                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 도배 메시지 삭제",
-                    color=discord.Color.orange(),
-                    timestamp=discord.utils.utcnow()
-                )
-                await sec_channel.send(embed=embed)
+                if sec_channel:
+                    embed = discord.Embed(
+                        title="⚠️ [보안 경고] 도배 행위 감지",
+                        description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 도배 메시지 삭제",
+                        color=discord.Color.orange(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    await sec_channel.send(embed=embed)
                 return
 
     except Exception as e:
