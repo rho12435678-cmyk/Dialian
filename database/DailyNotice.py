@@ -1,18 +1,26 @@
 import discord
-from discord.ext import tasks
-from datetime import timezone, timedelta, time
+from discord.ext import commands, tasks
+from datetime import datetime, timezone, timedelta, time
 from config import *
 
 KST = timezone(timedelta(hours=9))
 
-class DailyNotice:
+class DailyNotice(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
         self.daily_notice.start()
 
+    def cog_unload(self):
+        self.daily_notice.cancel()
+
     @tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
     async def daily_notice(self):
+        # 이틀에 1회 발송을 위한 날짜 검사 (짝수 일자에만 발송)
+        today = datetime.now(KST)
+        if today.day % 2 != 0:
+            return
+
         print("공지 실행 시작")
 
         try:
@@ -48,3 +56,6 @@ class DailyNotice:
     async def before(self):
         print("DailyNotice 시작")
         await self.bot.wait_until_ready()
+
+async def setup(bot):
+    await bot.add_cog(DailyNotice(bot))
