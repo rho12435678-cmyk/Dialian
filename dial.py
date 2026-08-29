@@ -18,8 +18,6 @@ from database.monthly_stats import (
 )
 from database.services.points import (
     add_user_points,
-    check_and_add_feedback_points,
-    check_and_add_share_points,
     get_user_points,
 )
 from database.views.claim_view import ClaimTicketView
@@ -40,7 +38,9 @@ from discord.ext import commands, tasks
 
 TOKEN = os.getenv("TOKEN")
 
-# 핵심 채널 및 역할 ID
+# ----------------------------------------------------
+# 📌 핵심 채널, 역할 ID 및 미정의 상수 통합 관리
+# ----------------------------------------------------
 POINT_RANKING_CHANNEL_ID = 1532599012316938321
 POINT_INFO_CHANNEL_ID = 1532373833783316610
 DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
@@ -48,8 +48,14 @@ DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
 KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
-# 🔒 보안 로그 전송 채널 ID
 SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
+
+# 서비스 지원용 채널 ID (환경 설정에 맞게 지정)
+COMMAND_CHANNEL_ID = 1505102694917079132 
+
+# 포인트 및 미니게임 설정 상수
+GACHA_COST = 20
+DAILY_ACTION_LIMIT = 3
 
 DESIGNER_ROLE_IDS = {
     "gfx": 1518906536095776868,
@@ -93,7 +99,7 @@ DANGEROUS_EXTENSIONS = (
 # 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
 DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
 PHONE_REGEX = r"01[016789]-?\d{3,4}-?\d{4}"
-RRN_REGEX = r"\d{6}-?[1-4]\d{6}"
+RRN_REGEX = r"\d{6}-?[1-8]\d{6}"
 
 
 def get_bot_version():
@@ -123,13 +129,13 @@ async def init_blacklist_table(db):
     await db.commit()
 
 async def is_blacklisted(db, user_id: int) -> bool:
-    cursor = await db.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,))
-    row = await cursor.fetchone()
-    return row is not None
+    async with db.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)) as cursor:
+        row = await cursor.fetchone()
+        return row is not None
 
 async def get_blacklist_info(db, user_id: int):
-    cursor = await db.execute("SELECT reason, created_at FROM blacklist WHERE user_id = ?", (user_id,))
-    return await cursor.fetchone()
+    async with db.execute("SELECT reason, created_at FROM blacklist WHERE user_id = ?", (user_id,)) as cursor:
+        return await cursor.fetchone()
 
 async def add_blacklist(db, user_id: int, reason: str):
     now = datetime.now().isoformat()
@@ -296,7 +302,6 @@ class CombinedTicketOpenView(ui.View):
 
 class DialianBot(commands.Bot):
     async def setup_hook(self):
-        # 🔑 봇 재시작 시에도 기존 버튼/메뉴가 정상 동작하도록 Persistent View 사전 등록
         self.add_view(CombinedTicketOpenView())
         self.add_view(CategorySelectView())
         self.add_view(VerifyView())
@@ -506,8 +511,8 @@ async def build_designer_tier_embed(guild):
 
 async def update_designer_tier_panel_message(bot_instance):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("SELECT channel_id, message_id FROM designer_tier_panel WHERE id = 1")
-        row = await cursor.fetchone()
+        async with db.execute("SELECT channel_id, message_id FROM designer_tier_panel WHERE id = 1") as cursor:
+            row = await cursor.fetchone()
 
     if not row:
         return
@@ -709,13 +714,13 @@ async def on_guild_role_create(role):
 
 async def build_point_ranking_embed(guild):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("""
+        async with db.execute("""
             SELECT user_id, points 
             FROM user_points 
             ORDER BY points DESC 
             LIMIT 10
-        """)
-        rows = await cursor.fetchall()
+        """) as cursor:
+            rows = await cursor.fetchall()
 
     embed = discord.Embed(
         title="🏆 Dialian 포인트 랭킹 (TOP 10)",
@@ -743,8 +748,8 @@ async def build_point_ranking_embed(guild):
 
 async def update_point_ranking_message(bot_instance):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("SELECT channel_id, message_id FROM point_ranking_panel WHERE id = 1")
-        row = await cursor.fetchone()
+        async with db.execute("SELECT channel_id, message_id FROM point_ranking_panel WHERE id = 1") as cursor:
+            row = await cursor.fetchone()
 
     if not row:
         return
@@ -774,12 +779,12 @@ async def check_command_channel(ctx):
 async def check_and_increment_daily_limit(user_id: int, action_type: str, max_limit: int = DAILY_ACTION_LIMIT):
     today = datetime.now().strftime("%Y-%m-%d")
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("""
+        async with db.execute("""
             SELECT count FROM daily_activity_limits
             WHERE user_id = ? AND action_type = ? AND date = ?
-        """, (user_id, action_type, today))
-        row = await cursor.fetchone()
-        current_count = row[0] if row else 0
+        """, (user_id, action_type, today)) as cursor:
+            row = await cursor.fetchone()
+            current_count = row[0] if row else 0
 
         if current_count >= max_limit:
             return False, current_count
@@ -945,57 +950,11 @@ async def on_message(message):
                 await message.channel.send(embed=embed, delete_after=7)
                 return
 
-        if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
-            can_earn, _ = await check_and_increment_daily_limit(message.author.id, "work_share")
-            if can_earn:
-                success = await check_and_add_share_points(message.guild, message.author, message)
-                if success:
-                    try:
-                        await message.add_reaction("🪙")
-                    except Exception:
-                        pass
-
     except Exception as e:
         print(f"[on_message 보안 및 이벤트 처리 중 예외 발생] {e}")
         traceback.print_exc()
 
     await bot.process_commands(message)
-
-
-@bot.event
-async def on_raw_reaction_add(payload):
-    if not payload.guild_id or payload.user_id == bot.user.id:
-        return
-
-    if payload.channel_id != FEEDBACK_CHANNEL_ID:
-        return
-
-    guild = bot.get_guild(payload.guild_id)
-    if not guild:
-        return
-
-    channel = guild.get_channel(payload.channel_id)
-    if not channel:
-        return
-
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except Exception:
-        return
-
-    if message.author.id == payload.user_id or message.author.bot:
-        return
-
-    can_earn, _ = await check_and_increment_daily_limit(payload.user_id, "feedback_react")
-    if can_earn:
-        user = guild.get_member(payload.user_id)
-        if user:
-            success = await check_and_add_feedback_points(guild, user, message)
-            if success:
-                try:
-                    await message.add_reaction("🪙")
-                except Exception:
-                    pass
 
 
 # ==================== [명령어 모음] ====================
@@ -1025,7 +984,7 @@ async def command_list(ctx):
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
             "`!뽑기` - 20P 소모\n"
             "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 약 1.95배!\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 승리 시 최대 1.3배!"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 심리전 기반 배팅 게임!"
         ),
         color=discord.Color.blurple(),
     )
@@ -1121,12 +1080,8 @@ async def send_point_guide_embed(ctx):
     )
 
     embed.add_field(
-        name="1️⃣ 포인트 적립 방법 (채널별 안내)",
+        name="1️⃣ 포인트 적립 방법 안내",
         value=(
-            f"• <#{WORK_SHARE_CHANNEL_ID}> **작품 공유**\n"
-            "  - 이미지 첨부 + 20자 이상 작성 시 ➡️ **+15P** *(하루 최대 3회)*\n\n"
-            f"• <#{FEEDBACK_CHANNEL_ID}> **피드백 채널**\n"
-            "  - 메시지에 반응(이모지 등) 남길 시 ➡️ **+10P** *(하루 최대 3회, 본인 제외)*\n\n"
             "• **후기 작성**\n"
             "  - GFX / 복장 단품 구매 후기: **30P**\n"
             "  - 2 + 1 묶음 구매 후기: **45P**\n"
@@ -1154,7 +1109,7 @@ async def send_point_guide_embed(ctx):
             "!가위바위보 [가위/바위/보] [배팅포인트]\n"
             "- 최소 배팅 10P 이상 / 승리 시 1.95배 지급!\n\n"
             "!묵찌빠 [가위/바위/보] [배팅포인트]\n"
-            "- 최소 배팅 20P 이상 / 승리 시 최대 1.3배 지급!\n\n"
+            "- 최소 배팅 20P 이상 / 묵찌빠 심리전 대결!\n\n"
             "[ 관리자 전용 ]\n"
             "!포인트지급 [@유저] [금액]\n"
             "!포인트차감 [@유저] [금액]\n"
@@ -1347,8 +1302,16 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
         return await ctx.send(f"❌ 보유 포인트가 부족합니다. (현재 `{current_points}P`)")
 
     bot_choice1 = random.choice(choices)
+    
+    # 1라운드: 주도권 가져오기 (가위바위보)
     if choice == bot_choice1:
-        bot_choice1 = random.choice([c for c in choices if c != choice])
+        embed = discord.Embed(
+            title="👊✌️🖐️ 묵찌빠 - 1라운드 무승부",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice1}**\n\n첫 판부터 비겨 승패 없이 판돈을 돌려받습니다.",
+            color=discord.Color.light_grey()
+        )
+        embed.add_field(name="현재 보유 포인트", value=f"`{current_points} P`", inline=False)
+        return await ctx.send(embed=embed)
 
     user_attacker = (
         (choice == "가위" and bot_choice1 == "보") or
@@ -1356,13 +1319,14 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
         (choice == "보" and bot_choice1 == "바위")
     )
 
+    # 2라운드 시뮬레이션
     bot_choice2 = random.choice(choices)
-    user_choice2 = choice
+    user_choice2 = random.choice(choices)
 
-    embed = discord.Embed(title="👊✌️🖐️ 스릴만점 묵찌빠 대결!", color=discord.Color.blurple())
+    embed = discord.Embed(title="👊✌️🖐️ 묵찌빠 결과!", color=discord.Color.blurple())
     embed.add_field(
-        name="1라운드 (주도권 잡기)",
-        value=f"유저: **{choice}** vs 봇: **{bot_choice1}** ➔ **{'유저' if user_attacker else '봇'}** 공격 선제 잡기!",
+        name="1라운드 (주도권)",
+        value=f"유저: **{choice}** vs 봇: **{bot_choice1}** ➔ **{'유저' if user_attacker else '봇'}** 공격 잡기!",
         inline=False
     )
 
@@ -1371,25 +1335,25 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             win_amount = int(bet * 1.3)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** **+{win_amount}P** 획득!", inline=False)
+            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** **+{win_amount}P** 획득!", inline=False)
             embed.color = discord.Color.gold()
         else:
             await add_user_points(ctx.guild, ctx.author, -bet)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 방어 실패로 `{bet}P`를 잃었습니다.", inline=False)
+            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** `{bet}P`를 잃었습니다.", inline=False)
             embed.color = discord.Color.dark_red()
     else:
-        bot_wins_final = random.choices([True, False], weights=[55, 45])[0]
-        if not bot_wins_final:
+        # 공격이 이어지는 난전 상황 처리
+        if user_attacker:
             win_amount = int(bet * 1.1)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드", value=f"유저 승리! **+{win_amount}P** 획득!", inline=False)
+            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n✨ 우세한 공격으로 판정승! **+{win_amount}P** 획득!", inline=False)
             embed.color = discord.Color.green()
         else:
             await add_user_points(ctx.guild, ctx.author, -bet)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드", value=f"패배하여 `{bet}P`를 잃었습니다.", inline=False)
+            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 봇의 압박을 버티지 못하고 `{bet}P`를 잃었습니다.", inline=False)
             embed.color = discord.Color.red()
 
     embed.add_field(name="현재 보유 포인트", value=f"`{final_points} P`", inline=False)
@@ -1533,12 +1497,12 @@ def is_ticket_or_archive_channel(channel):
 
 async def find_ticket_owner(channel):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
-        row = await cursor.fetchone()
-        if row and row[0]:
-            member = await fetch_member_or_none(channel.guild, row[0])
-            if member:
-                return member
+        async with db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                member = await fetch_member_or_none(channel.guild, row[0])
+                if member:
+                    return member
 
     try:
         if channel.topic:
@@ -1556,10 +1520,10 @@ async def find_ticket_owner(channel):
 
 async def find_ticket_designer_id(channel):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
-        row = await cursor.fetchone()
-        if row and row[0]:
-            return row[0]
+        async with db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                return row[0]
 
     async for msg in channel.history(limit=50, oldest_first=True):
         for embed in msg.embeds:
@@ -1648,11 +1612,11 @@ async def upsert_commission_record(data):
 
 async def send_payment_info(channel, designer_id):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT bank_name, account_number, holder FROM bank_accounts WHERE developer_id = ?",
             (designer_id,)
-        )
-        data = await cursor.fetchone()
+        ) as cursor:
+            data = await cursor.fetchone()
 
     if data is None:
         return False
@@ -1712,8 +1676,9 @@ async def list_active_tickets(ctx):
             query += " AND designer_id = ?"
             params.append(ctx.author.id)
         query += " ORDER BY updated_at DESC LIMIT 25"
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
+        
+        async with db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
 
     if not rows:
         return await ctx.send("📭 진행 중인 티켓이 없습니다.")
@@ -1747,8 +1712,8 @@ async def register_bank(ctx, member: discord.Member, bank_name: str, account_num
 @commands.has_permissions(administrator=True)
 async def list_bank_accounts(ctx):
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute("SELECT developer_id, bank_name, account_number, holder FROM bank_accounts")
-        rows = await cursor.fetchall()
+        async with db.execute("SELECT developer_id, bank_name, account_number, holder FROM bank_accounts") as cursor:
+            rows = await cursor.fetchall()
 
     if not rows:
         return await ctx.send("📭 등록된 계좌 정보가 없습니다.")
@@ -1933,11 +1898,11 @@ async def ticket_info(ctx):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT customer_id, designer_id, category, status, progress, created_at FROM commissions WHERE ticket_channel = ?",
             (ctx.channel.id,)
-        )
-        row = await cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
 
     if not row:
         return await ctx.send("❌ 해당 티켓의 DB 정보가 존재하지 않습니다.")
@@ -2036,11 +2001,8 @@ async def auto_chat_guide_loop():
         embed_kr.add_field(
             name="📌 주요 이용 안내 채널",
             value=(
-                "• <#1505102694917079132> : 커미션 주문 및 문의/지원 신청\n"
-                "• <#1505178799950532720> : 디자이너 샘플 및 예시작 감상\n"
-                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황\n"
-                "• <#1521001578239361155> : 디자이너 작업 완료 통계\n"
-                f"• <#{FEEDBACK_CHANNEL_ID}> : 실제 이용 고객님들의 솔직한 후기"
+                f"• <#{SECURITY_LOG_CHANNEL_ID}> : 커미션 주문 및 문의/지원 신청\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황"
             ),
             inline=False
         )
@@ -2071,11 +2033,8 @@ async def auto_chat_guide_loop():
         embed_en.add_field(
             name="📌 Essential Channels",
             value=(
-                "• <#1505102694917079132> : Order commissions & Partner/Dev inquiries\n"
-                "• <#1505178799950532720> : Designer portfolio & sample showcase\n"
-                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories\n"
-                "• <#1521001578239361155> : Designer completion statistics\n"
-                f"• <#{FEEDBACK_CHANNEL_ID}> : Customer reviews & feedback"
+                f"• <#{SECURITY_LOG_CHANNEL_ID}> : Order commissions & Partner/Dev inquiries\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories"
             ),
             inline=False
         )
