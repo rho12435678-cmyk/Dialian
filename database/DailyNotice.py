@@ -46,6 +46,9 @@ class DailyNotice(commands.Cog):
                 color=0xF4A300
             )
 
+            # 임베드 맨 아래 푸터 문구 수정
+            embed.set_footer(text="DDS System | 이틀에 1회, 오후 6시 정각 정기 발송")
+
             await channel.send(embed=embed)
             print("공지 전송 완료")
 
