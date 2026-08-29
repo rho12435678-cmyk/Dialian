@@ -49,8 +49,6 @@ KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
 SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
-
-# 서비스 지원용 채널 ID
 COMMAND_CHANNEL_ID = 1505102694917079132 
 
 # 포인트 및 미니게임 설정 상수
@@ -89,20 +87,20 @@ DM_TRADE_KEYWORDS = [
     "개인메시지", "개인 메세지", "뒷거래"
 ]
 
-# ⚠️ 위험 실행 파일 확장자 차단 (zip, rar, 7z, html 등 공유 허용)
+# ⚠️ 위험 실행 파일 확장자 차단
 DANGEROUS_EXTENSIONS = (
     '.exe', '.bat', '.ps1', '.scr', '.vbs', '.cmd', '.jar',
     '.pif', '.application', '.gadget', '.msi', '.msp', '.com', '.hta', '.cpl',
     '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2'
 )
 
-# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식 (단어 경계 \b 추가로 디스코드 ID 오감지 차단)
+# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
 DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
 PHONE_REGEX = r"\b01[016789]-?\d{3,4}-?\d{4}\b"
 RRN_REGEX = r"\b\d{6}-[1-8]\d{6}\b"
 
 
-def get_bot_version():
+def get_bot_version() -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -116,9 +114,16 @@ def get_bot_version():
         return "unknown"
 
 
+def parse_mention_id(text: str) -> int | None:
+    if not text:
+        return None
+    match = re.search(r"(\d{17,20})", str(text))
+    return int(match.group(1)) if match else None
+
+
 # ==================== [🔒 블랙리스트 헬퍼 함수] ====================
 
-async def init_blacklist_table(db):
+async def init_blacklist_table(db: aiosqlite.Connection):
     await db.execute("""
         CREATE TABLE IF NOT EXISTS blacklist (
             user_id INTEGER PRIMARY KEY,
@@ -128,24 +133,24 @@ async def init_blacklist_table(db):
     """)
     await db.commit()
 
-async def is_blacklisted(db, user_id: int) -> bool:
+async def is_blacklisted(db: aiosqlite.Connection, user_id: int) -> bool:
     async with db.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)) as cursor:
         row = await cursor.fetchone()
         return row is not None
 
-async def get_blacklist_info(db, user_id: int):
+async def get_blacklist_info(db: aiosqlite.Connection, user_id: int):
     async with db.execute("SELECT reason, created_at FROM blacklist WHERE user_id = ?", (user_id,)) as cursor:
         return await cursor.fetchone()
 
-async def add_blacklist(db, user_id: int, reason: str):
-    now = datetime.now().isoformat()
+async def add_blacklist(db: aiosqlite.Connection, user_id: int, reason: str):
+    now = discord.utils.utcnow().isoformat()
     await db.execute(
         "INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)",
         (user_id, reason, now)
     )
     await db.commit()
 
-async def remove_blacklist(db, user_id: int):
+async def remove_blacklist(db: aiosqlite.Connection, user_id: int):
     await db.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
     await db.commit()
 
@@ -163,6 +168,7 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         guild = interaction.guild
         user = interaction.user
 
+        clean_username = re.sub(r'[^a-zA-Z0-9_-]', '', user.name.lower()) or "user"
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
@@ -170,7 +176,7 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-지원-{user.name}",
+            name=f"티켓-지원-{clean_username}",
             reason=f"{user.display_name} 님의 개발자 지원 티켓",
             overwrites=overwrites
         )
@@ -179,7 +185,7 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
             title="💻 개발자 지원 신청서가 접수되었습니다.",
             description=f"**신청자:** {user.mention} (`{user.id}`)\n\n관리자가 신청서를 확인한 후 답변을 드릴 예정입니다.",
             color=discord.Color.blue(),
-            timestamp=datetime.now()
+            timestamp=discord.utils.utcnow()
         )
         embed.add_field(name="📌 지원 분야", value=self.dev_field.value, inline=False)
         embed.add_field(name="🎨 경력 및 포트폴리오", value=self.portfolio.value, inline=False)
@@ -187,6 +193,7 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
 
         await channel.send(content=f"{user.mention} 님, 지원서가 성공적으로 생성되었습니다.", embed=embed, view=TicketCloseView())
 
+        now_str = discord.utils.utcnow().isoformat()
         data = {
             "ticket_channel": channel.id,
             "customer_id": user.id,
@@ -194,9 +201,9 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
             "category": "개발자 지원",
             "status": "in_progress",
             "progress": 0,
-            "created_at": datetime.now().isoformat(),
+            "created_at": now_str,
             "completed_at": None,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": now_str,
         }
         await upsert_commission_record(data)
         await interaction.followup.send(f"✅ 지원 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
@@ -213,6 +220,7 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         guild = interaction.guild
         user = interaction.user
 
+        clean_username = re.sub(r'[^a-zA-Z0-9_-]', '', user.name.lower()) or "user"
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
@@ -220,7 +228,7 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-파트너-{user.name}",
+            name=f"티켓-파트너-{clean_username}",
             reason=f"{user.display_name} 님의 파트너 문의 티켓",
             overwrites=overwrites
         )
@@ -229,7 +237,7 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
             title="🤝 파트너 문의가 접수되었습니다.",
             description=f"**문의자:** {user.mention} (`{user.id}`)\n\n담당자가 제안서를 확인한 후 빠르게 답변해 드리겠습니다.",
             color=discord.Color.gold(),
-            timestamp=datetime.now()
+            timestamp=discord.utils.utcnow()
         )
         embed.add_field(name="🏢 대표 단체 / 서버명", value=self.partner_type.value, inline=False)
         embed.add_field(name="📝 제휴 제안 내용", value=self.proposal.value, inline=False)
@@ -238,6 +246,7 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
 
         await channel.send(content=f"{user.mention} 님, 파트너 문의 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView())
 
+        now_str = discord.utils.utcnow().isoformat()
         data = {
             "ticket_channel": channel.id,
             "customer_id": user.id,
@@ -245,9 +254,9 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
             "category": "파트너 문의",
             "status": "in_progress",
             "progress": 0,
-            "created_at": datetime.now().isoformat(),
+            "created_at": now_str,
             "completed_at": None,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": now_str,
         }
         await upsert_commission_record(data)
         await interaction.followup.send(f"✅ 파트너 문의 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
@@ -316,7 +325,7 @@ bot = DialianBot(command_prefix="!", intents=intents, help_command=None)
 
 daily_notice = None
 update_notice_sent = False
-bot_started_at = datetime.now()
+bot_started_at = discord.utils.utcnow()
 
 PROCESSED_TABLES = {
     "processed_commands",
@@ -335,7 +344,7 @@ async def log_security_event(guild: discord.Guild, title: str, description: str,
             title=f"🛡️ [보안 경고] {title}",
             description=description,
             color=color,
-            timestamp=datetime.now()
+            timestamp=discord.utils.utcnow()
         )
         try:
             await sec_channel.send(embed=embed)
@@ -347,7 +356,7 @@ async def check_and_punish_mass_action(guild: discord.Guild, user_id: int, actio
     if not guild or user_id == guild.owner_id:
         return
 
-    now = datetime.now()
+    now = discord.utils.utcnow()
     tracker_key = f"{user_id}:{action_type}"
     
     for k, ts_list in list(admin_action_tracker.items()):
@@ -391,6 +400,7 @@ async def claim_once(table_name: str, message_id: int) -> bool:
         raise ValueError("허용되지 않은 처리 기록 테이블입니다.")
 
     async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("PRAGMA busy_timeout = 5000;")
         cursor = await db.execute(
             f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
             (message_id,)
@@ -410,6 +420,8 @@ async def prevent_duplicate_command_processing(ctx):
 
 async def init_extended_db():
     async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("PRAGMA journal_mode=WAL;")
+        await db.execute("PRAGMA busy_timeout = 5000;")
         await init_blacklist_table(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS processed_commands (
@@ -492,7 +504,7 @@ async def build_designer_tier_embed(guild):
         title="🎨 Dialian 디자이너 등급 현황",
         description="실시간으로 자동 갱신되는 DDS 공식 디자이너 등급 목록입니다. ✨",
         color=discord.Color.purple(),
-        timestamp=datetime.now()
+        timestamp=discord.utils.utcnow()
     )
 
     def fmt(lst):
@@ -736,7 +748,7 @@ async def build_point_ranking_embed(guild):
         title="🏆 Dialian 포인트 랭킹 (TOP 10)",
         description="실시간으로 동기화되는 포인트 순위입니다! ✨\n*(매월 1일 00시에 포인트가 초기화됩니다)*",
         color=discord.Color.gold(),
-        timestamp=datetime.now()
+        timestamp=discord.utils.utcnow()
     )
 
     if not rows:
@@ -787,7 +799,7 @@ async def check_command_channel(ctx):
 
 
 async def check_and_increment_daily_limit(user_id: int, action_type: str, max_limit: int = DAILY_ACTION_LIMIT):
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = discord.utils.utcnow().strftime("%Y-%m-%d")
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("""
             SELECT count FROM daily_activity_limits
@@ -820,7 +832,7 @@ async def on_message(message):
     sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID) or message.channel
 
     try:
-        # 1. 실행 파일 감지 (보안실 채널 전송)
+        # 1. 실행 파일 감지
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
@@ -833,12 +845,12 @@ async def on_message(message):
                         title="🚨 [보안 경고] 위험 실행 파일 업로드 감지",
                         description=f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**발생 채널:** {message.channel.mention}",
                         color=discord.Color.red(),
-                        timestamp=datetime.now()
+                        timestamp=discord.utils.utcnow()
                     )
                     await sec_channel.send(embed=embed)
                     return
 
-        # 2. 민감한 개인정보/토큰 보호 (멘션 ID 제거 후 검사)
+        # 2. 민감한 개인정보/토큰 보호
         clean_content = re.sub(r"<@!?\d+>|<@&\d+>|<#\d+>", "", message.content)
         if re.search(DISCORD_TOKEN_REGEX, clean_content) or re.search(RRN_REGEX, clean_content) or re.search(PHONE_REGEX, clean_content):
             try:
@@ -850,7 +862,7 @@ async def on_message(message):
                 title="🔒 [보안 경고] 민감 정보 유출 차단 (PII Guard)",
                 description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 토큰/개인정보 유출 위험 메시지 즉시 삭제",
                 color=discord.Color.gold(),
-                timestamp=datetime.now()
+                timestamp=discord.utils.utcnow()
             )
             await sec_channel.send(embed=embed)
             return
@@ -858,7 +870,7 @@ async def on_message(message):
         is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
         if not is_staff and author.id != guild.owner_id:
             
-            # 3. 사적 거래 (뒷매) 키워드 차단 (보안실 전송)
+            # 3. 사적 거래 (뒷매) 키워드 차단
             msg_content = message.content.replace(" ", "").lower()
             found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
 
@@ -875,12 +887,12 @@ async def on_message(message):
                                 f"**원본 메시지:** {message.content}\n"
                                 f"**발생 채널:** {message.channel.mention}",
                     color=discord.Color.orange(),
-                    timestamp=datetime.now()
+                    timestamp=discord.utils.utcnow()
                 )
                 await sec_channel.send(embed=embed)
                 return
 
-            # 4. 외부 디스코드 초대 링크 유포 차단 (보안실 전송)
+            # 4. 외부 디스코드 초대 링크 유포 차단
             if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
                 try:
                     await message.delete()
@@ -891,12 +903,12 @@ async def on_message(message):
                     title="🚨 [보안 경고] 외부 초대 링크 유포 감지",
                     description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}",
                     color=discord.Color.orange(),
-                    timestamp=datetime.now()
+                    timestamp=discord.utils.utcnow()
                 )
                 await sec_channel.send(embed=embed)
                 return
 
-            # 5. 무단 대량 멘션 감지 (보안실 전송)
+            # 5. 무단 대량 멘션 감지
             total_mentions = len(message.mentions) + len(message.role_mentions)
             if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
                 try:
@@ -908,13 +920,13 @@ async def on_message(message):
                     title="🚨 [보안 경고] 대량 멘션 시도 감지",
                     description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**멘션 수:** {total_mentions}회",
                     color=discord.Color.orange(),
-                    timestamp=datetime.now()
+                    timestamp=discord.utils.utcnow()
                 )
                 await sec_channel.send(embed=embed)
                 return
 
-            # 6. 유연한 채팅 도배(Spam) 감지 (보안실 전송)
-            now = datetime.now()
+            # 6. 유연한 채팅 도배(Spam) 감지
+            now = discord.utils.utcnow()
             for k, ts_list in list(user_message_tracker.items()):
                 valid_ts = [t for t in ts_list if (now - t).total_seconds() < SPAM_TIME_WINDOW]
                 if valid_ts:
@@ -936,7 +948,7 @@ async def on_message(message):
                     title="⚠️ [보안 경고] 도배 행위 감지",
                     description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 도배 메시지 삭제",
                     color=discord.Color.orange(),
-                    timestamp=datetime.now()
+                    timestamp=discord.utils.utcnow()
                 )
                 await sec_channel.send(embed=embed)
                 return
@@ -1004,7 +1016,7 @@ async def command_list(ctx):
 @bot.command(name="블랙", aliases=["블랙등록", "차단등록"])
 @commands.has_permissions(administrator=True)
 async def add_to_blacklist(ctx, user_input: str, *, reason: str = "사유 미기재"):
-    user_id = parse_mention_id(user_input) or (int(user_input) if user_input.isdigit() else None)
+    user_id = parse_mention_id(user_input)
     if not user_id:
         return await ctx.send("❌ 유효한 유저 Mention 또는 ID를 입력해 주세요.")
 
@@ -1030,7 +1042,7 @@ async def add_to_blacklist(ctx, user_input: str, *, reason: str = "사유 미기
 @bot.command(name="블랙해제", aliases=["차단해제"])
 @commands.has_permissions(administrator=True)
 async def remove_from_blacklist(ctx, user_input: str):
-    user_id = parse_mention_id(user_input) or (int(user_input) if user_input.isdigit() else None)
+    user_id = parse_mention_id(user_input)
     if not user_id:
         return await ctx.send("❌ 유효한 유저 Mention 또는 ID를 입력해 주세요.")
 
@@ -1055,7 +1067,7 @@ async def remove_from_blacklist(ctx, user_input: str):
 @bot.command(name="블랙조회", aliases=["블랙확인"])
 @commands.has_permissions(administrator=True)
 async def check_blacklist(ctx, user_input: str):
-    user_id = parse_mention_id(user_input) or (int(user_input) if user_input.isdigit() else None)
+    user_id = parse_mention_id(user_input)
     if not user_id:
         return await ctx.send("❌ 유효한 유저 Mention 또는 ID를 입력해 주세요.")
 
@@ -1487,13 +1499,6 @@ async def update_bot(ctx):
 
 # ==================== [보안 및 유틸리티 헬퍼] ====================
 
-def parse_mention_id(text):
-    if not text:
-        return None
-    match = re.search(r"<@!?(\d+)>", str(text))
-    return int(match.group(1)) if match else None
-
-
 def is_ticket_channel(channel):
     return isinstance(channel, discord.TextChannel) and channel.name.startswith("티켓-")
 
@@ -1569,7 +1574,7 @@ async def fetch_member_or_none(guild, member_id):
 
 
 async def update_commission_progress(channel, progress):
-    now = datetime.now().isoformat()
+    now_str = discord.utils.utcnow().isoformat()
     status = "completed" if progress == 100 else "in_progress"
     async with aiosqlite.connect(DATABASE) as db:
         if progress == 100:
@@ -1579,7 +1584,7 @@ async def update_commission_progress(channel, progress):
                 SET progress = ?, status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
                 WHERE ticket_channel = ?
                 """,
-                (progress, status, now, now, channel.id)
+                (progress, status, now_str, now_str, channel.id)
             )
         else:
             await db.execute(
@@ -1588,7 +1593,7 @@ async def update_commission_progress(channel, progress):
                 SET progress = ?, status = ?, updated_at = ?
                 WHERE ticket_channel = ?
                 """,
-                (progress, status, now, channel.id)
+                (progress, status, now_str, channel.id)
             )
         await db.commit()
 
@@ -1781,7 +1786,7 @@ async def change_designer(ctx, designer: discord.Member):
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute(
             "UPDATE commissions SET designer_id = ?, updated_at = ? WHERE ticket_channel = ?",
-            (designer.id, datetime.now().isoformat(), ctx.channel.id)
+            (designer.id, discord.utils.utcnow().isoformat(), ctx.channel.id)
         )
         await db.commit()
 
@@ -1949,7 +1954,7 @@ async def change_ticket_owner(ctx, new_owner: discord.Member):
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute(
             "UPDATE commissions SET customer_id = ?, updated_at = ? WHERE ticket_channel = ?",
-            (new_owner.id, datetime.now().isoformat(), ctx.channel.id)
+            (new_owner.id, discord.utils.utcnow().isoformat(), ctx.channel.id)
         )
         await db.commit()
 
