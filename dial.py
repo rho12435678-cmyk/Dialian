@@ -10,15 +10,7 @@ import aiosqlite
 from config import *
 from database.DailyNotice import DailyNotice
 from database.backups import backup_database
-from database.database import (
-    DATABASE,
-    add_blacklist,
-    create_tables,
-    get_blacklist_info,
-    init_blacklist_table,
-    is_blacklisted,
-    remove_blacklist,
-)
+from database.database import DATABASE, create_tables
 from database.monthly_stats import (
     build_monthly_stats_embed,
     save_monthly_stats_message,
@@ -116,6 +108,40 @@ def get_bot_version():
         return result.stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+
+
+# ==================== [🔒 블랙리스트 헬퍼 함수] ====================
+
+async def init_blacklist_table(db):
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS blacklist (
+            user_id INTEGER PRIMARY KEY,
+            reason TEXT,
+            created_at TEXT
+        )
+    """)
+    await db.commit()
+
+async def is_blacklisted(db, user_id: int) -> bool:
+    cursor = await db.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,))
+    row = await cursor.fetchone()
+    return row is not None
+
+async def get_blacklist_info(db, user_id: int):
+    cursor = await db.execute("SELECT reason, created_at FROM blacklist WHERE user_id = ?", (user_id,))
+    return await cursor.fetchone()
+
+async def add_blacklist(db, user_id: int, reason: str):
+    now = datetime.now().isoformat()
+    await db.execute(
+        "INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)",
+        (user_id, reason, now)
+    )
+    await db.commit()
+
+async def remove_blacklist(db, user_id: int):
+    await db.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
+    await db.commit()
 
 
 # ==================== [티켓 지원 / 파트너 모달 및 뷰] ====================
