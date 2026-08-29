@@ -9,7 +9,63 @@ from database.views.ticket_guard import block_if_ticket_exists
 
 
 # --------------------------------------------------
-# 1. 메인 티켓 오픈 View
+# 0. 공통 손님 호출 함수
+# --------------------------------------------------
+async def handle_customer_call(
+    channel: discord.TextChannel,
+    sender: discord.Member,
+    interaction: discord.Interaction = None
+):
+    # DB에서 해당 티켓 채널의 손님(user_id) 조회
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute(
+            "SELECT user_id FROM commissions WHERE ticket_channel = ?",
+            (channel.id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if not row or not row[0]:
+        msg = "❌ 이 채널의 손님 정보를 DB에서 찾을 수 없습니다."
+        if interaction and not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await channel.send(msg)
+        return
+
+    customer_id = row[0]
+    customer = channel.guild.get_member(customer_id)
+
+    if not customer:
+        msg = "❌ 서버에서 손님 멤버를 찾을 수 없습니다."
+        if interaction and not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await channel.send(msg)
+        return
+
+    # DM 발송용 알림 임베드
+    embed = discord.Embed(
+        title="🔔 디자이너 호출 알림",
+        description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 손님을 찾고 계십니다!\n빠른 진행을 위해 아래 링크를 눌러 채널로 이동해 주세요.",
+        color=0x5865F2
+    )
+    embed.add_field(name="🔗 티켓 채널 바로가기", value=f"[여기 클릭해서 이동하기]({channel.jump_url})")
+
+    # 손님에게 DM 발송
+    try:
+        await customer.send(embed=embed)
+        result_text = f"✅ {customer.mention} 손님께 DM 호출 알림을 성공적으로 보냈습니다!"
+    except discord.Forbidden:
+        result_text = f"⚠️ {customer.mention} 손님님이 DM을 닫아두셔서 알림을 보내지 못했습니다."
+
+    if interaction and not interaction.response.is_done():
+        await interaction.response.send_message(result_text)
+    else:
+        await channel.send(result_text)
+
+
+# --------------------------------------------------
+# 1. 메인 티켓 오픈 View & 티켓 채널 호출 View
 # --------------------------------------------------
 class TicketOpenView(discord.ui.View):
     def __init__(self):
@@ -25,7 +81,6 @@ class TicketOpenView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-        # 이미 티켓이 존재하는지 확인
         if await block_if_ticket_exists(interaction):
             return
 
@@ -34,6 +89,23 @@ class TicketOpenView(discord.ui.View):
             view=CategoryView(),
             ephemeral=True
         )
+
+
+class TicketCallView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="🔔 손님 호출",
+        style=discord.ButtonStyle.primary,
+        custom_id="ticket_call_btn"
+    )
+    async def call_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await handle_customer_call(interaction.channel, interaction.user, interaction)
 
 
 # --------------------------------------------------
@@ -66,7 +138,7 @@ class ProgressModal(Modal, title="📊 진행률 설정"):
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute(
                 "UPDATE commissions SET progress = ? WHERE ticket_channel = ?",
-                (int_val, channel.id) # DB 타입 통일을 위해 정수(INTEGER) 저장
+                (int_val, channel.id)
             )
             await db.commit()
 
@@ -111,7 +183,14 @@ class DesignerDMControlView(View):
         super().__init__(timeout=None)
         self.ticket_channel_id = ticket_channel_id
 
-    @button(label="📊 진행률 설정", style=discord.ButtonStyle.primary)
+    @button(label="🔔 손님 호출", style=discord.ButtonStyle.primary)
+    async def call_customer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+        await handle_customer_call(channel, interaction.user, interaction)
+
+    @button(label="📊 진행률 설정", style=discord.ButtonStyle.secondary)
     async def set_progress(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ProgressModal(self.ticket_channel_id))
 
@@ -151,7 +230,6 @@ class DesignerDMControlView(View):
         await channel.send("🔒 **디자이너 요청으로 5초 후 티켓이 종료됩니다.**")
         await interaction.response.send_message("✅ 티켓 종료 안내 메시지를 전송했습니다.", ephemeral=True)
 
-        # DB 상에서 티켓 상태를 closed로 먼저 업데이트
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute(
                 "UPDATE commissions SET status = 'closed' WHERE ticket_channel = ?",
@@ -159,7 +237,6 @@ class DesignerDMControlView(View):
             )
             await db.commit()
 
-        # 5초 후 실제 채널 삭제
         await asyncio.sleep(5)
         try:
             await channel.delete(reason="디자이너 컨트롤 패널에 의한 티켓 종료")
