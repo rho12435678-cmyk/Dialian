@@ -10,7 +10,15 @@ import aiosqlite
 from config import *
 from database.DailyNotice import DailyNotice
 from database.backups import backup_database
-from database.database import DATABASE, create_tables
+from database.database import (
+    DATABASE,
+    add_blacklist,
+    create_tables,
+    get_blacklist_info,
+    init_blacklist_table,
+    is_blacklisted,
+    remove_blacklist,
+)
 from database.monthly_stats import (
     build_monthly_stats_embed,
     save_monthly_stats_message,
@@ -160,20 +168,17 @@ async def check_and_punish_mass_action(guild: discord.Guild, user_id: int, actio
     if len(timestamps) >= limit:
         member = guild.get_member(user_id)
         if member:
-            # 1. 관리자 및 일반 역할 즉시 제거
             roles_to_remove = [r for r in member.roles if r != guild.default_role and not r.managed]
             try:
                 await member.remove_roles(*roles_to_remove, reason=f"대량 조작 감지 ({action_type})")
             except Exception as e:
                 print(f"[역할 박탈 실패] {e}")
 
-            # 2. 24시간 격리 조치
             try:
                 await member.timeout(discord.utils.utcnow() + timedelta(hours=24), reason=f"보안 위협: 대량 {action_type} 시도")
             except Exception:
                 pass
 
-            # 3. 보안 로그 전송
             await log_security_event(
                 guild,
                 f"대량 {action_type} 감지 - 자동 차단 집행",
@@ -208,6 +213,7 @@ async def prevent_duplicate_command_processing(ctx):
 
 async def init_extended_db():
     async with aiosqlite.connect(DATABASE) as db:
+        await init_blacklist_table(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS point_ranking_panel (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -481,6 +487,27 @@ async def update_designer_tier_panel_message(bot_instance):
 async def on_member_join(member: discord.Member):
     guild = member.guild
 
+    # 🚨 0. 블랙리스트 유저 즉시 자동 차단 (0.1초 반응)
+    async with aiosqlite.connect(DATABASE) as db:
+        if await is_blacklisted(db, member.id):
+            info = await get_blacklist_info(db, member.id)
+            reason = info[0] if info else "사유 미기재"
+            
+            try:
+                await member.ban(reason=f"[블랙리스트 자동 차단] 사유: {reason}")
+            except Exception as e:
+                print(f"[블랙리스트 자동 차단 실패] {e}")
+
+            await log_security_event(
+                guild,
+                "🚫 블랙리스트 유저 자동 차단 (Ban)",
+                f"**차단 대상:** {member.mention} (`{member.id}`)\n"
+                f"**등록된 사유:** `{reason}`\n"
+                f"**조치 내용:** 서버 재입장 시도 즉시 영구 차단 집행",
+                discord.Color.dark_red()
+            )
+            return
+
     # 1. Anti-Bot: 승인되지 않은 봇 차단
     if member.bot:
         try:
@@ -512,7 +539,6 @@ async def on_member_update(before, after):
 async def on_member_remove(member):
     await update_designer_tier_panel_message(bot)
     
-    # 대량 추방(Kick) 감지
     guild = member.guild
     try:
         async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
@@ -524,7 +550,6 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_member_ban(guild, user):
-    # 대량 차단(Ban) 감지
     try:
         async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
             if entry.target.id == user.id and (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 5:
@@ -535,7 +560,6 @@ async def on_member_ban(guild, user):
 
 @bot.event
 async def on_webhooks_update(channel):
-    # Anti-Webhook: 대량 웹훅 생성 실시간 감지
     guild = channel.guild
     try:
         async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
@@ -547,7 +571,6 @@ async def on_webhooks_update(channel):
 
 @bot.event
 async def on_guild_role_update(before, after):
-    # Permission Guard: @everyone 역할 위험 권한 부여 차단
     if after.is_default():
         dangerous_perms = ['administrator', 'manage_roles', 'manage_channels', 'kick_members', 'ban_members', 'mention_everyone']
         before_perms = dict(before.permissions)
@@ -720,7 +743,7 @@ async def on_message(message):
     guild = message.guild
 
     # ----------------------------------------------------
-    # 🛡️ File Security: 위험 파일 확장자 첨부 차단 (관리자 포함 적용)
+    # 🛡️ File Security: 위험 파일 확장자 첨부 차단
     # ----------------------------------------------------
     if message.attachments:
         for attachment in message.attachments:
@@ -781,7 +804,6 @@ async def on_message(message):
             )
             await message.channel.send(embed=embed, delete_after=7)
 
-            # 보안 채널 비밀 알림 전송
             security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
             if security_channel:
                 log_embed = discord.Embed(
@@ -868,9 +890,6 @@ async def on_message(message):
             await message.channel.send(embed=embed, delete_after=7)
             return
 
-    # ----------------------------------------------------
-    # 기존 포인트 감지 로직
-    # ----------------------------------------------------
     if hasattr(message.channel, "id") and message.channel.id == WORK_SHARE_CHANNEL_ID:
         can_earn, _ = await check_and_increment_daily_limit(message.author.id, "work_share")
         if can_earn:
@@ -932,6 +951,10 @@ async def command_list(ctx):
             "`!진행 0|25|50|75|100` `!예상 [시간]` `!완료` `!티켓정보` `!고객` `!소유자변경 @유저` `!청소 1~100`\n"
             "`!계좌등록 @유저 은행 계좌번호 예금주` `!계좌목록` `!계좌삭제 @유저`\n"
             "`!통계` `!진행티켓` `!강제종료`\n\n"
+            "**[🔒 블랙리스트 관리]**\n"
+            "`!블랙 @유저/ID [사유]` (DB 등록 및 즉시 영구 차단)\n"
+            "`!블랙해제 @유저/ID` (DB 삭제 및 서버 차단 해제)\n"
+            "`!블랙조회 @유저/ID` (블랙리스트 여부 및 사유 조회)\n\n"
             "**[패널 및 가이드 설정]**\n"
             "`!포인트안내` (포인트 적립 채널에 공지 임베드 전송)\n"
             "`!디자이너등급패널` (디자이너 등급 실시간 패널 생성)\n"
@@ -948,6 +971,85 @@ async def command_list(ctx):
         color=discord.Color.blurple(),
     )
     await ctx.send(embed=embed)
+
+
+# ==================== [🔒 블랙리스트 명령어] ====================
+
+@bot.command(name="블랙", aliases=["블랙등록", "차단등록"])
+@commands.has_permissions(administrator=True)
+async def add_to_blacklist(ctx, user_input: str, *, reason: str = "사유 미기재"):
+    user_id = parse_mention_id(user_input) or (int(user_input) if user_input.isdigit() else None)
+    if not user_id:
+        return await ctx.send("❌ 유효한 유저 Mention 또는 ID를 입력해 주세요.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        await add_blacklist(db, user_id, reason)
+
+    # 서버에 유저가 존재하면 즉시 차단
+    member = ctx.guild.get_member(user_id)
+    if member:
+        try:
+            await member.ban(reason=f"[관리자 등록 블랙리스트] {reason}")
+        except Exception as e:
+            await ctx.send(f"⚠️ DB 등록 완료되었으나, 서버 차단 실패: `{e}`")
+
+    await ctx.send(f"✅ **ID: `{user_id}`** 님이 블랙리스트에 등록되었습니다. (사유: {reason})")
+    await log_security_event(
+        ctx.guild,
+        "🚫 블랙리스트 유저 수동 등록",
+        f"**처리자:** {ctx.author.mention}\n**대상 유저 ID:** `{user_id}`\n**사유:** {reason}",
+        discord.Color.red()
+    )
+
+
+@bot.command(name="블랙해제", aliases=["차단해제"])
+@commands.has_permissions(administrator=True)
+async def remove_from_blacklist(ctx, user_input: str):
+    user_id = parse_mention_id(user_input) or (int(user_input) if user_input.isdigit() else None)
+    if not user_id:
+        return await ctx.send("❌ 유효한 유저 Mention 또는 ID를 입력해 주세요.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        await remove_blacklist(db, user_id)
+
+    # 디스코드 서버 차단 목록에서도 해제 시도
+    try:
+        user = await bot.fetch_user(user_id)
+        await ctx.guild.unban(user, reason="[관리자 요청] 블랙리스트 해제")
+    except Exception:
+        pass
+
+    await ctx.send(f"✅ **ID: `{user_id}`** 님의 블랙리스트 등록 및 차단이 해제되었습니다.")
+    await log_security_event(
+        ctx.guild,
+        "🟢 블랙리스트 해제",
+        f"**처리자:** {ctx.author.mention}\n**대상 유저 ID:** `{user_id}`",
+        discord.Color.green()
+    )
+
+
+@bot.command(name="블랙조회", aliases=["블랙확인"])
+@commands.has_permissions(administrator=True)
+async def check_blacklist(ctx, user_input: str):
+    user_id = parse_mention_id(user_input) or (int(user_input) if user_input.isdigit() else None)
+    if not user_id:
+        return await ctx.send("❌ 유효한 유저 Mention 또는 ID를 입력해 주세요.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        info = await get_blacklist_info(db, user_id)
+
+    if info:
+        reason, created_at = info
+        embed = discord.Embed(
+            title="🚫 블랙리스트 유저 정보",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="유저 ID", value=f"`{user_id}`", inline=False)
+        embed.add_field(name="등록 사유", value=f"`{reason}`", inline=False)
+        embed.add_field(name="등록 일시", value=f"`{created_at}`", inline=False)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send(f"ℹ️ **ID: `{user_id}`** 님은 블랙리스트에 등록되어 있지 않습니다.")
 
 
 @bot.command(name="포인트안내")
