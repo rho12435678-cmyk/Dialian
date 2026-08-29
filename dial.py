@@ -1988,6 +1988,12 @@ async def verify_panel(ctx):
 
 @tasks.loop(hours=12)
 async def auto_chat_guide_loop():
+    # config.py 및 전역 변수에서 필요한 채널 ID 동적 로드
+    inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID") or SECURITY_LOG_CHANNEL_ID
+    example_ch = globals().get("EXAMPLE_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
+    designer_stats_ch = globals().get("DESIGNER_STATS_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
+    reviews_ch = globals().get("REVIEWS_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
+
     kr_channel = bot.get_channel(KR_CHAT_CHANNEL_ID)
     if kr_channel:
         embed_kr = discord.Embed(
@@ -2001,8 +2007,11 @@ async def auto_chat_guide_loop():
         embed_kr.add_field(
             name="📌 주요 이용 안내 채널",
             value=(
-                f"• <#{SECURITY_LOG_CHANNEL_ID}> : 커미션 주문 및 문의/지원 신청\n"
-                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황"
+                f"• <#{inquiry_ch}> : 커미션 주문 및 문의/지원 신청\n"
+                f"• <#{example_ch}> : 디자이너 샘플 및 예시작 감상\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황\n"
+                f"• <#{designer_stats_ch}> : 디자이너 작업 완료 통계\n"
+                f"• <#{reviews_ch}> : 실제 이용 고객님들의 솔직한 후기"
             ),
             inline=False
         )
@@ -2033,8 +2042,11 @@ async def auto_chat_guide_loop():
         embed_en.add_field(
             name="📌 Essential Channels",
             value=(
-                f"• <#{SECURITY_LOG_CHANNEL_ID}> : Order commissions & Partner/Dev inquiries\n"
-                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories"
+                f"• <#{inquiry_ch}> : Order commissions & Partner/Dev inquiries\n"
+                f"• <#{example_ch}> : Designer portfolio & sample showcase\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories\n"
+                f"• <#{designer_stats_ch}> : Designer completed work statistics\n"
+                f"• <#{reviews_ch}> : Genuine customer reviews & feedback"
             ),
             inline=False
         )
