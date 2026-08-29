@@ -67,8 +67,8 @@ DESIGNER_ROLE_IDS = {
 # ----------------------------------------------------
 # 🛡️ 통합 보안 설정 및 패턴 리스트
 # ----------------------------------------------------
-user_message_tracker = {}  # 도배 감지용 변수 (메모리 누수 방지 적용)
-admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수 (메모리 누수 방지 적용)
+user_message_tracker = {}  # 도배 감지용 변수
+admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수
 
 SPAM_MESSAGE_LIMIT = 4       # 감지 시간 내 허용 메시지 수
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
@@ -98,10 +98,10 @@ DANGEROUS_EXTENSIONS = (
     '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2', '.zip', '.rar', '.7z'
 )
 
-# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식 (하이픈 미포함 패턴 강화)
+# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
 DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
 PHONE_REGEX = r"01[016789]-?\d{3,4}-?\d{4}"
-RRN_REGEX = r"\d{6}-?[1-4]\d{6}" # 주민등록번호 (하이픈 유무 모두 포함)
+RRN_REGEX = r"\d{6}-?[1-4]\d{6}"
 
 
 def get_bot_version():
@@ -116,155 +116,6 @@ def get_bot_version():
         return result.stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
-
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
-
-daily_notice = None
-update_notice_sent = False
-bot_started_at = datetime.now()
-
-PROCESSED_TABLES = {
-    "processed_commands",
-    "processed_command_errors",
-}
-
-
-# ==================== [🛡️ 보안 & 로그 헬퍼 함수] ====================
-
-async def log_security_event(guild: discord.Guild, title: str, description: str, color=discord.Color.red()):
-    """보안 로그 채널에 즉시 경고 알림 송신"""
-    if not guild:
-        return
-    sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
-    if sec_channel:
-        embed = discord.Embed(
-            title=f"🛡️ [보안 경고] {title}",
-            description=description,
-            color=color,
-            timestamp=datetime.now()
-        )
-        try:
-            await sec_channel.send(embed=embed)
-        except Exception as e:
-            print(f"[보안 로그 전송 실패] {e}")
-
-
-async def check_and_punish_mass_action(guild: discord.Guild, user_id: int, action_type: str, limit: int):
-    """소유자를 제외한 관리자의 대량 조작(Raid/Nuke) 감지 및 권한 회수"""
-    if not guild or user_id == guild.owner_id:
-        return  # 👑 소유자 면책
-
-    now = datetime.now()
-    tracker_key = f"{user_id}:{action_type}"
-    
-    # 🧹 [메모리 누수 해결] 만료된 관리자 추적 데이터 및 빈 키 정리
-    for k, ts_list in list(admin_action_tracker.items()):
-        valid_ts = [t for t in ts_list if (now - t).total_seconds() < MASS_ACTION_WINDOW * 2]
-        if valid_ts:
-            admin_action_tracker[k] = valid_ts
-        else:
-            admin_action_tracker.pop(k, None)
-
-    timestamps = admin_action_tracker.get(tracker_key, [])
-    timestamps = [t for t in timestamps if (now - t).total_seconds() < MASS_ACTION_WINDOW]
-    timestamps.append(now)
-    admin_action_tracker[tracker_key] = timestamps
-
-    if len(timestamps) >= limit:
-        member = guild.get_member(user_id)
-        if member:
-            roles_to_remove = [r for r in member.roles if r != guild.default_role and not r.managed]
-            try:
-                await member.remove_roles(*roles_to_remove, reason=f"대량 조작 감지 ({action_type})")
-            except Exception as e:
-                print(f"[역할 박탈 실패] {e}")
-
-            try:
-                await member.timeout(discord.utils.utcnow() + timedelta(hours=24), reason=f"보안 위협: 대량 {action_type} 시도")
-            except Exception:
-                pass
-
-            await log_security_event(
-                guild,
-                f"대량 {action_type} 감지 - 자동 차단 집행",
-                f"**행위자:** {member.mention} (`{member.id}`)\n"
-                f"**감지 유형:** `{action_type}` (10초 내 {len(timestamps)}회 시도)\n"
-                f"**조치 내용:** 모든 역할 박탈 및 24시간 격리(Timeout)",
-                discord.Color.dark_red()
-            )
-
-
-async def claim_once(table_name: str, message_id: int) -> bool:
-    if table_name not in PROCESSED_TABLES:
-        raise ValueError("허용되지 않은 처리 기록 테이블입니다.")
-
-    async with aiosqlite.connect(DATABASE) as db:
-        cursor = await db.execute(
-            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
-            (message_id,)
-        )
-        await db.commit()
-        return cursor.rowcount == 1
-
-
-@bot.check
-async def prevent_duplicate_command_processing(ctx):
-    if ctx.command and ctx.command.name in ["업데이트", "업데이트확인"]:
-        return True
-    return await claim_once("processed_commands", ctx.message.id)
-
-
-# ==================== [DB 초기화] ====================
-
-async def init_extended_db():
-    async with aiosqlite.connect(DATABASE) as db:
-        await init_blacklist_table(db)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS point_ranking_panel (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                channel_id INTEGER,
-                message_id INTEGER
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS designer_tier_panel (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                channel_id INTEGER,
-                message_id INTEGER
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS point_reset_logs (
-                year_month TEXT PRIMARY KEY
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS commissions (
-                ticket_channel INTEGER PRIMARY KEY,
-                customer_id INTEGER,
-                designer_id INTEGER,
-                category TEXT,
-                status TEXT,
-                progress INTEGER DEFAULT 0,
-                created_at TEXT,
-                completed_at TEXT,
-                updated_at TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS daily_activity_limits (
-                user_id INTEGER,
-                action_type TEXT,
-                date TEXT,
-                count INTEGER DEFAULT 0,
-                PRIMARY KEY (user_id, action_type, date)
-            )
-        """)
-        await db.commit()
 
 
 # ==================== [티켓 지원 / 파트너 모달 및 뷰] ====================
@@ -415,6 +266,164 @@ class CombinedTicketOpenView(ui.View):
         await interaction.followup.send(embed=embed, view=CategorySelectView(), ephemeral=True)
 
 
+# ==================== [봇 클래스 정의 및 Persistent View 등록] ====================
+
+class DialianBot(commands.Bot):
+    async def setup_hook(self):
+        # 🔑 봇 재시작 시에도 기존 버튼/메뉴가 정상 동작하도록 Persistent View 사전 등록
+        self.add_view(CombinedTicketOpenView())
+        self.add_view(CategorySelectView())
+        self.add_view(VerifyView())
+        self.add_view(TicketCloseView())
+        self.add_view(ClaimTicketView())
+
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+bot = DialianBot(command_prefix="!", intents=intents, help_command=None)
+
+daily_notice = None
+update_notice_sent = False
+bot_started_at = datetime.now()
+
+PROCESSED_TABLES = {
+    "processed_commands",
+    "processed_command_errors",
+}
+
+
+# ==================== [🛡️ 보안 & 로그 헬퍼 함수] ====================
+
+async def log_security_event(guild: discord.Guild, title: str, description: str, color=discord.Color.red()):
+    if not guild:
+        return
+    sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
+    if sec_channel:
+        embed = discord.Embed(
+            title=f"🛡️ [보안 경고] {title}",
+            description=description,
+            color=color,
+            timestamp=datetime.now()
+        )
+        try:
+            await sec_channel.send(embed=embed)
+        except Exception as e:
+            print(f"[보안 로그 전송 실패] {e}")
+
+
+async def check_and_punish_mass_action(guild: discord.Guild, user_id: int, action_type: str, limit: int):
+    if not guild or user_id == guild.owner_id:
+        return
+
+    now = datetime.now()
+    tracker_key = f"{user_id}:{action_type}"
+    
+    for k, ts_list in list(admin_action_tracker.items()):
+        valid_ts = [t for t in ts_list if (now - t).total_seconds() < MASS_ACTION_WINDOW * 2]
+        if valid_ts:
+            admin_action_tracker[k] = valid_ts
+        else:
+            admin_action_tracker.pop(k, None)
+
+    timestamps = admin_action_tracker.get(tracker_key, [])
+    timestamps = [t for t in timestamps if (now - t).total_seconds() < MASS_ACTION_WINDOW]
+    timestamps.append(now)
+    admin_action_tracker[tracker_key] = timestamps
+
+    if len(timestamps) >= limit:
+        member = guild.get_member(user_id)
+        if member:
+            roles_to_remove = [r for r in member.roles if r != guild.default_role and not r.managed]
+            try:
+                await member.remove_roles(*roles_to_remove, reason=f"대량 조작 감지 ({action_type})")
+            except Exception as e:
+                print(f"[역할 박탈 실패] {e}")
+
+            try:
+                await member.timeout(discord.utils.utcnow() + timedelta(hours=24), reason=f"보안 위협: 대량 {action_type} 시도")
+            except Exception:
+                pass
+
+            await log_security_event(
+                guild,
+                f"대량 {action_type} 감지 - 자동 차단 집행",
+                f"**행위자:** {member.mention} (`{member.id}`)\n"
+                f"**감지 유형:** `{action_type}` (10초 내 {len(timestamps)}회 시도)\n"
+                f"**조치 내용:** 모든 역할 박탈 및 24시간 격리(Timeout)",
+                discord.Color.dark_red()
+            )
+
+
+async def claim_once(table_name: str, message_id: int) -> bool:
+    if table_name not in PROCESSED_TABLES:
+        raise ValueError("허용되지 않은 처리 기록 테이블입니다.")
+
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
+            (message_id,)
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+@bot.check
+async def prevent_duplicate_command_processing(ctx):
+    if ctx.command and ctx.command.name in ["업데이트", "업데이트확인"]:
+        return True
+    return await claim_once("processed_commands", ctx.message.id)
+
+
+# ==================== [DB 초기화] ====================
+
+async def init_extended_db():
+    async with aiosqlite.connect(DATABASE) as db:
+        await init_blacklist_table(db)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS point_ranking_panel (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                channel_id INTEGER,
+                message_id INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS designer_tier_panel (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                channel_id INTEGER,
+                message_id INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS point_reset_logs (
+                year_month TEXT PRIMARY KEY
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS commissions (
+                ticket_channel INTEGER PRIMARY KEY,
+                customer_id INTEGER,
+                designer_id INTEGER,
+                category TEXT,
+                status TEXT,
+                progress INTEGER DEFAULT 0,
+                created_at TEXT,
+                completed_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS daily_activity_limits (
+                user_id INTEGER,
+                action_type TEXT,
+                date TEXT,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, action_type, date)
+            )
+        """)
+        await db.commit()
+
+
 # ==================== [디자이너 등급 패널 로직] ====================
 
 async def build_designer_tier_embed(guild):
@@ -496,7 +505,6 @@ async def update_designer_tier_panel_message(bot_instance):
 async def on_member_join(member: discord.Member):
     guild = member.guild
 
-    # 🚨 0. 블랙리스트 유저 즉시 자동 차단 (0.1초 반응)
     async with aiosqlite.connect(DATABASE) as db:
         if await is_blacklisted(db, member.id):
             info = await get_blacklist_info(db, member.id)
@@ -517,7 +525,6 @@ async def on_member_join(member: discord.Member):
             )
             return
 
-    # 1. Anti-Bot: 승인되지 않은 봇 차단 (Audit Log 지연 고려: 1초 대기 및 15초 윈도우, limit=5)
     if member.bot:
         try:
             await asyncio.sleep(1.0)
@@ -771,9 +778,6 @@ async def on_message(message):
     guild = message.guild
 
     try:
-        # ----------------------------------------------------
-        # 🛡️ File Security: 위험 파일 확장자 첨부 차단
-        # ----------------------------------------------------
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
@@ -793,9 +797,6 @@ async def on_message(message):
                     )
                     return
 
-        # ----------------------------------------------------
-        # 🔒 PII Guard: 개인정보/토큰 유출 차단
-        # ----------------------------------------------------
         if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content) or re.search(PHONE_REGEX, message.content):
             try:
                 await message.delete()
@@ -810,13 +811,9 @@ async def on_message(message):
             )
             return
 
-        # ----------------------------------------------------
-        # 🛡️ 통합 서버 보안 및 뒷매 차단 시스템 (소유자 면책)
-        # ----------------------------------------------------
         is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
         if not is_staff and author.id != guild.owner_id:
             
-            # 1. 뒷매 / 사적 유인 키워드 감지
             msg_content = message.content.replace(" ", "").lower()
             found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
 
@@ -852,7 +849,6 @@ async def on_message(message):
                     pass
                 return
 
-            # 2. 외부 초대 링크 차단
             if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
                 try:
                     await message.delete()
@@ -872,7 +868,6 @@ async def on_message(message):
                     pass
                 return
 
-            # 3. 대량 멘션 차단
             total_mentions = len(message.mentions) + len(message.role_mentions)
             if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
                 try:
@@ -893,7 +888,6 @@ async def on_message(message):
                     pass
                 return
 
-            # 4. 도배 (Anti-Spam) 실시간 감지 (메모리 누수 해결 적용)
             now = datetime.now()
             for k, ts_list in list(user_message_tracker.items()):
                 valid_ts = [t for t in ts_list if (now - t).total_seconds() < SPAM_TIME_WINDOW]
@@ -939,7 +933,6 @@ async def on_message(message):
         print(f"[on_message 보안 및 이벤트 처리 중 예외 발생] {e}")
         traceback.print_exc()
 
-    # 🛡️ [예외 발생 시 명령어 미작동 문제 해결] 보안 검사 중 오류가 나더라도 명령어 처리가 정상 실행되도록 보장
     await bot.process_commands(message)
 
 
@@ -1025,7 +1018,6 @@ async def add_to_blacklist(ctx, user_input: str, *, reason: str = "사유 미기
     async with aiosqlite.connect(DATABASE) as db:
         await add_blacklist(db, user_id, reason)
 
-    # 서버에 유저가 존재하면 즉시 차단
     member = ctx.guild.get_member(user_id)
     if member:
         try:
@@ -1052,7 +1044,6 @@ async def remove_from_blacklist(ctx, user_input: str):
     async with aiosqlite.connect(DATABASE) as db:
         await remove_blacklist(db, user_id)
 
-    # 디스코드 서버 차단 목록에서도 해제 시도
     try:
         user = await bot.fetch_user(user_id)
         await ctx.guild.unban(user, reason="[관리자 요청] 블랙리스트 해제")
