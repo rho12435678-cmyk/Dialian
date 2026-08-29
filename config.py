@@ -62,7 +62,4 @@ DESIGNER_ROLE_IDS = {
 TARGET_REGULAR_POINTS = 1000   # 단골 승급 기준 포인트
 REGULAR_DISCOUNT_RATE = 0.15   # 단골 할인율 (15%)
 
-DAILY_ACTION_LIMIT = 3         # 일일 적립 제한 횟수 (작품공유/피드백)
-WORK_SHARE_POINTS = 15         # 작품공유 1회 적립 포인트
-FEEDBACK_POINTS = 10           # 피드백 반응 1회 적립 포인트
 GACHA_COST = 20                # 뽑기 1회 소모 포인트
