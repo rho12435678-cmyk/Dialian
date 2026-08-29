@@ -50,7 +50,7 @@ EN_CHAT_CHANNEL_ID = 1527725232864100362
 
 SECURITY_LOG_CHANNEL_ID = 1505102694917079132 
 
-# 서비스 지원용 채널 ID (환경 설정에 맞게 지정)
+# 서비스 지원용 채널 ID
 COMMAND_CHANNEL_ID = 1505102694917079132 
 
 # 포인트 및 미니게임 설정 상수
@@ -66,11 +66,11 @@ DESIGNER_ROLE_IDS = {
 # 🛡️ 통합 보안 설정 및 패턴 리스트
 # ----------------------------------------------------
 user_message_tracker = {}  # 도배 감지용 변수
-admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수
+admin_action_tracker = {}   # 대량 행위 추적용 변수
 
-SPAM_MESSAGE_LIMIT = 5       # 감지 시간 내 허용 메시지 수 (유연하게 조정)
+SPAM_MESSAGE_LIMIT = 5       # 감지 시간 내 허용 메시지 수
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
-MAX_MENTION_LIMIT = 6        # 한 메시지 당 최대 허용 멘션 수 (유연하게 조정)
+MAX_MENTION_LIMIT = 6        # 한 메시지 당 최대 허용 멘션 수
 
 # 대량 테러 감지 임계값 (10초 이내 실행 횟수)
 MASS_ACTION_WINDOW = 10.0
@@ -89,17 +89,17 @@ DM_TRADE_KEYWORDS = [
     "개인메시지", "개인 메세지", "뒷거래"
 ]
 
-# ⚠️ 파일 보안: 위험 실행 파일 확장자만 차단 (zip, rar, 7z, html 등은 공유 가능하도록 허용)
+# ⚠️ 위험 실행 파일 확장자 차단 (zip, rar, 7z, html 등 공유 허용)
 DANGEROUS_EXTENSIONS = (
     '.exe', '.bat', '.ps1', '.scr', '.vbs', '.cmd', '.jar',
     '.pif', '.application', '.gadget', '.msi', '.msp', '.com', '.hta', '.cpl',
     '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2'
 )
 
-# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
+# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식 (단어 경계 \b 추가로 디스코드 ID 오감지 차단)
 DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
-PHONE_REGEX = r"01[016789]-?\d{3,4}-?\d{4}"
-RRN_REGEX = r"\d{6}-?[1-8]\d{6}"
+PHONE_REGEX = r"\b01[016789]-?\d{3,4}-?\d{4}\b"
+RRN_REGEX = r"\b\d{6}-[1-8]\d{6}\b"
 
 
 def get_bot_version():
@@ -412,6 +412,16 @@ async def init_extended_db():
     async with aiosqlite.connect(DATABASE) as db:
         await init_blacklist_table(db)
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS processed_commands (
+                message_id INTEGER PRIMARY KEY
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS processed_command_errors (
+                message_id INTEGER PRIMARY KEY
+            )
+        """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS point_ranking_panel (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 channel_id INTEGER,
@@ -628,12 +638,12 @@ async def on_webhooks_update(channel):
 async def on_guild_role_update(before, after):
     if after.is_default():
         dangerous_perms = ['administrator', 'manage_roles', 'manage_channels', 'kick_members', 'ban_members', 'mention_everyone']
-        before_perms = dict(before.permissions)
-        after_perms = dict(after.permissions)
         
         has_violation = False
         for perm in dangerous_perms:
-            if not before_perms.get(perm) and after_perms.get(perm):
+            before_val = getattr(before.permissions, perm, False)
+            after_val = getattr(after.permissions, perm, False)
+            if not before_val and after_val:
                 has_violation = True
                 break
                 
@@ -807,9 +817,10 @@ async def on_message(message):
 
     author = message.author
     guild = message.guild
+    sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID) or message.channel
 
     try:
-        # 1. 실행 파일 감지 (압축파일/웹파일 제외되어 공유 가능)
+        # 1. 실행 파일 감지 (보안실 채널 전송)
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
@@ -817,37 +828,37 @@ async def on_message(message):
                         await message.delete()
                     except Exception:
                         pass
-                    await message.channel.send(
-                        f"🚨 {author.mention}님, 보안 위험 실행 파일(`{attachment.filename}`)은 업로드할 수 없습니다.",
-                        delete_after=6
+                    
+                    embed = discord.Embed(
+                        title="🚨 [보안 경고] 위험 실행 파일 업로드 감지",
+                        description=f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**발생 채널:** {message.channel.mention}",
+                        color=discord.Color.red(),
+                        timestamp=datetime.now()
                     )
-                    await log_security_event(
-                        guild,
-                        "⚠️ 위험 실행 파일 업로드 차단",
-                        f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**채널:** {message.channel.mention}",
-                        discord.Color.red()
-                    )
+                    await sec_channel.send(embed=embed)
                     return
 
-        # 2. 민감한 개인정보/토큰 보호
-        if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content) or re.search(PHONE_REGEX, message.content):
+        # 2. 민감한 개인정보/토큰 보호 (멘션 ID 제거 후 검사)
+        clean_content = re.sub(r"<@!?\d+>|<@&\d+>|<#\d+>", "", message.content)
+        if re.search(DISCORD_TOKEN_REGEX, clean_content) or re.search(RRN_REGEX, clean_content) or re.search(PHONE_REGEX, clean_content):
             try:
                 await message.delete()
             except Exception:
                 pass
-            await message.channel.send(f"🔒 {author.mention}님, 토큰 및 민감한 개인정보 보호를 위해 메시지가 삭제되었습니다.", delete_after=5)
-            await log_security_event(
-                guild,
-                "🔒 민감 정보 유출 차단 (PII Guard)",
-                f"**유저:** {author.mention} (`{author.id}`)\n**채널:** {message.channel.mention}",
-                discord.Color.gold()
+            
+            embed = discord.Embed(
+                title="🔒 [보안 경고] 민감 정보 유출 차단 (PII Guard)",
+                description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 토큰/개인정보 유출 위험 메시지 즉시 삭제",
+                color=discord.Color.gold(),
+                timestamp=datetime.now()
             )
+            await sec_channel.send(embed=embed)
             return
 
         is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
         if not is_staff and author.id != guild.owner_id:
             
-            # 3. 사적 거래 (뒷매) 키워드 차단 - 타임아웃 처리는 제거, 안내 및 삭제만 진행
+            # 3. 사적 거래 (뒷매) 키워드 차단 (보안실 전송)
             msg_content = message.content.replace(" ", "").lower()
             found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
 
@@ -858,27 +869,18 @@ async def on_message(message):
                     pass
 
                 embed = discord.Embed(
-                    title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 안내",
-                    description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
-                    color=discord.Color.orange()
+                    title="🕵️‍♂️ [보안 경고] 뒷매 의심 키워드 감지",
+                    description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
+                                f"**적발 키워드:** `{found_keyword[0]}`\n"
+                                f"**원본 메시지:** {message.content}\n"
+                                f"**발생 채널:** {message.channel.mention}",
+                    color=discord.Color.orange(),
+                    timestamp=datetime.now()
                 )
-                await message.channel.send(embed=embed, delete_after=7)
-
-                security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
-                if security_channel:
-                    log_embed = discord.Embed(
-                        title="🕵️‍♂️ [뒷매 의심 키워드 감지]",
-                        description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
-                                    f"**적발 키워드:** `{found_keyword[0]}`\n"
-                                    f"**원본 메시지:** {message.content}\n"
-                                    f"**발생 채널:** {message.channel.mention}",
-                        color=discord.Color.orange(),
-                        timestamp=datetime.now()
-                    )
-                    await security_channel.send(embed=log_embed)
+                await sec_channel.send(embed=embed)
                 return
 
-            # 4. 외부 디스코드 초대 링크 유포 차단 - 타임아웃 처리는 제거, 안내 및 삭제만 진행
+            # 4. 외부 디스코드 초대 링크 유포 차단 (보안실 전송)
             if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
                 try:
                     await message.delete()
@@ -886,14 +888,15 @@ async def on_message(message):
                     pass
                 
                 embed = discord.Embed(
-                    title="🚨 [보안 경고] 외부 초대 링크 유포 차단",
-                    description=f"{author.mention}님, 서버 내 외부 디스코드 초대 링크 유포는 금지되어 있습니다.",
-                    color=discord.Color.orange()
+                    title="🚨 [보안 경고] 외부 초대 링크 유포 감지",
+                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}",
+                    color=discord.Color.orange(),
+                    timestamp=datetime.now()
                 )
-                await message.channel.send(embed=embed, delete_after=5)
+                await sec_channel.send(embed=embed)
                 return
 
-            # 5. 무단 대량 멘션 감지 (기준 완화: MAX_MENTION_LIMIT 이상)
+            # 5. 무단 대량 멘션 감지 (보안실 전송)
             total_mentions = len(message.mentions) + len(message.role_mentions)
             if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
                 try:
@@ -902,14 +905,15 @@ async def on_message(message):
                     pass
 
                 embed = discord.Embed(
-                    title="🚨 [보안 경고] 대량 멘션 시도 차단",
-                    description=f"{author.mention}님, 무단 대량 멘션 사용으로 메시지가 삭제되었습니다.",
-                    color=discord.Color.orange()
+                    title="🚨 [보안 경고] 대량 멘션 시도 감지",
+                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**멘션 수:** {total_mentions}회",
+                    color=discord.Color.orange(),
+                    timestamp=datetime.now()
                 )
-                await message.channel.send(embed=embed, delete_after=5)
+                await sec_channel.send(embed=embed)
                 return
 
-            # 6. 유연한 채팅 도배(Spam) 감지
+            # 6. 유연한 채팅 도배(Spam) 감지 (보안실 전송)
             now = datetime.now()
             for k, ts_list in list(user_message_tracker.items()):
                 valid_ts = [t for t in ts_list if (now - t).total_seconds() < SPAM_TIME_WINDOW]
@@ -929,11 +933,12 @@ async def on_message(message):
                     pass
 
                 embed = discord.Embed(
-                    title="⚠️ [도배 경고] 채팅 속도 제한",
-                    description=f"{author.mention}님, 메시지 전송 속도가 너무 빠릅니다. 조금만 천천히 입력해 주세요!",
-                    color=discord.Color.orange()
+                    title="⚠️ [보안 경고] 도배 행위 감지",
+                    description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}\n**조치:** 도배 메시지 삭제",
+                    color=discord.Color.orange(),
+                    timestamp=datetime.now()
                 )
-                await message.channel.send(embed=embed, delete_after=5)
+                await sec_channel.send(embed=embed)
                 return
 
     except Exception as e:
@@ -941,6 +946,23 @@ async def on_message(message):
         traceback.print_exc()
 
     await bot.process_commands(message)
+
+
+# ==================== [전역 예외 처리 핸들러] ====================
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ 해당 명령어를 실행할 권한이 없습니다.", delete_after=5)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ 필수 인자가 누락되었습니다: `{error.param.name}`", delete_after=5)
+    elif isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"⏳ 명령어 쿨다운 중입니다. {error.retry_after:.1f}초 후 다시 시도해주세요.", delete_after=5)
+    else:
+        print(f"[Command Error in {ctx.command}]: {error}")
+        traceback.print_exception(type(error), error, error.__traceback__)
 
 
 # ==================== [명령어 모음] ====================
@@ -1289,7 +1311,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
 
     bot_choice1 = random.choice(choices)
     
-    # 1라운드: 주도권 가져오기 (가위바위보)
+    # 1라운드: 주도권 가져오기
     if choice == bot_choice1:
         embed = discord.Embed(
             title="👊✌️🖐️ 묵찌빠 - 1라운드 무승부",
@@ -1329,7 +1351,6 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** `{bet}P`를 잃었습니다.", inline=False)
             embed.color = discord.Color.dark_red()
     else:
-        # 공격이 이어지는 난전 상황 처리
         if user_attacker:
             win_amount = int(bet * 1.1)
             await add_user_points(ctx.guild, ctx.author, win_amount)
@@ -1974,7 +1995,6 @@ async def verify_panel(ctx):
 
 @tasks.loop(hours=12)
 async def auto_chat_guide_loop():
-    # config.py 및 전역 변수에서 필요한 채널 ID 동적 로드
     inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID") or SECURITY_LOG_CHANNEL_ID
     example_ch = globals().get("EXAMPLE_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
     designer_stats_ch = globals().get("DESIGNER_STATS_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
@@ -2053,9 +2073,17 @@ async def auto_chat_guide_loop():
 
 @bot.event
 async def on_ready():
+    global daily_notice
     print(f"🤖 {bot.user.name} 봇 준비 완료 (ID: {bot.user.id})")
     await create_tables()
     await init_extended_db()
+
+    try:
+        if DailyNotice:
+            daily_notice = DailyNotice(bot)
+    except Exception as e:
+        print(f"[DailyNotice 초기화 예외] {e}")
+
     if not auto_chat_guide_loop.is_running():
         auto_chat_guide_loop.start()
 
