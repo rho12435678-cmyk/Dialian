@@ -68,9 +68,9 @@ DESIGNER_ROLE_IDS = {
 user_message_tracker = {}  # 도배 감지용 변수
 admin_action_tracker = {}   # 대량 행위(테러) 추적용 변수
 
-SPAM_MESSAGE_LIMIT = 4       # 감지 시간 내 허용 메시지 수
+SPAM_MESSAGE_LIMIT = 5       # 감지 시간 내 허용 메시지 수 (유연하게 조정)
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
-MAX_MENTION_LIMIT = 5        # 한 메시지 당 최대 허용 멘션 수
+MAX_MENTION_LIMIT = 6        # 한 메시지 당 최대 허용 멘션 수 (유연하게 조정)
 
 # 대량 테러 감지 임계값 (10초 이내 실행 횟수)
 MASS_ACTION_WINDOW = 10.0
@@ -89,11 +89,11 @@ DM_TRADE_KEYWORDS = [
     "개인메시지", "개인 메세지", "뒷거래"
 ]
 
-# ⚠️ 파일 보안: 위험 파일 확장자 리스트
+# ⚠️ 파일 보안: 위험 실행 파일 확장자만 차단 (zip, rar, 7z, html 등은 공유 가능하도록 허용)
 DANGEROUS_EXTENSIONS = (
-    '.exe', '.bat', '.ps1', '.scr', '.vbs', '.cmd', '.jar', '.html', '.htm',
+    '.exe', '.bat', '.ps1', '.scr', '.vbs', '.cmd', '.jar',
     '.pif', '.application', '.gadget', '.msi', '.msp', '.com', '.hta', '.cpl',
-    '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2', '.zip', '.rar', '.7z'
+    '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2'
 )
 
 # 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
@@ -809,6 +809,7 @@ async def on_message(message):
     guild = message.guild
 
     try:
+        # 1. 실행 파일 감지 (압축파일/웹파일 제외되어 공유 가능)
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
@@ -817,17 +818,18 @@ async def on_message(message):
                     except Exception:
                         pass
                     await message.channel.send(
-                        f"🚨 {author.mention}님, 보안 위험 확장자 파일(`{attachment.filename}`)은 업로드할 수 없습니다.",
+                        f"🚨 {author.mention}님, 보안 위험 실행 파일(`{attachment.filename}`)은 업로드할 수 없습니다.",
                         delete_after=6
                     )
                     await log_security_event(
                         guild,
-                        "⚠️ 위험 파일 업로드 차단",
+                        "⚠️ 위험 실행 파일 업로드 차단",
                         f"**유저:** {author.mention} (`{author.id}`)\n**파일명:** `{attachment.filename}`\n**채널:** {message.channel.mention}",
                         discord.Color.red()
                     )
                     return
 
+        # 2. 민감한 개인정보/토큰 보호
         if re.search(DISCORD_TOKEN_REGEX, message.content) or re.search(RRN_REGEX, message.content) or re.search(PHONE_REGEX, message.content):
             try:
                 await message.delete()
@@ -845,6 +847,7 @@ async def on_message(message):
         is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
         if not is_staff and author.id != guild.owner_id:
             
+            # 3. 사적 거래 (뒷매) 키워드 차단 - 타임아웃 처리는 제거, 안내 및 삭제만 진행
             msg_content = message.content.replace(" ", "").lower()
             found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
 
@@ -855,31 +858,27 @@ async def on_message(message):
                     pass
 
                 embed = discord.Embed(
-                    title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 금지",
+                    title="🚨 [보안 경고] 뒷매 및 사적 유인 행위 안내",
                     description=f"{author.mention}님, 서버 내에서 **사적 거래(뒷매) 및 DM 유인 행위**는 금지되어 있습니다.\n모든 커미션 및 문의는 공식 티켓 시스템을 이용해 주세요.",
-                    color=discord.Color.red()
+                    color=discord.Color.orange()
                 )
                 await message.channel.send(embed=embed, delete_after=7)
 
                 security_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
                 if security_channel:
                     log_embed = discord.Embed(
-                        title="🕵️‍♂️ [뒷매 의심 감지 로그]",
+                        title="🕵️‍♂️ [뒷매 의심 키워드 감지]",
                         description=f"**감지된 유저:** {author.mention} (`{author.id}`)\n"
                                     f"**적발 키워드:** `{found_keyword[0]}`\n"
                                     f"**원본 메시지:** {message.content}\n"
                                     f"**발생 채널:** {message.channel.mention}",
-                        color=discord.Color.dark_orange(),
+                        color=discord.Color.orange(),
                         timestamp=datetime.now()
                     )
                     await security_channel.send(embed=log_embed)
-
-                try:
-                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=30), reason="뒷매/사적 유인 키워드 적발")
-                except Exception:
-                    pass
                 return
 
+            # 4. 외부 디스코드 초대 링크 유포 차단 - 타임아웃 처리는 제거, 안내 및 삭제만 진행
             if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
                 try:
                     await message.delete()
@@ -889,16 +888,12 @@ async def on_message(message):
                 embed = discord.Embed(
                     title="🚨 [보안 경고] 외부 초대 링크 유포 차단",
                     description=f"{author.mention}님, 서버 내 외부 디스코드 초대 링크 유포는 금지되어 있습니다.",
-                    color=discord.Color.red()
+                    color=discord.Color.orange()
                 )
                 await message.channel.send(embed=embed, delete_after=5)
-
-                try:
-                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=10), reason="외부 초대 링크 유포")
-                except Exception:
-                    pass
                 return
 
+            # 5. 무단 대량 멘션 감지 (기준 완화: MAX_MENTION_LIMIT 이상)
             total_mentions = len(message.mentions) + len(message.role_mentions)
             if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
                 try:
@@ -908,17 +903,13 @@ async def on_message(message):
 
                 embed = discord.Embed(
                     title="🚨 [보안 경고] 대량 멘션 시도 차단",
-                    description=f"{author.mention}님, 무단 대량 멘션으로 인해 **1시간 동안 채팅이 금지**됩니다.",
-                    color=discord.Color.dark_red()
+                    description=f"{author.mention}님, 무단 대량 멘션 사용으로 메시지가 삭제되었습니다.",
+                    color=discord.Color.orange()
                 )
-                await message.channel.send(embed=embed)
-
-                try:
-                    await author.timeout(discord.utils.utcnow() + timedelta(hours=1), reason="대량 멘션 시도")
-                except Exception:
-                    pass
+                await message.channel.send(embed=embed, delete_after=5)
                 return
 
+            # 6. 유연한 채팅 도배(Spam) 감지
             now = datetime.now()
             for k, ts_list in list(user_message_tracker.items()):
                 valid_ts = [t for t in ts_list if (now - t).total_seconds() < SPAM_TIME_WINDOW]
@@ -937,17 +928,12 @@ async def on_message(message):
                 except Exception:
                     pass
 
-                try:
-                    await author.timeout(discord.utils.utcnow() + timedelta(minutes=5), reason="채팅 도배(Spam) 감지")
-                except Exception:
-                    pass
-
                 embed = discord.Embed(
                     title="⚠️ [도배 경고] 채팅 속도 제한",
-                    description=f"{author.mention}님, 너무 빠른 속도로 메시지를 도배하여 **5분간 채팅 제한** 조치되었습니다.",
+                    description=f"{author.mention}님, 메시지 전송 속도가 너무 빠릅니다. 조금만 천천히 입력해 주세요!",
                     color=discord.Color.orange()
                 )
-                await message.channel.send(embed=embed, delete_after=7)
+                await message.channel.send(embed=embed, delete_after=5)
                 return
 
     except Exception as e:
