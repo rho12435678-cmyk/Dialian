@@ -32,32 +32,36 @@ class DailyNotice(commands.Cog):
                 return
 
             embed = discord.Embed(
-                description=(
-                    f"<@&{CUSTOMER_ROLE_ID}>\n\n"
-                    "🎨 **Roblox GFX / 복장 커미션 받습니다!**\n\n"
-                    "✨ **제작 가능**\n"
-                    "• 🎨 Roblox GFX\n"
-                    "• 👕 Roblox 복장 제작\n\n"
-                    f"📸 **예시작** : <#{EXAMPLE_CHANNEL_ID}> 에서 확인해주세요.\n"
-                    f"📊 **디자이너 통계** : <#{DESIGNER_STATS_CHANNEL_ID}> 에서 확인해주세요.\n"
-                    f"⭐ **구매 후기** : <#{REVIEWS_CHANNEL_ID}> 에서 확인해주세요.\n"
-                    f"💳 **구매 및 문의** : <#{PURCHASE_CHANNEL_ID}> 를 이용해주세요.\n\n"
-                ),
-                color=0xF4A300
-            )
+    title="✨ DDS (Design & Developer Service) 공식 가이드",
+    description=(
+        "안녕하세요! **DDS 공식 커뮤니티**에 오신 것을 환영합니다! 🎉\n\n"
+        "서버를 효율적으로 이용하실 수 있도록 주요 채널 안내를 드립니다."
+    ),
+    color=0x5865F2
+)
 
-            embed.set_footer(text="DDS System | 이틀에 1회, 오후 6시 정각 정기 발송")
+# 주요 이용 안내 채널 (보안실 -> 문의 채널 변경)
+embed.add_field(
+    name="📌 주요 이용 안내 채널",
+    value=(
+        f"• <#{PURCHASE_CHANNEL_ID}> : 커미션 주문 및 문의/지원 신청\n"
+        f"• <#{EXAMPLE_CHANNEL_ID}> : 디자이너 샘플 및 예시작 감상\n"
+        f"• <#{DESIGNER_RANKING_CHANNEL_ID}> : 디자이너 등급 및 분야 현황\n"
+        f"• <#{DESIGNER_STATS_CHANNEL_ID}> : 디자이너 작업 완료 통계\n"
+        f"• <#{REVIEWS_CHANNEL_ID}> : 실제 이용 고객님들의 솔직한 후기"
+    ),
+    inline=False
+)
 
-            await channel.send(embed=embed)
-            print("공지 전송 완료")
+# 포인트 & 혜택 시스템
+embed.add_field(
+    name="🏛️ 포인트 & 혜택 시스템",
+    value=(
+        f"• <#{POINTS_RANKING_CHANNEL_ID}> : 포인트 실시간 랭킹 확인\n"
+        f"• <#{GETTING_POINTS_CHANNEL_ID}> : 포인트 적립 방법 및 단골(15% 할인) 혜택 안내"
+    ),
+    inline=False
+)
 
-        except Exception as e:
-            print(f"공지 오류: {e}")
-
-    @daily_notice.before_loop
-    async def before(self):
-        print("DailyNotice 시작")
-        await self.bot.wait_until_ready()
-
-async def setup(bot):
-    await bot.add_cog(DailyNotice(bot))
+# 푸터 문구 수정
+embed.set_footer(text="자동 가이드 공지 | 이틀에 1회, 오후 6시 정각 업데이트")
