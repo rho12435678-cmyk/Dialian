@@ -16,9 +16,9 @@ class DailyNotice(commands.Cog):
 
     @tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
     async def daily_notice(self):
-        # 이틀에 1회 발송을 위한 날짜 검사 (짝수 일자에만 발송)
-        today = datetime.now(KST)
-        if today.day % 2 != 0:
+        # toordinal()을 사용해 월말/월초(31일->1일) 연속 스킵 버그 방지
+        today = datetime.now(KST).date()
+        if today.toordinal() % 2 != 0:
             return
 
         print("공지 실행 시작")
@@ -46,7 +46,6 @@ class DailyNotice(commands.Cog):
                 color=0xF4A300
             )
 
-            # 임베드 맨 아래 푸터 문구 수정
             embed.set_footer(text="DDS System | 이틀에 1회, 오후 6시 정각 정기 발송")
 
             await channel.send(embed=embed)
