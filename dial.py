@@ -2097,10 +2097,25 @@ async def verify_panel(ctx):
     await ctx.send(embed=embed, view=VerifyView())
 
 
-# ==================== [자동 반복 태스크] ====================
+# ----------------------------------------------------
+# ⏰ 주기적 공지 스케줄 설정 (KST 기준 오후 6시 정각)
+# ----------------------------------------------------
+KST = timezone(timedelta(hours=9))
+GUIDE_SCHEDULE_TIME = datetime.time(hour=18, minute=0, second=0, tzinfo=KST)
+last_guide_run_date = None
 
-@tasks.loop(hours=12)
+
+@tasks.loop(time=GUIDE_SCHEDULE_TIME)
 async def auto_chat_guide_loop():
+    global last_guide_run_date
+    today = datetime.now(KST).date()
+
+    # 최초 실행이 아니고, 마지막 전송일로부터 2일이 지나지 않았다면 스킵
+    if last_guide_run_date is not None and (today - last_guide_run_date).days < 2:
+        return
+
+    last_guide_run_date = today
+
     inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID")
     example_ch = globals().get("EXAMPLE_CHANNEL_ID")
     designer_stats_ch = globals().get("DESIGNER_STATS_CHANNEL_ID")
@@ -2109,9 +2124,9 @@ async def auto_chat_guide_loop():
     def format_ch(ch_id):
         return f"<#{ch_id}>" if ch_id else "`미설정 채널`"
 
+    # 1. 한국어 채팅 채널 공지
     kr_channel = bot.get_channel(KR_CHAT_CHANNEL_ID)
     if kr_channel:
-        # config.py의 GUIDE_MESSAGE_KR 변수를 Embed description으로 적용
         kr_description = globals().get("GUIDE_MESSAGE_KR", (
             "안녕하세요! **DDS 공식 커뮤니티**에 오신 것을 환영합니다! 🎉\n"
             "서버를 효율적으로 이용하실 수 있도록 주요 채널 안내를 드립니다."
@@ -2141,15 +2156,15 @@ async def auto_chat_guide_loop():
             ),
             inline=False
         )
-        embed_kr.set_footer(text="자동 가이드 공지 | 12시간 주기 업데이트")
+        embed_kr.set_footer(text="자동 가이드 공지 | 이틀 주기 오후 6시 업데이트")
         try:
             await kr_channel.send(embed=embed_kr)
         except Exception as e:
             print(f"[한챗 공지 실패] {e}")
 
+    # 2. 영어 채팅 채널 공지
     en_channel = bot.get_channel(EN_CHAT_CHANNEL_ID)
     if en_channel:
-        # config.py의 GUIDE_MESSAGE_EN 변수를 Embed description으로 적용
         en_description = globals().get("GUIDE_MESSAGE_EN", (
             "Welcome to **DDS Official Server**! 🎉\n"
             "Here is a quick directory of our main channels to help you get started."
@@ -2179,7 +2194,7 @@ async def auto_chat_guide_loop():
             ),
             inline=False
         )
-        embed_en.set_footer(text="Auto Guide Notice | 12h Cycle")
+        embed_en.set_footer(text="Auto Guide Notice | Every 2 Days at 6 PM")
         try:
             await en_channel.send(embed=embed_en)
         except Exception as e:
