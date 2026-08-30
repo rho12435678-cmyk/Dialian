@@ -16,34 +16,39 @@ class DailyNotice(commands.Cog):
 
     @tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
     async def daily_notice(self):
-        # 2일(48시간) 주기 발송 체크
         today = datetime.now(KST).date()
-        if today.toordinal() % 2 != 0:
-            return
+        print("[DailyNotice] 오후 6시 정기 공지 스케줄 시작")
 
-        print("[DailyNotice] 가이드 공지 실행 시작")
-
-        # 1. 한국어 채팅 채널 전송
-        kr_channel = self.bot.get_channel(config.KR_CHAT_CHANNEL_ID)
-        if kr_channel:
+        # 1. 판매 공지 (매일 오후 6시 정각 전송)
+        sales_channel = self.bot.get_channel(getattr(config, 'SALES_NOTICE_CHANNEL_ID', None))
+        if sales_channel:
             try:
-                await kr_channel.send(config.GUIDE_MESSAGE_KR)
-                print("[DailyNotice] 한국어 가이드 공지 전송 완료")
+                await sales_channel.send(config.SALES_NOTICE_MESSAGE)
+                print("[DailyNotice] 판매 공지 전송 완료 (매일)")
             except Exception as e:
-                print(f"[DailyNotice] 한국어 공지 오류: {e}")
+                print(f"[DailyNotice] 판매 공지 오류: {e}")
         else:
-            print("[DailyNotice] 한국어 채널을 찾을 수 없음")
+            print("[DailyNotice] 판매 공지 채널을 찾을 수 없음")
 
-        # 2. 영어 채팅 채널 전송
-        en_channel = self.bot.get_channel(config.EN_CHAT_CHANNEL_ID)
-        if en_channel:
-            try:
-                await en_channel.send(config.GUIDE_MESSAGE_EN)
-                print("[DailyNotice] 영어 가이드 공지 전송 완료")
-            except Exception as e:
-                print(f"[DailyNotice] 영어 공지 오류: {e}")
-        else:
-            print("[DailyNotice] 영어 채널을 찾을 수 없음")
+        # 2. 한국어 / 영어 가이드 공지 (2일 주기 전송)
+        if today.toordinal() % 2 == 0:
+            # 한국어 가이드
+            kr_channel = self.bot.get_channel(config.KR_CHAT_CHANNEL_ID)
+            if kr_channel:
+                try:
+                    await kr_channel.send(config.GUIDE_MESSAGE_KR)
+                    print("[DailyNotice] 한국어 가이드 공지 전송 완료 (2일 주기)")
+                except Exception as e:
+                    print(f"[DailyNotice] 한국어 공지 오류: {e}")
+
+            # 영어 가이드
+            en_channel = self.bot.get_channel(config.EN_CHAT_CHANNEL_ID)
+            if en_channel:
+                try:
+                    await en_channel.send(config.GUIDE_MESSAGE_EN)
+                    print("[DailyNotice] 영어 가이드 공지 전송 완료 (2일 주기)")
+                except Exception as e:
+                    print(f"[DailyNotice] 영어 공지 오류: {e}")
 
     @daily_notice.before_loop
     async def before(self):
