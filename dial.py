@@ -98,6 +98,13 @@ DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
 PHONE_REGEX = r"\b01[016789]-?\d{3,4}-?\d{4}\b"
 RRN_REGEX = r"\b\d{6}-[1-8]\d{6}\b"
 
+PROCESSED_TABLES = {
+    "processed_commands",
+    "processed_command_errors",
+}
+
+
+# ==================== [유틸리티 & 기본 헬퍼] ====================
 
 def get_bot_version() -> str:
     try:
@@ -118,6 +125,18 @@ def parse_mention_id(text: str) -> int | None:
         return None
     match = re.search(r"(\d{17,20})", str(text))
     return int(match.group(1)) if match else None
+
+
+async def fetch_member_or_none(guild, member_id):
+    if not member_id or not guild:
+        return None
+    member = guild.get_member(member_id)
+    if member:
+        return member
+    try:
+        return await guild.fetch_member(member_id)
+    except Exception:
+        return None
 
 
 # ==================== [🔒 블랙리스트 헬퍼 함수] ====================
@@ -152,6 +171,140 @@ async def add_blacklist(db: aiosqlite.Connection, user_id: int, reason: str):
 async def remove_blacklist(db: aiosqlite.Connection, user_id: int):
     await db.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
     await db.commit()
+
+
+# ==================== [티켓 / 커미션 데이터베이스 헬퍼] ====================
+
+def is_ticket_channel(channel):
+    return isinstance(channel, discord.TextChannel) and channel.name.startswith("티켓-")
+
+
+def is_ticket_or_archive_channel(channel):
+    return isinstance(channel, discord.TextChannel) and (channel.name.startswith("티켓-") or channel.name.startswith("보관-티켓-"))
+
+
+async def find_ticket_owner(channel):
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                member = await fetch_member_or_none(channel.guild, row[0])
+                if member:
+                    return member
+
+    try:
+        if channel.topic:
+            match = re.search(r"\d+", channel.topic)
+            if match:
+                return await fetch_member_or_none(channel.guild, int(match.group(0)))
+    except (TypeError, ValueError):
+        pass
+
+    async for msg in channel.history(limit=5, oldest_first=True):
+        if msg.mentions:
+            return msg.mentions[0]
+    return None
+
+
+async def find_ticket_designer_id(channel):
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+
+    async for msg in channel.history(limit=50, oldest_first=True):
+        for embed in msg.embeds:
+            for field in embed.fields:
+                if field.name == "👨‍💻 담당 디자이너":
+                    designer_id = parse_mention_id(field.value)
+                    if designer_id:
+                        return designer_id
+            if embed.description:
+                designer_id = parse_mention_id(embed.description)
+                if designer_id:
+                    return designer_id
+    return None
+
+
+def can_manage_ticket(member, user_id, designer_id):
+    if member is None:
+        return False
+    if member.guild_permissions.administrator:
+        return True
+    if designer_id is not None:
+        return user_id == designer_id
+    return has_designer_role(member)
+
+
+async def update_commission_progress(channel, progress):
+    now_str = discord.utils.utcnow().isoformat()
+    status = "completed" if progress == 100 else "in_progress"
+    async with aiosqlite.connect(DATABASE) as db:
+        if progress == 100:
+            await db.execute(
+                """
+                UPDATE commissions
+                SET progress = ?, status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
+                WHERE ticket_channel = ?
+                """,
+                (progress, status, now_str, now_str, channel.id)
+            )
+        else:
+            await db.execute(
+                """
+                UPDATE commissions
+                SET progress = ?, status = ?, updated_at = ?
+                WHERE ticket_channel = ?
+                """,
+                (progress, status, now_str, channel.id)
+            )
+        await db.commit()
+
+
+async def upsert_commission_record(data):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            """
+            INSERT INTO commissions(ticket_channel, customer_id, designer_id, category, status, progress, created_at, completed_at, updated_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticket_channel) DO UPDATE SET
+                customer_id = excluded.customer_id,
+                designer_id = excluded.designer_id,
+                category = excluded.category,
+                status = excluded.status,
+                progress = excluded.progress,
+                completed_at = COALESCE(commissions.completed_at, excluded.completed_at),
+                updated_at = excluded.updated_at
+            """,
+            (
+                data["ticket_channel"], data["customer_id"], data["designer_id"],
+                data["category"], data["status"], data["progress"],
+                data["created_at"], data["completed_at"], data["updated_at"],
+            )
+        )
+        await db.commit()
+
+
+async def send_payment_info(channel, designer_id):
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute(
+            "SELECT bank_name, account_number, holder FROM bank_accounts WHERE developer_id = ?",
+            (designer_id,)
+        ) as cursor:
+            data = await cursor.fetchone()
+
+    if data is None:
+        return False
+
+    bank_name, account_number, holder = data
+    embed = discord.Embed(
+        title="💳 결제 정보",
+        description=f"🏦 {bank_name}\n계좌번호 : `{account_number}`\n예금주 : **{holder}**\n\n✅ 입금 후 담당 디자이너에게 말씀해주세요.",
+        color=discord.Color.green()
+    )
+    await channel.send(embed=embed)
+    return True
 
 
 # ==================== [티켓 지원 / 파트너 모달 및 뷰] ====================
@@ -354,11 +507,6 @@ bot = DialianBot(command_prefix="!", intents=intents, help_command=None)
 
 daily_notice = None
 bot_started_at = discord.utils.utcnow()
-
-PROCESSED_TABLES = {
-    "processed_commands",
-    "processed_command_errors",
-}
 
 
 # ==================== [🛡️ 보안 & 로그 헬퍼 함수] ====================
@@ -1010,7 +1158,7 @@ async def on_message(message):
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
+    if isinstance(error, (commands.CommandNotFound, commands.CheckFailure)):
         return
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ 해당 명령어를 실행할 권한이 없습니다.", delete_after=5)
@@ -1594,152 +1742,6 @@ async def update_bot(ctx):
         await status_msg.edit(content="❌ **Git이 설치되어 있지 않거나 경로 환경변수가 설정되지 않았습니다.**")
     except Exception as e:
         await status_msg.edit(content=f"❌ **업데이트 중 오류 발생:** `{e}`")
-
-
-# ==================== [보안 및 유틸리티 헬퍼] ====================
-
-def is_ticket_channel(channel):
-    return isinstance(channel, discord.TextChannel) and channel.name.startswith("티켓-")
-
-
-def is_ticket_or_archive_channel(channel):
-    return isinstance(channel, discord.TextChannel) and (channel.name.startswith("티켓-") or channel.name.startswith("보관-티켓-"))
-
-
-async def find_ticket_owner(channel):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0]:
-                member = await fetch_member_or_none(channel.guild, row[0])
-                if member:
-                    return member
-
-    try:
-        if channel.topic:
-            match = re.search(r"\d+", channel.topic)
-            if match:
-                return await fetch_member_or_none(channel.guild, int(match.group(0)))
-    except (TypeError, ValueError):
-        pass
-
-    async for msg in channel.history(limit=5, oldest_first=True):
-        if msg.mentions:
-            return msg.mentions[0]
-    return None
-
-
-async def find_ticket_designer_id(channel):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0]:
-                return row[0]
-
-    async for msg in channel.history(limit=50, oldest_first=True):
-        for embed in msg.embeds:
-            for field in embed.fields:
-                if field.name == "👨‍💻 담당 디자이너":
-                    designer_id = parse_mention_id(field.value)
-                    if designer_id:
-                        return designer_id
-            if embed.description:
-                designer_id = parse_mention_id(embed.description)
-                if designer_id:
-                    return designer_id
-    return None
-
-
-def can_manage_ticket(member, user_id, designer_id):
-    if member is None:
-        return False
-    if member.guild_permissions.administrator:
-        return True
-    if designer_id is not None:
-        return user_id == designer_id
-    return has_designer_role(member)
-
-
-async def fetch_member_or_none(guild, member_id):
-    if not member_id or not guild:
-        return None
-    member = guild.get_member(member_id)
-    if member:
-        return member
-    try:
-        return await guild.fetch_member(member_id)
-    except Exception:
-        return None
-
-
-async def update_commission_progress(channel, progress):
-    now_str = discord.utils.utcnow().isoformat()
-    status = "completed" if progress == 100 else "in_progress"
-    async with aiosqlite.connect(DATABASE) as db:
-        if progress == 100:
-            await db.execute(
-                """
-                UPDATE commissions
-                SET progress = ?, status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
-                WHERE ticket_channel = ?
-                """,
-                (progress, status, now_str, now_str, channel.id)
-            )
-        else:
-            await db.execute(
-                """
-                UPDATE commissions
-                SET progress = ?, status = ?, updated_at = ?
-                WHERE ticket_channel = ?
-                """,
-                (progress, status, now_str, channel.id)
-            )
-        await db.commit()
-
-
-async def upsert_commission_record(data):
-    async with aiosqlite.connect(DATABASE) as db:
-        await db.execute(
-            """
-            INSERT INTO commissions(ticket_channel, customer_id, designer_id, category, status, progress, created_at, completed_at, updated_at)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(ticket_channel) DO UPDATE SET
-                customer_id = excluded.customer_id,
-                designer_id = excluded.designer_id,
-                category = excluded.category,
-                status = excluded.status,
-                progress = excluded.progress,
-                completed_at = COALESCE(commissions.completed_at, excluded.completed_at),
-                updated_at = excluded.updated_at
-            """,
-            (
-                data["ticket_channel"], data["customer_id"], data["designer_id"],
-                data["category"], data["status"], data["progress"],
-                data["created_at"], data["completed_at"], data["updated_at"],
-            )
-        )
-        await db.commit()
-
-
-async def send_payment_info(channel, designer_id):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute(
-            "SELECT bank_name, account_number, holder FROM bank_accounts WHERE developer_id = ?",
-            (designer_id,)
-        ) as cursor:
-            data = await cursor.fetchone()
-
-    if data is None:
-        return False
-
-    bank_name, account_number, holder = data
-    embed = discord.Embed(
-        title="💳 결제 정보",
-        description=f"🏦 {bank_name}\n계좌번호 : `{account_number}`\n예금주 : **{holder}**\n\n✅ 입금 후 담당 디자이너에게 말씀해주세요.",
-        color=discord.Color.green()
-    )
-    await channel.send(embed=embed)
-    return True
 
 
 # ==================== [티켓 패널 생성 및 업무 명령어] ====================
