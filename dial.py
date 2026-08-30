@@ -1386,7 +1386,6 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
     await ctx.send(embed=embed)
 
 
-# 🛠️ [수정 완료] 묵찌빠 2라운드 공격/방어 판정 로직 완벽 개편
 @bot.command(name="묵찌빠")
 async def muk_jji_bba(ctx, choice: str, bet: int):
     if not await check_command_channel(ctx):
@@ -1432,7 +1431,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
         inline=False
     )
 
-    # 2라운드 판정 로직 (같은 패 제출 시 공격자 승리, 다른 패 제출 시 방어 성공)
+    # 2라운드 판정 로직
     if user_choice2 == bot_choice2:
         if user_attacker:
             win_amount = int(bet * 1.3)
@@ -1454,9 +1453,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.dark_red()
     else:
-        # 패가 다르면 공격 실패 (방어 성공)
         if user_attacker:
-            # 유저의 공격 실패 -> 판돈 환불 (무승부 처리)
             final_points = current_points
             embed.add_field(
                 name="2라운드 (최종)", 
@@ -1465,7 +1462,6 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             )
             embed.color = discord.Color.light_grey()
         else:
-            # 봇의 공격을 유저가 방어 성공 -> 빗나감 보상 (+0.1배 추가 지급)
             win_amount = int(bet * 0.1)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
@@ -2103,7 +2099,6 @@ async def verify_panel(ctx):
 
 # ==================== [자동 반복 태스크] ====================
 
-# 🛠️ [수정 완료] 안전한 채널 멘션 처리로 보안 채널 오공지 방지
 @tasks.loop(hours=12)
 async def auto_chat_guide_loop():
     inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID")
@@ -2185,7 +2180,6 @@ async def auto_chat_guide_loop():
             print(f"[영챗 공지 실패] {e}")
 
 
-# 🛠️ [수정 완료] on_ready 내 중복 실행 DB 함수 정리 및 태스크 안전 가동
 @bot.event
 async def on_ready():
     global daily_notice
