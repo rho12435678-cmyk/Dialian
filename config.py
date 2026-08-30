@@ -26,7 +26,7 @@ PURCHASE_CHANNEL_ID = 1505102694917079132        # 구매/문의 채널
 INQUIRIES_CHANNEL_ID = 1505102694917079132       # dial.py 인식용 문의/티켓 채널 ID (PURCHASE_CHANNEL_ID와 동일)
 EXAMPLE_CHANNEL_ID = 1505178799950532720         # 예시작 채널
 REVIEWS_CHANNEL_ID = 1506517440463638581         # 후기 채널
-SALE_NOTICE_CHANNEL_ID = 1505562851824369714     # 구매 알림 채널
+SALE_NOTICE_CHANNEL_ID = 1505562851824369714     # 판매공지 채널 ID
 DESIGNER_STATS_CHANNEL_ID = 1521001578239361155  # 디자이너 통계 채널
 DESIGNER_TIER_CHANNEL_ID = 1537806140711239760   # 디자이너 등급 채널
 
@@ -66,10 +66,24 @@ REGULAR_DISCOUNT_RATE = 0.15   # 단골 할인율 (15%)
 GACHA_COST = 20                # 뽑기 1회 소모 포인트
 
 # ==========================================
-# 5. 자동 가이드 메시지 템플릿 (2일 주기 / 오후 6시)
+# 5. 자동 공지 메시지 템플릿
 # ==========================================
 
-# 한국어 채널용 가이드
+# 매일 오후 6시 판매 공지
+SALES_NOTICE_MESSAGE = f"""<@&{CUSTOMER_ROLE_ID}>
+
+🎨 **Roblox GFX / 복장 커미션 받습니다!**
+
+✨ **제작 가능**
+• 🎨 **Roblox GFX**
+• 👕 **Roblox 복장 제작**
+
+💣 **예시작** : <#{EXAMPLE_CHANNEL_ID}> 에서 확인해주세요.
+📊 **디자이너 통계** : <#{DESIGNER_STATS_CHANNEL_ID}> 에서 확인해주세요.
+⭐ **구매 후기** : <#{REVIEWS_CHANNEL_ID}> 에서 확인해주세요.
+💳 **구매 및 문의** : <#{PURCHASE_CHANNEL_ID}> 를 이용해주세요."""
+
+# 한국어 채널용 가이드 (2일 주기 / 오후 6시)
 GUIDE_MESSAGE_KR = f"""✨ DDS (Design & Developer Service) 안내 가이드
 
 DDS 공식 서버에 오신 것을 환영합니다! 🎉
@@ -88,7 +102,7 @@ DDS 공식 서버에 오신 것을 환영합니다! 🎉
 
 자동 가이드 안내 | 2일 주기 (오후 6시)"""
 
-# 영어 채널용 가이드
+# 영어 채널용 가이드 (2일 주기 / 오후 6시)
 GUIDE_MESSAGE_EN = f"""✨ DDS (Design & Developer Service) Guide
 
 Welcome to DDS Official Server! 🎉
