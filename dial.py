@@ -7,6 +7,10 @@ import subprocess
 import traceback
 
 import aiosqlite
+import discord
+from discord import ui
+from discord.ext import commands, tasks
+
 from config import *
 from database.DailyNotice import DailyNotice
 from database.backups import backup_database
@@ -32,9 +36,6 @@ from database.views.designer_select import DesignerView
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import VerifyView
-import discord
-from discord import ui
-from discord.ext import commands, tasks
 
 TOKEN = os.getenv("TOKEN")
 
@@ -333,18 +334,15 @@ async def cleanup_processed_records():
 
 class DialianBot(commands.Bot):
     async def setup_hook(self):
-        # 1. DB 및 테이블 초기화 (on_ready 대신 봇 시작 시 단 1회 실행)
         await create_tables()
         await init_extended_db()
 
-        # 2. Persistent View 등록
         self.add_view(CombinedTicketOpenView())
         self.add_view(CategorySelectView())
         self.add_view(VerifyView())
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
 
-        # 3. Clean-up 루프 태스크 가동
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
 
@@ -1279,13 +1277,13 @@ async def show_points(ctx, member: discord.Member = None):
         color=color
     )
     embed.add_field(name="현재 계급 (티어)", value=f"{tier_icon} **{tier_name}**", inline=False)
-    embed.add_field(name="현재 포인트", value=f"`{points} P` / (골드 기준: `1000 P`)", inline=False)
+    embed.add_field(name="현재 포인트", value=f"`{points:,} P` / (골드 기준: `1,000 P`)", inline=False)
 
     if points >= 1000:
         embed.add_field(name="🎁 해제된 최고 혜택", value="✅ **골드 단골 손님 (모든 커미션 15% 자동 할인 적용 중)**", inline=False)
     else:
         remaining = 1000 - points
-        embed.add_field(name="승급까지 남은 길", value=f"최고 등급 **골드(단골 15% 할인)**까지 **{remaining} P** 남았습니다!", inline=False)
+        embed.add_field(name="승급까지 남은 길", value=f"최고 등급 **골드(단골 15% 할인)**까지 **{remaining:,} P** 남았습니다!", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -1299,7 +1297,7 @@ async def point_gacha(ctx):
     cost = GACHA_COST
 
     if current_points < cost:
-        return await ctx.send(f"❌ 포인트가 부족합니다. (현재 `{current_points}P` / 필요 `{cost}P`)")
+        return await ctx.send(f"❌ 포인트가 부족합니다. (현재 `{current_points:,}P` / 필요 `{cost}P`)")
 
     await add_user_points(ctx.guild, ctx.author, -cost)
 
@@ -1325,7 +1323,7 @@ async def point_gacha(ctx):
         color, title, desc = discord.Color.green(), "✨ 소소한 이득!", f"**+{result}P**를 획득했습니다!"
 
     embed = discord.Embed(title=title, description=desc, color=color)
-    embed.add_field(name="현재 잔여 포인트", value=f"`{final_points} P`", inline=False)
+    embed.add_field(name="현재 잔여 포인트", value=f"`{final_points:,} P`", inline=False)
     await ctx.send(embed=embed)
 
 
@@ -1343,7 +1341,7 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
 
     current_points = await get_user_points(ctx.author.id)
     if current_points < bet:
-        return await ctx.send(f"❌ 보유 포인트가 부족합니다. (현재 `{current_points}P`)")
+        return await ctx.send(f"❌ 보유 포인트가 부족합니다. (현재 `{current_points:,}P`)")
 
     bot_choice = random.choice(choices)
 
@@ -1362,7 +1360,7 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
             title="✌️🖐️✊ 가위바위보 승리!",
-            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n🎉 승리하여 **+{win_profit}P** (수수료 5% 제외)를 획득했습니다!",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n🎉 승리하여 **+{win_profit:,}P** (수수료 5% 제외)를 획득했습니다!",
             color=discord.Color.green()
         )
     elif result == "draw":
@@ -1377,12 +1375,12 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
         final_points = await get_user_points(ctx.author.id)
         embed = discord.Embed(
             title="✌️🖐️✊ 가위바위보 패배...",
-            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n😭 패배하여 `{bet}P`를 잃었습니다.",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n😭 패배하여 `{bet:,}P`를 잃었습니다.",
             color=discord.Color.red()
         )
 
     await update_point_ranking_message(bot)
-    embed.add_field(name="현재 보유 포인트", value=f"`{final_points} P`", inline=False)
+    embed.add_field(name="현재 보유 포인트", value=f"`{final_points:,} P`", inline=False)
     await ctx.send(embed=embed)
 
 
@@ -1400,7 +1398,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
 
     current_points = await get_user_points(ctx.author.id)
     if current_points < bet:
-        return await ctx.send(f"❌ 보유 포인트가 부족합니다. (현재 `{current_points}P`)")
+        return await ctx.send(f"❌ 보유 포인트가 부족합니다. (현재 `{current_points:,}P`)")
 
     bot_choice1 = random.choice(choices)
     
@@ -1411,7 +1409,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             description=f"유저: **{choice}** vs 봇: **{bot_choice1}**\n\n첫 판부터 비겨 승패 없이 판돈을 돌려받습니다.",
             color=discord.Color.light_grey()
         )
-        embed.add_field(name="현재 보유 포인트", value=f"`{current_points} P`", inline=False)
+        embed.add_field(name="현재 보유 포인트", value=f"`{current_points:,} P`", inline=False)
         return await ctx.send(embed=embed)
 
     user_attacker = (
@@ -1439,7 +1437,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** (상대방이 같은 패를 냄) **+{win_amount}P** 획득!", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** (상대방이 같은 패를 냄) **+{win_amount:,}P** 획득!", 
                 inline=False
             )
             embed.color = discord.Color.gold()
@@ -1448,7 +1446,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** (봇의 공격에 걸려듦) `{bet}P`를 잃었습니다.", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** (봇의 공격에 걸려듦) `{bet:,}P`를 잃었습니다.", 
                 inline=False
             )
             embed.color = discord.Color.dark_red()
@@ -1467,13 +1465,13 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             final_points = await get_user_points(ctx.author.id)
             embed.add_field(
                 name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n✨ **방어 성공!** 봇의 공격을 차단하고 보너스 **+{win_amount}P**를 획득했습니다!", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n✨ **방어 성공!** 봇의 공격을 차단하고 보너스 **+{win_amount:,}P**를 획득했습니다!", 
                 inline=False
             )
             embed.color = discord.Color.green()
 
     await update_point_ranking_message(bot)
-    embed.add_field(name="현재 보유 포인트", value=f"`{final_points} P`", inline=False)
+    embed.add_field(name="현재 보유 포인트", value=f"`{final_points:,} P`", inline=False)
     await ctx.send(embed=embed)
 
 
@@ -1486,8 +1484,8 @@ async def give_points(ctx, member: discord.Member, amount: int):
 
     new_points = await add_user_points(ctx.guild, member, amount)
     await update_point_ranking_message(bot)
-    await ctx.send(f"✅ {member.mention} 님에게 `{amount} P`를 지급했습니다. (현재: `{new_points} P`)")
-    await log_security_event(ctx.guild, "포인트 강제 지급", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n지급액: `{amount}P`", discord.Color.blue())
+    await ctx.send(f"✅ {member.mention} 님에게 `{amount:,} P`를 지급했습니다. (현재: `{new_points:,} P`)")
+    await log_security_event(ctx.guild, "포인트 강제 지급", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n지급액: `{amount:,}P`", discord.Color.blue())
 
 
 @bot.command(name="포인트차감")
@@ -1495,8 +1493,8 @@ async def give_points(ctx, member: discord.Member, amount: int):
 async def remove_points(ctx, member: discord.Member, amount: int):
     new_points = await add_user_points(ctx.guild, member, -amount)
     await update_point_ranking_message(bot)
-    await ctx.send(f"✅ {member.mention} 님의 포인트를 `{amount} P` 차감했습니다. (현재: `{new_points} P`)")
-    await log_security_event(ctx.guild, "포인트 강제 차감", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n차감액: `{amount}P`", discord.Color.orange())
+    await ctx.send(f"✅ {member.mention} 님의 포인트를 `{amount:,} P` 차감했습니다. (현재: `{new_points:,} P`)")
+    await log_security_event(ctx.guild, "포인트 강제 차감", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n차감액: `{amount:,}P`", discord.Color.orange())
 
 
 @bot.command(name="포인트리셋")
@@ -1507,7 +1505,7 @@ async def reset_points(ctx, member: discord.Member):
         await add_user_points(ctx.guild, member, -current_points)
     await update_point_ranking_message(bot)
     await ctx.send(f"🔄 {member.mention} 님의 포인트를 `0 P`로 초기화했습니다.")
-    await log_security_event(ctx.guild, "포인트 리셋", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n리셋 전 포인트: `{current_points}P`", discord.Color.red())
+    await log_security_event(ctx.guild, "포인트 리셋", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n리셋 전 포인트: `{current_points:,}P`", discord.Color.red())
 
 
 @bot.command(name="포인트랭킹", aliases=["랭킹패널", "주간베스트", "명예의전당"])
