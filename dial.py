@@ -48,7 +48,6 @@ DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
 KR_CHAT_CHANNEL_ID = 1505074223356317771
 EN_CHAT_CHANNEL_ID = 1527725232864100362
 
-# 🔒 보안실 채널 ID 수정 반영 (1505122707098828806)
 SECURITY_LOG_CHANNEL_ID = 1505122707098828806 
 COMMAND_CHANNEL_ID = 1531287070281040054 
 
@@ -72,7 +71,6 @@ SPAM_MESSAGE_LIMIT = 5       # 감지 시간 내 허용 메시지 수
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
 MAX_MENTION_LIMIT = 6        # 한 메시지 당 최대 허용 멘션 수
 
-# 대량 테러 감지 임계값 (10초 이내 실행 횟수)
 MASS_ACTION_WINDOW = 10.0
 MASS_CHANNEL_LIMIT = 3
 MASS_ROLE_LIMIT = 3
@@ -89,14 +87,12 @@ DM_TRADE_KEYWORDS = [
     "개인메시지", "개인 메세지", "뒷거래"
 ]
 
-# ⚠️ 위험 실행 파일 확장자 차단
 DANGEROUS_EXTENSIONS = (
     '.exe', '.bat', '.ps1', '.scr', '.vbs', '.cmd', '.jar',
     '.pif', '.application', '.gadget', '.msi', '.msp', '.com', '.hta', '.cpl',
     '.msc', '.vbe', '.jse', '.wsf', '.wsh', '.ps2', '.psc1', '.psc2'
 )
 
-# 🔒 PII Guard: 개인정보 및 sensitive 토큰 정규식
 DISCORD_TOKEN_REGEX = r"[\w-]{24,28}\.[\w-]{6}\.[\w-]{27,38}"
 PHONE_REGEX = r"\b01[016789]-?\d{3,4}-?\d{4}\b"
 RRN_REGEX = r"\b\d{6}-[1-8]\d{6}\b"
@@ -309,15 +305,48 @@ class CombinedTicketOpenView(ui.View):
         await interaction.followup.send(embed=embed, view=CategorySelectView(), ephemeral=True)
 
 
-# ==================== [봇 클래스 정의 및 Persistent View 등록] ====================
+# ==================== [자동 DB 정기 Clean-up 태스크] ====================
+
+@tasks.loop(hours=6)
+async def cleanup_processed_records():
+    """DB 용량 누수 방지를 위해 5,000건 초과된 오래된 처리 기록을 정기 삭제"""
+    try:
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute("""
+                DELETE FROM processed_commands 
+                WHERE message_id NOT IN (
+                    SELECT message_id FROM processed_commands ORDER BY message_id DESC LIMIT 5000
+                )
+            """)
+            await db.execute("""
+                DELETE FROM processed_command_errors 
+                WHERE message_id NOT IN (
+                    SELECT message_id FROM processed_command_errors ORDER BY message_id DESC LIMIT 5000
+                )
+            """)
+            await db.commit()
+    except Exception as e:
+        print(f"[DB Cleanup Error] {e}")
+
+
+# ==================== [봇 클래스 정의 및 Persistent View / DB 초기화] ====================
 
 class DialianBot(commands.Bot):
     async def setup_hook(self):
+        # 1. DB 및 테이블 초기화 (on_ready 대신 봇 시작 시 단 1회 실행)
+        await create_tables()
+        await init_extended_db()
+
+        # 2. Persistent View 등록
         self.add_view(CombinedTicketOpenView())
         self.add_view(CategorySelectView())
         self.add_view(VerifyView())
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
+
+        # 3. Clean-up 루프 태스크 가동
+        if not cleanup_processed_records.is_running():
+            cleanup_processed_records.start()
 
 
 intents = discord.Intents.default()
@@ -326,7 +355,6 @@ intents.members = True
 bot = DialianBot(command_prefix="!", intents=intents, help_command=None)
 
 daily_notice = None
-update_notice_sent = False
 bot_started_at = discord.utils.utcnow()
 
 PROCESSED_TABLES = {
@@ -338,7 +366,6 @@ PROCESSED_TABLES = {
 # ==================== [🛡️ 보안 & 로그 헬퍼 함수] ====================
 
 async def get_security_channel(guild: discord.Guild):
-    """보안실 채널을 캐시 또는 API 조회를 통해 정확히 가져오는 헬퍼 함수"""
     if not guild:
         return None
     sec_channel = guild.get_channel(SECURITY_LOG_CHANNEL_ID)
@@ -431,7 +458,7 @@ async def prevent_duplicate_command_processing(ctx):
     return await claim_once("processed_commands", ctx.message.id)
 
 
-# ==================== [DB 초기화] ====================
+# ==================== [DB 확장 구조 초기화] ====================
 
 async def init_extended_db():
     async with aiosqlite.connect(DATABASE) as db:
@@ -1201,7 +1228,6 @@ async def attendance_check(ctx):
     if not await check_command_channel(ctx):
         return
 
-    # 매일 1회만 가능하도록 일일 제한 검사
     success, current_count = await check_and_increment_daily_limit(ctx.author.id, "attendance", max_limit=1)
     if not success:
         return await ctx.send(f"❌ {ctx.author.mention}님, 이미 오늘 출석체크를 완료하셨습니다! 내일 다시 시도해주세요. 📅")
@@ -1209,7 +1235,6 @@ async def attendance_check(ctx):
     reward = ATTENDANCE_REWARD
     new_points = await add_user_points(ctx.guild, ctx.author, reward)
     
-    # 포인트 변동에 따른 랭킹 패널 동기화
     await update_point_ranking_message(bot)
 
     embed = discord.Embed(
@@ -1361,6 +1386,7 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
     await ctx.send(embed=embed)
 
 
+# 🛠️ [수정 완료] 묵찌빠 2라운드 공격/방어 판정 로직 완벽 개편
 @bot.command(name="묵찌빠")
 async def muk_jji_bba(ctx, choice: str, bet: int):
     if not await check_command_channel(ctx):
@@ -1379,7 +1405,7 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
 
     bot_choice1 = random.choice(choices)
     
-    # 1라운드: 주도권 가져오기
+    # 1라운드: 주도권(공격권) 결정
     if choice == bot_choice1:
         embed = discord.Embed(
             title="👊✌️🖐️ 묵찌빠 - 1라운드 무승부",
@@ -1402,34 +1428,53 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
     embed = discord.Embed(title="👊✌️🖐️ 묵찌빠 결과!", color=discord.Color.blurple())
     embed.add_field(
         name="1라운드 (주도권)",
-        value=f"유저: **{choice}** vs 봇: **{bot_choice1}** ➔ **{'유저' if user_attacker else '봇'}** 공격 잡기!",
+        value=f"유저: **{choice}** vs 봇: **{bot_choice1}** ➔ **{'유저' if user_attacker else '봇'}** 공격권 획득!",
         inline=False
     )
 
+    # 2라운드 판정 로직 (같은 패 제출 시 공격자 승리, 다른 패 제출 시 방어 성공)
     if user_choice2 == bot_choice2:
         if user_attacker:
             win_amount = int(bet * 1.3)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** **+{win_amount}P** 획득!", inline=False)
+            embed.add_field(
+                name="2라운드 (최종)", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** (상대방이 같은 패를 냄) **+{win_amount}P** 획득!", 
+                inline=False
+            )
             embed.color = discord.Color.gold()
         else:
             await add_user_points(ctx.guild, ctx.author, -bet)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** `{bet}P`를 잃었습니다.", inline=False)
+            embed.add_field(
+                name="2라운드 (최종)", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** (봇의 공격에 걸려듦) `{bet}P`를 잃었습니다.", 
+                inline=False
+            )
             embed.color = discord.Color.dark_red()
     else:
+        # 패가 다르면 공격 실패 (방어 성공)
         if user_attacker:
-            win_amount = int(bet * 1.1)
+            # 유저의 공격 실패 -> 판돈 환불 (무승부 처리)
+            final_points = current_points
+            embed.add_field(
+                name="2라운드 (최종)", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🛡️ **공격 빗나감!** 봇이 방어에 성공하여 배팅금을 그대로 돌려받습니다.", 
+                inline=False
+            )
+            embed.color = discord.Color.light_grey()
+        else:
+            # 봇의 공격을 유저가 방어 성공 -> 빗나감 보상 (+0.1배 추가 지급)
+            win_amount = int(bet * 0.1)
             await add_user_points(ctx.guild, ctx.author, win_amount)
             final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n✨ 우세한 공격으로 판정승! **+{win_amount}P** 획득!", inline=False)
+            embed.add_field(
+                name="2라운드 (최종)", 
+                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n✨ **방어 성공!** 봇의 공격을 차단하고 보너스 **+{win_amount}P**를 획득했습니다!", 
+                inline=False
+            )
             embed.color = discord.Color.green()
-        else:
-            await add_user_points(ctx.guild, ctx.author, -bet)
-            final_points = await get_user_points(ctx.author.id)
-            embed.add_field(name="2라운드 (최종)", value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n😭 봇의 압박을 버티지 못하고 `{bet}P`를 잃었습니다.", inline=False)
-            embed.color = discord.Color.red()
 
     await update_point_ranking_message(bot)
     embed.add_field(name="현재 보유 포인트", value=f"`{final_points} P`", inline=False)
@@ -2058,12 +2103,16 @@ async def verify_panel(ctx):
 
 # ==================== [자동 반복 태스크] ====================
 
+# 🛠️ [수정 완료] 안전한 채널 멘션 처리로 보안 채널 오공지 방지
 @tasks.loop(hours=12)
 async def auto_chat_guide_loop():
-    inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID") or SECURITY_LOG_CHANNEL_ID
-    example_ch = globals().get("EXAMPLE_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
-    designer_stats_ch = globals().get("DESIGNER_STATS_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
-    reviews_ch = globals().get("REVIEWS_CHANNEL_ID", SECURITY_LOG_CHANNEL_ID)
+    inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID")
+    example_ch = globals().get("EXAMPLE_CHANNEL_ID")
+    designer_stats_ch = globals().get("DESIGNER_STATS_CHANNEL_ID")
+    reviews_ch = globals().get("REVIEWS_CHANNEL_ID")
+
+    def format_ch(ch_id):
+        return f"<#{ch_id}>" if ch_id else "`미설정 채널`"
 
     kr_channel = bot.get_channel(KR_CHAT_CHANNEL_ID)
     if kr_channel:
@@ -2078,11 +2127,11 @@ async def auto_chat_guide_loop():
         embed_kr.add_field(
             name="📌 주요 이용 안내 채널",
             value=(
-                f"• <#{inquiry_ch}> : 커미션 주문 및 문의/지원 신청\n"
-                f"• <#{example_ch}> : 디자이너 샘플 및 예시작 감상\n"
+                f"• {format_ch(inquiry_ch)} : 커미션 주문 및 문의/지원 신청\n"
+                f"• {format_ch(example_ch)} : 디자이너 샘플 및 예시작 감상\n"
                 f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황\n"
-                f"• <#{designer_stats_ch}> : 디자이너 작업 완료 통계\n"
-                f"• <#{reviews_ch}> : 실제 이용 고객님들의 솔직한 후기"
+                f"• {format_ch(designer_stats_ch)} : 디자이너 작업 완료 통계\n"
+                f"• {format_ch(reviews_ch)} : 실제 이용 고객님들의 솔직한 후기"
             ),
             inline=False
         )
@@ -2113,11 +2162,11 @@ async def auto_chat_guide_loop():
         embed_en.add_field(
             name="📌 Essential Channels",
             value=(
-                f"• <#{inquiry_ch}> : Order commissions & Partner/Dev inquiries\n"
-                f"• <#{example_ch}> : Designer portfolio & sample showcase\n"
+                f"• {format_ch(inquiry_ch)} : Order commissions & Partner/Dev inquiries\n"
+                f"• {format_ch(example_ch)} : Designer portfolio & sample showcase\n"
                 f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories\n"
-                f"• <#{designer_stats_ch}> : Designer completed work statistics\n"
-                f"• <#{reviews_ch}> : Genuine customer reviews & feedback"
+                f"• {format_ch(designer_stats_ch)} : Designer completed work statistics\n"
+                f"• {format_ch(reviews_ch)} : Genuine customer reviews & feedback"
             ),
             inline=False
         )
@@ -2136,12 +2185,11 @@ async def auto_chat_guide_loop():
             print(f"[영챗 공지 실패] {e}")
 
 
+# 🛠️ [수정 완료] on_ready 내 중복 실행 DB 함수 정리 및 태스크 안전 가동
 @bot.event
 async def on_ready():
     global daily_notice
     print(f"🤖 {bot.user.name} 봇 준비 완료 (ID: {bot.user.id})")
-    await create_tables()
-    await init_extended_db()
 
     try:
         if DailyNotice:
