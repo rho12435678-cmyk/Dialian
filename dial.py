@@ -2099,6 +2099,93 @@ async def verify_panel(ctx):
 
 # ==================== [자동 반복 태스크] ====================
 
+@tasks.loop(hours=12)
+async def auto_chat_guide_loop():
+    inquiry_ch = globals().get("INQUIRIES_CHANNEL_ID") or globals().get("TICKET_CHANNEL_ID")
+    example_ch = globals().get("EXAMPLE_CHANNEL_ID")
+    designer_stats_ch = globals().get("DESIGNER_STATS_CHANNEL_ID")
+    reviews_ch = globals().get("REVIEWS_CHANNEL_ID")
+
+    def format_ch(ch_id):
+        return f"<#{ch_id}>" if ch_id else "`미설정 채널`"
+
+    kr_channel = bot.get_channel(KR_CHAT_CHANNEL_ID)
+    if kr_channel:
+        # config.py의 GUIDE_MESSAGE_KR 변수를 Embed description으로 적용
+        kr_description = globals().get("GUIDE_MESSAGE_KR", (
+            "안녕하세요! **DDS 공식 커뮤니티**에 오신 것을 환영합니다! 🎉\n"
+            "서버를 효율적으로 이용하실 수 있도록 주요 채널 안내를 드립니다."
+        ))
+        
+        embed_kr = discord.Embed(
+            title="✨ DDS (Design & Developer Service) 공식 가이드",
+            description=kr_description,
+            color=discord.Color.blurple()
+        )
+        embed_kr.add_field(
+            name="📌 주요 이용 안내 채널",
+            value=(
+                f"• {format_ch(inquiry_ch)} : 커미션 주문 및 문의/지원 신청\n"
+                f"• {format_ch(example_ch)} : 디자이너 샘플 및 예시작 감상\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : 디자이너 등급 및 분야 현황\n"
+                f"• {format_ch(designer_stats_ch)} : 디자이너 작업 완료 통계\n"
+                f"• {format_ch(reviews_ch)} : 실제 이용 고객님들의 솔직한 후기"
+            ),
+            inline=False
+        )
+        embed_kr.add_field(
+            name="🪙 포인트 & 혜택 시스템",
+            value=(
+                f"• <#{POINT_RANKING_CHANNEL_ID}> : 포인트 실시간 랭킹 확인\n"
+                f"• <#{POINT_INFO_CHANNEL_ID}> : 포인트 적립 방법 및 단골(15% 할인) 혜택 안내"
+            ),
+            inline=False
+        )
+        embed_kr.set_footer(text="자동 가이드 공지 | 12시간 주기 업데이트")
+        try:
+            await kr_channel.send(embed=embed_kr)
+        except Exception as e:
+            print(f"[한챗 공지 실패] {e}")
+
+    en_channel = bot.get_channel(EN_CHAT_CHANNEL_ID)
+    if en_channel:
+        # config.py의 GUIDE_MESSAGE_EN 변수를 Embed description으로 적용
+        en_description = globals().get("GUIDE_MESSAGE_EN", (
+            "Welcome to **DDS Official Server**! 🎉\n"
+            "Here is a quick directory of our main channels to help you get started."
+        ))
+
+        embed_en = discord.Embed(
+            title="✨ DDS (Design & Developer Service) Guide",
+            description=en_description,
+            color=discord.Color.blue()
+        )
+        embed_en.add_field(
+            name="📌 Essential Channels",
+            value=(
+                f"• {format_ch(inquiry_ch)} : Order commissions & Partner/Dev inquiries\n"
+                f"• {format_ch(example_ch)} : Designer portfolio & sample showcase\n"
+                f"• <#{DESIGNER_TIER_CHANNEL_ID}> : Designer ranks & categories\n"
+                f"• {format_ch(designer_stats_ch)} : Designer completed work statistics\n"
+                f"• {format_ch(reviews_ch)} : Genuine customer reviews & feedback"
+            ),
+            inline=False
+        )
+        embed_en.add_field(
+            name="🪙 Points & Rewards",
+            value=(
+                f"• <#{POINT_RANKING_CHANNEL_ID}> : Real-time Point Leaderboard\n"
+                f"• <#{POINT_INFO_CHANNEL_ID}> : How to earn points & VIP perks (15% OFF)"
+            ),
+            inline=False
+        )
+        embed_en.set_footer(text="Auto Guide Notice | 12h Cycle")
+        try:
+            await en_channel.send(embed=embed_en)
+        except Exception as e:
+            print(f"[영챗 공지 실패] {e}")
+
+
 @bot.event
 async def on_ready():
     global daily_notice
