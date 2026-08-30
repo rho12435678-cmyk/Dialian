@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import os
 import random
 import re
@@ -2101,7 +2101,7 @@ async def verify_panel(ctx):
 # ⏰ 주기적 공지 스케줄 설정 (KST 기준 오후 6시 정각)
 # ----------------------------------------------------
 KST = timezone(timedelta(hours=9))
-GUIDE_SCHEDULE_TIME = datetime.time(hour=18, minute=0, second=0, tzinfo=KST)
+GUIDE_SCHEDULE_TIME = time(hour=18, minute=0, second=0, tzinfo=KST)
 last_guide_run_date = None
 
 
