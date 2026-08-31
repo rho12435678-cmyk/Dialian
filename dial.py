@@ -1197,9 +1197,9 @@ async def command_list(ctx):
             "`!출석체크` (매일 1회 출석 체크 시 **+10P** 지급!)\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용)*\n"
-            "`!뽑기` - 20P 소모\n"
-            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 약 1.95배!\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 심리전 기반 배팅 게임!"
+            "`!뽑기` - 20P 소모 (최대 300P 획득 가능)\n"
+            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 수수료 5% 제외 후 지급!\n"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 정식 심리전 대결 (승리 시 1.5배 지급!)"
         ),
         color=discord.Color.blurple(),
     )
@@ -1324,7 +1324,7 @@ async def send_point_guide_embed(ctx):
             "!뽑기 (또는 !가챠, !럭키드로우)\n"
             "- 20P 소모 / 최대 300P 잭팟!\n\n"
             "!가위바위보 [가위/바위/보] [배팅포인트]\n"
-            "- 최소 배팅 10P 이상 / 승리 시 1.95배 지급!\n\n"
+            "- 최소 배팅 10P 이상 / 승리 시 수수료 5% 제외 지급!\n\n"
             "!묵찌빠 [가위/바위/보] [배팅포인트]\n"
             "- 최소 배팅 20P 이상 / 묵찌빠 심리전 대결!\n\n"
             "[ 관리자 전용 ]\n"
@@ -1436,6 +1436,8 @@ async def show_points(ctx, member: discord.Member = None):
     await ctx.send(embed=embed)
 
 
+# ==================== [🎰 수정된 미니게임 섹션] ====================
+
 @bot.command(name="뽑기", aliases=["가챠", "럭키드로우"])
 async def point_gacha(ctx):
     if not await check_command_channel(ctx):
@@ -1449,26 +1451,31 @@ async def point_gacha(ctx):
 
     await add_user_points(ctx.guild, ctx.author, -cost)
 
-    prizes = [2, 10, 20, 30, 50, 100, 300]
-    weights = [60, 15, 15, 6, 3, 0.9, 0.1]
+    # 수정된 현실적 가챠 확률 테이블 (기대 환급률 약 83.5%)
+    prizes = [0, 10, 20, 30, 50, 100, 300]
+    weights = [30, 30, 20, 12, 5, 2.7, 0.3]
     result = random.choices(prizes, weights=weights, k=1)[0]
 
-    await add_user_points(ctx.guild, ctx.author, result)
+    if result > 0:
+        await add_user_points(ctx.guild, ctx.author, result)
+
     final_points = await get_user_points(ctx.author.id)
     await update_point_ranking_message(bot)
 
-    if result == 2:
-        color, title, desc = discord.Color.dark_grey(), "😭 아쉬운 꽝!", "위로 포인트 **2P**를 받으셨습니다."
+    if result == 0:
+        color, title, desc = discord.Color.dark_grey(), "😭 아쉬운 꽝!", "포인트를 얻지 못했습니다."
     elif result == 10:
-        color, title, desc = discord.Color.light_grey(), "💧 절반 보전!", "소모한 포인트의 절반인 **10P**를 찾았습니다."
+        color, title, desc = discord.Color.light_grey(), "💧 절반 보전!", "소모한 포인트의 절반인 **10P**를 돌려받았습니다."
     elif result == 20:
         color, title, desc = discord.Color.blue(), "😐 본전치기!", "소모한 20P를 그대로 찾아왔습니다."
-    elif result == 300:
-        color, title, desc = discord.Color.magenta(), "🔥 극악의 300P 잭팟 터짐!!!", f"0.1%의 기적을 뚫고 무려 **{result}P**를 획득했습니다!"
-    elif result >= 50:
-        color, title, desc = discord.Color.gold(), "🎉 축하합니다! 대박 당첨!", f"**+{result}P**를 얻으셨습니다!"
-    else:
-        color, title, desc = discord.Color.green(), "✨ 소소한 이득!", f"**+{result}P**를 획득했습니다!"
+    elif result == 30:
+        color, title, desc = discord.Color.green(), "✨ 소소한 이득!", "소모 포인트 대비 **+10P** 이득 (**30P** 획득)!"
+    elif result == 50:
+        color, title, desc = discord.Color.gold(), "🎉 축하합니다! 당첨!", f"**+{result}P**를 얻으셨습니다!"
+    elif result == 100:
+        color, title, desc = discord.Color.purple(), "💎 대박 당첨!", f"무려 **+{result}P**를 획득하셨습니다!"
+    else:  # 300P
+        color, title, desc = discord.Color.magenta(), "🔥 300P 잭팟 터짐!!!", f"극악의 확률을 뚫고 무려 **{result}P**를 획득했습니다!"
 
     embed = discord.Embed(title=title, description=desc, color=color)
     embed.add_field(name="현재 잔여 포인트", value=f"`{final_points:,} P`", inline=False)
@@ -1548,80 +1555,87 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
     if current_points < bet:
         return await ctx.send(f"❌ 보유 포인트가 부족합니다. (현재 `{current_points:,}P`)")
 
+    # 가위바위보 승패 판정 함수
+    def get_rps_winner(p1_move, p2_move):
+        if p1_move == p2_move:
+            return "draw"
+        if (p1_move == "가위" and p2_move == "보") or \
+           (p1_move == "바위" and p2_move == "가위") or \
+           (p1_move == "보" and p2_move == "바위"):
+            return "p1"
+        return "p2"
+
+    # 1라운드: 가위바위보로 선공 결정
     bot_choice1 = random.choice(choices)
-    
-    # 1라운드: 주도권(공격권) 결정
-    if choice == bot_choice1:
+    first_round_result = get_rps_winner(choice, bot_choice1)
+
+    if first_round_result == "draw":
         embed = discord.Embed(
-            title="👊✌️🖐️ 묵찌빠 - 1라운드 무승부",
-            description=f"유저: **{choice}** vs 봇: **{bot_choice1}**\n\n첫 판부터 비겨 승패 없이 판돈을 돌려받습니다.",
+            title="👊✌️🖐️ 묵찌빠 - 무승부",
+            description=f"유저: **{choice}** vs 봇: **{bot_choice1}**\n\n첫 판 가위바위보에서 비겼으므로 승패 없이 판돈을 돌려받습니다.",
             color=discord.Color.light_grey()
         )
         embed.add_field(name="현재 보유 포인트", value=f"`{current_points:,} P`", inline=False)
         return await ctx.send(embed=embed)
 
-    user_attacker = (
-        (choice == "가위" and bot_choice1 == "보") or
-        (choice == "바위" and bot_choice1 == "가위") or
-        (choice == "보" and bot_choice1 == "바위")
-    )
+    attacker = "user" if first_round_result == "p1" else "bot"
+    logs = [f"**[1턴 - 선공 결정]** 유저({choice}) vs 봇({bot_choice1}) ➔ **{'유저' if attacker == 'user' else '봇'}** 선공!"]
 
-    # 2라운드 시뮬레이션
-    bot_choice2 = random.choice(choices)
-    user_choice2 = random.choice(choices)
+    # 2라운드부터 정식 묵찌빠 시뮬레이션
+    winner = None
+    turn = 2
 
-    embed = discord.Embed(title="👊✌️🖐️ 묵찌빠 결과!", color=discord.Color.blurple())
-    embed.add_field(
-        name="1라운드 (주도권)",
-        value=f"유저: **{choice}** vs 봇: **{bot_choice1}** ➔ **{'유저' if user_attacker else '봇'}** 공격권 획득!",
-        inline=False
-    )
+    while turn <= 6:
+        u_move = choice if turn == 2 else random.choice(choices)
+        b_move = random.choice(choices)
+        att_name = "유저" if attacker == "user" else "봇"
 
-    # 2라운드 판정 로직
-    if user_choice2 == bot_choice2:
-        if user_attacker:
-            win_amount = int(bet * 1.3)
-            await add_user_points(ctx.guild, ctx.author, win_amount)
-            final_points = await get_user_points(ctx.author.id)
-            embed.add_field(
-                name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🔥 **공격 성공!** (상대방이 같은 패를 냄) **+{win_amount:,}P** 획득!", 
-                inline=False
-            )
-            embed.color = discord.Color.gold()
+        if u_move == b_move:
+            winner = attacker
+            logs.append(f"**[{turn}턴 - 최종]** {att_name} 공격! 유저({u_move}) vs 봇({b_move}) ➔ **{att_name} 승리!** 🎉")
+            break
         else:
-            await add_user_points(ctx.guild, ctx.author, -bet)
-            final_points = await get_user_points(ctx.author.id)
-            embed.add_field(
-                name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n💀 **방어 실패!** (봇의 공격에 걸려듦) `{bet:,}P`를 잃었습니다.", 
-                inline=False
-            )
-            embed.color = discord.Color.dark_red()
+            turn_result = get_rps_winner(u_move, b_move)
+            new_attacker = "user" if turn_result == "p1" else "bot"
+            new_att_name = "유저" if new_attacker == "user" else "봇"
+            logs.append(f"**[{turn}턴]** {att_name} 공격 실패! 유저({u_move}) vs 봇({b_move}) ➔ 공격권 **{new_att_name}**에게 이동!")
+            attacker = new_attacker
+            turn += 1
+
+    if not winner:
+        logs.append("**[종료]** 6턴 넘게 치열한 접전이 이어져 무승부 처리되었습니다.")
+
+    if winner == "user":
+        win_profit = int(bet * 1.5)  # 묵찌빠 난이도 감안 1.5배 보상
+        await add_user_points(ctx.guild, ctx.author, win_profit)
+        final_points = await get_user_points(ctx.author.id)
+        embed = discord.Embed(
+            title="👊✌️🖐️ 묵찌빠 승리!",
+            description="\n".join(logs) + f"\n\n🎉 치열한 대결 끝에 승리하여 **+{win_profit:,}P**를 획득했습니다!",
+            color=discord.Color.gold()
+        )
+    elif winner == "bot":
+        await add_user_points(ctx.guild, ctx.author, -bet)
+        final_points = await get_user_points(ctx.author.id)
+        embed = discord.Embed(
+            title="👊✌️🖐️ 묵찌빠 패배...",
+            description="\n".join(logs) + f"\n\n😭 패배하여 `{bet:,}P`를 잃었습니다.",
+            color=discord.Color.red()
+        )
     else:
-        if user_attacker:
-            final_points = current_points
-            embed.add_field(
-                name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n🛡️ **공격 빗나감!** 봇이 방어에 성공하여 배팅금을 그대로 돌려받습니다.", 
-                inline=False
-            )
-            embed.color = discord.Color.light_grey()
-        else:
-            win_amount = int(bet * 0.1)
-            await add_user_points(ctx.guild, ctx.author, win_amount)
-            final_points = await get_user_points(ctx.author.id)
-            embed.add_field(
-                name="2라운드 (최종)", 
-                value=f"유저: **{user_choice2}** vs 봇: **{bot_choice2}**\n\n✨ **방어 성공!** 봇의 공격을 차단하고 보너스 **+{win_amount:,}P**를 획득했습니다!", 
-                inline=False
-            )
-            embed.color = discord.Color.green()
+        final_points = current_points
+        embed = discord.Embed(
+            title="👊✌️🖐️ 묵찌빠 무승부!",
+            description="\n".join(logs),
+            color=discord.Color.light_grey()
+        )
 
     await update_point_ranking_message(bot)
     embed.add_field(name="현재 보유 포인트", value=f"`{final_points:,} P`", inline=False)
     await ctx.send(embed=embed)
 
+
+# ==================== [포인트 관리 전용 명령어] ====================
 
 @bot.command(name="포인트지급")
 @commands.has_permissions(administrator=True)
