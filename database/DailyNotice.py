@@ -9,6 +9,7 @@ class DailyNotice(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.last_run_date = None  # 하루 중복 실행 방지용 상태 변수
         self.daily_notice.start()
 
     def cog_unload(self):
@@ -17,10 +18,16 @@ class DailyNotice(commands.Cog):
     @tasks.loop(time=time(hour=18, minute=0, tzinfo=KST))
     async def daily_notice(self):
         today = datetime.now(KST).date()
+
+        # 당일 이미 실행되었다면 루프 중복 호출 스킵 (중복 발송 방지)
+        if self.last_run_date == today:
+            return
+        self.last_run_date = today
+
         print("[DailyNotice] 오후 6시 정기 공지 스케줄 시작")
 
         # 1. 판매 공지 (매일 오후 6시 정각 전송)
-        sales_channel = self.bot.get_channel(getattr(config, 'SALES_NOTICE_CHANNEL_ID', None))
+        sales_channel = self.bot.get_channel(config.SALES_NOTICE_CHANNEL_ID)
         if sales_channel:
             try:
                 await sales_channel.send(config.SALES_NOTICE_MESSAGE)
