@@ -26,34 +26,49 @@ class DailyNotice(commands.Cog):
 
         print("[DailyNotice] 오후 6시 정기 공지 스케줄 시작")
 
-        # 1. 판매 공지 (매일 오후 6시 정각 전송)
+        # 1. 판매 공지 (매일 오후 6시 정각 Embed 전송)
         sales_channel = self.bot.get_channel(config.SALES_NOTICE_CHANNEL_ID)
         if sales_channel:
             try:
-                await sales_channel.send(config.SALES_NOTICE_MESSAGE)
+                sales_embed = discord.Embed(
+                    title="📢 Sales Notice / 판매 공지",
+                    description=config.SALES_NOTICE_MESSAGE,
+                    color=discord.Color.gold()
+                )
+                await sales_channel.send(embed=sales_embed)
                 print("[DailyNotice] 판매 공지 전송 완료 (매일)")
             except Exception as e:
                 print(f"[DailyNotice] 판매 공지 오류: {e}")
         else:
             print("[DailyNotice] 판매 공지 채널을 찾을 수 없음")
 
-        # 2. 한국어 / 영어 가이드 공지 (2일 주기 전송)
+        # 2. 한국어 / 영어 가이드 공지 (교대 전송: 짝수일 KR, 홀수일 EN)
         if today.toordinal() % 2 == 0:
-            # 한국어 가이드
+            # 짝수일: 한국어 가이드
             kr_channel = self.bot.get_channel(config.KR_CHAT_CHANNEL_ID)
             if kr_channel:
                 try:
-                    await kr_channel.send(config.GUIDE_MESSAGE_KR)
-                    print("[DailyNotice] 한국어 가이드 공지 전송 완료 (2일 주기)")
+                    kr_embed = discord.Embed(
+                        title="📘 공식 가이드 안내",
+                        description=config.GUIDE_MESSAGE_KR,
+                        color=discord.Color.blue()
+                    )
+                    await kr_channel.send(embed=kr_embed)
+                    print("[DailyNotice] 한국어 가이드 공지 전송 완료 (짝수일)")
                 except Exception as e:
                     print(f"[DailyNotice] 한국어 공지 오류: {e}")
-
-            # 영어 가이드
+        else:
+            # 홀수일: 영어 가이드
             en_channel = self.bot.get_channel(config.EN_CHAT_CHANNEL_ID)
             if en_channel:
                 try:
-                    await en_channel.send(config.GUIDE_MESSAGE_EN)
-                    print("[DailyNotice] 영어 가이드 공지 전송 완료 (2일 주기)")
+                    en_embed = discord.Embed(
+                        title="📘 Official Guide",
+                        description=config.GUIDE_MESSAGE_EN,
+                        color=discord.Color.blue()
+                    )
+                    await en_channel.send(embed=en_embed)
+                    print("[DailyNotice] 영어 가이드 공지 전송 완료 (홀수일)")
                 except Exception as e:
                     print(f"[DailyNotice] 영어 공지 오류: {e}")
 
