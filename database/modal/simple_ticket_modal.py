@@ -1,3 +1,4 @@
+import re
 import discord
 import aiosqlite
 from datetime import datetime
@@ -32,11 +33,11 @@ class SimpleTicketModal(discord.ui.Modal):
 
         self.selected_designer = selected_designer
 
-        # 파트너/제휴 신청인 경우 개편된 2개 입력란 구성
+        # 파트너/제휴 신청인 경우 개편된 2개 입력란 구성 (서버 총 인원 / 서버 영구링크)
         if any(keyword in ticket_type for keyword in ["파트너", "제휴"]):
             self.member_count = discord.ui.TextInput(
-                label="서버 총 인원",
-                placeholder="0~100,000 (파트너십 조건: 100명 이상)",
+                label="서버 총 인원 (파트너십 조건: 100명 이상)",
+                placeholder="예: 150 (숫자만 입력)",
                 style=discord.TextStyle.short,
                 required=True,
                 max_length=50
@@ -64,6 +65,19 @@ class SimpleTicketModal(discord.ui.Modal):
         # 1. 3초 타임아웃 방지를 위한 defer 선제 처리
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
+
+        # 파트너 / 제휴 신청 시 서버 인원수(100명 이상) 검증
+        if any(keyword in self.COMMISSION_NAME for keyword in ["파트너", "제휴"]):
+            raw_count = self.member_count.value.strip().replace(",", "")
+            if not raw_count.isdigit():
+                return await interaction.followup.send("❌ 서버 총 인원란에는 숫자만 입력해 주세요.", ephemeral=True)
+
+            members_count = int(raw_count)
+            if members_count < 100:
+                return await interaction.followup.send(
+                    f"❌ 파트너십 신청은 **서버 인원 100명 이상** 조건일 때만 진행할 수 있습니다. (현재 입력값: {members_count:,}명)",
+                    ephemeral=True
+                )
 
         ticket_lock = await acquire_ticket_creation_lock(interaction)
         if ticket_lock is None:
@@ -131,7 +145,9 @@ class SimpleTicketModal(discord.ui.Modal):
 
         # 파트너/제휴 신청일 경우 출력할 임베드 항목 구분
         if any(keyword in self.COMMISSION_NAME for keyword in ["파트너", "제휴"]):
-            embed.add_field(name="👥 서버 총 인원", value=self.member_count.value, inline=False)
+            raw_count = self.member_count.value.strip().replace(",", "")
+            members_count = int(raw_count) if raw_count.isdigit() else 0
+            embed.add_field(name="👥 서버 총 인원", value=f"`{members_count:,}명`", inline=False)
             embed.add_field(name="🔗 서버 영구링크", value=self.invite_link.value, inline=False)
         else:
             embed.add_field(name=self.FIELD_NAME, value=self.content.value, inline=False)
