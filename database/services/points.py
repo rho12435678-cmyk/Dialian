@@ -17,38 +17,61 @@ async def get_user_points(user_id: int) -> int:
         return row[0] if row else 0
 
 async def add_user_points(guild, member, amount: int) -> int:
-    """포인트를 적립하고 기준 달성 시 단골 역할 자동 부여"""
+    """포인트를 적립하고 기준 달성 시 단골 역할 자동 부여 (중복 DM 차단 처리)"""
     user_id = member.id
     async with aiosqlite.connect(DATABASE) as db:
+        # 테이블 생성
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_points (
                 user_id INTEGER PRIMARY KEY,
                 points INTEGER DEFAULT 0,
-                last_attendance_date TEXT
+                last_attendance_date TEXT,
+                is_regular_notified INTEGER DEFAULT 0
             )
         """)
+        
+        # 기존 DB 호환용 컬럼 추가 예외 처리
+        try:
+            await db.execute("ALTER TABLE user_points ADD COLUMN is_regular_notified INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        # 포인트 적립
         await db.execute("""
             INSERT INTO user_points (user_id, points) VALUES (?, ?)
             ON CONFLICT(user_id) DO UPDATE SET points = points + ?
         """, (user_id, amount, amount))
         await db.commit()
         
-        cursor = await db.execute("SELECT points FROM user_points WHERE user_id = ?", (user_id,))
+        cursor = await db.execute("SELECT points, is_regular_notified FROM user_points WHERE user_id = ?", (user_id,))
         row = await cursor.fetchone()
         new_points = row[0] if row else 0
+        is_notified = row[1] if row and len(row) > 1 else 0
 
-    # 단골 역할 부여 체킹 (TARGET_REGULAR_POINTS 달성 시)
-    if guild and member and new_points >= TARGET_REGULAR_POINTS:
+    # 단골 역할 부여 및 중복 DM 방지 체킹 (TARGET_REGULAR_POINTS 달성 및 미발송 유저 대상)
+    if guild and member and new_points >= TARGET_REGULAR_POINTS and not is_notified:
+        target_member = guild.get_member(user_id) or member
         role = guild.get_role(REGULAR_CUSTOMER_ROLE_ID)
-        if role and role not in member.roles:
+        
+        # 이미 역할을 가지고 있는 경우 DB 상태만 업데이트 후 종료 (중복 DM 방지)
+        if role and role in target_member.roles:
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute("UPDATE user_points SET is_regular_notified = 1 WHERE user_id = ?", (user_id,))
+                await db.commit()
+        elif role and role not in target_member.roles:
             try:
-                await member.add_roles(role, reason="단골 기준 포인트 달성")
-                await member.send(
+                await target_member.add_roles(role, reason="단골 기준 포인트 달성")
+                await target_member.send(
                     f"🎉 축하합니다! **{TARGET_REGULAR_POINTS:,} P**를 달성하여 **@{role.name}** 등급으로 승급하셨습니다!\n"
                     "앞으로 모든 커미션 이용 시 **15% 할인** 혜택이 자동 적용됩니다."
                 )
+                
+                # 발송 완료 상태 기록
+                async with aiosqlite.connect(DATABASE) as db:
+                    await db.execute("UPDATE user_points SET is_regular_notified = 1 WHERE user_id = ?", (user_id,))
+                    await db.commit()
             except Exception as e:
-                print(f"[단골 역할 부여 실패] {e}")
+                print(f"[단골 역할 부여/DM 발송 실패] {e}")
 
     return new_points
 
@@ -62,7 +85,8 @@ async def process_daily_attendance(guild, member) -> tuple[bool, int, int]:
             CREATE TABLE IF NOT EXISTS user_points (
                 user_id INTEGER PRIMARY KEY,
                 points INTEGER DEFAULT 0,
-                last_attendance_date TEXT
+                last_attendance_date TEXT,
+                is_regular_notified INTEGER DEFAULT 0
             )
         """)
         
