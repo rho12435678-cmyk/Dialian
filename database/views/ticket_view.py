@@ -9,17 +9,17 @@ from database.views.ticket_guard import block_if_ticket_exists
 
 
 # --------------------------------------------------
-# 0. 공통 손님 호출 함수
+# 0. 공통 손님 호출 함수 (2번: 자동 멘션 & 진행상황 재확인 기능 강화)
 # --------------------------------------------------
 async def handle_customer_call(
     channel: discord.TextChannel,
     sender: discord.Member,
     interaction: discord.Interaction = None
 ):
-    # DB에서 해당 티켓 채널의 손님(user_id) 조회
+    # DB에서 손님 ID, 진행률, 상태 정보를 한 번에 조회
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
-            "SELECT user_id FROM commissions WHERE ticket_channel = ?",
+            "SELECT user_id, progress, status FROM commissions WHERE ticket_channel = ?",
             (channel.id,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -32,7 +32,7 @@ async def handle_customer_call(
             await channel.send(msg)
         return
 
-    customer_id = row[0]
+    customer_id, progress, status = row[0], row[1], row[2]
     customer = channel.guild.get_member(customer_id)
 
     if not customer:
@@ -43,25 +43,37 @@ async def handle_customer_call(
             await channel.send(msg)
         return
 
-    # DM 발송용 알림 임베드
+    # 진행 상황 요약 텍스트 구성
+    progress_val = progress if progress is not None else 0
+    status_val = status if status else "진행 중"
+    status_info = f"📊 **현재 진행률:** `{progress_val}%` | 📌 **상태:** `{status_val}`"
+
+    # 1) DM 전용 알림 임베드
     embed = discord.Embed(
-        title="🔔 디자이너 호출 알림",
-        description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 손님을 찾고 계십니다!\n빠른 진행을 위해 아래 링크를 눌러 채널로 이동해 주세요.",
+        title="🔔 디자이너 호출 및 진행 상황 안내",
+        description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 호출하셨습니다!\n아래 링크를 통해 채널로 이동하여 확인해 주세요.",
         color=0x5865F2
     )
-    embed.add_field(name="🔗 티켓 채널 바로가기", value=f"[여기 클릭해서 이동하기]({channel.jump_url})")
+    embed.add_field(name="📋 현재 진행 상황", value=status_info, inline=False)
+    embed.add_field(name="🔗 티켓 채널 바로가기", value=f"[여기 클릭해서 이동하기]({channel.jump_url})", inline=False)
 
-    # 손님에게 DM 발송
+    dm_notice = ""
     try:
         await customer.send(embed=embed)
-        result_text = f"✅ {customer.mention} 손님께 DM 호출 알림을 성공적으로 보냈습니다!"
+        dm_notice = "\n*(✉️ 손님 DM으로도 알림을 전송했습니다.)*"
     except discord.Forbidden:
-        result_text = f"⚠️ {customer.mention} 손님님이 DM을 닫아두셔서 알림을 보내지 못했습니다."
+        dm_notice = "\n*(⚠️ 손님의 DM이 차단되어 있어 채널 멘션만 수행되었습니다.)*"
+
+    # 2) 티켓 채널 내 자동 멘션 메시지 작성
+    call_message = (
+        f"🔔 {customer.mention} 손님! **{sender.display_name}** 디자이너님이 호출하셨습니다.\n"
+        f"> {status_info}{dm_notice}"
+    )
 
     if interaction and not interaction.response.is_done():
-        await interaction.response.send_message(result_text)
+        await interaction.response.send_message(call_message)
     else:
-        await channel.send(result_text)
+        await channel.send(call_message)
 
 
 # --------------------------------------------------
