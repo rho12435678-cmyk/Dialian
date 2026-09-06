@@ -129,7 +129,7 @@ def parse_mention_id(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-async def fetch_member_or_none(guild, member_id):
+async def fetch_member_or_none(guild: discord.Guild, member_id: int):
     if not member_id or not guild:
         return None
     member = guild.get_member(member_id)
@@ -153,14 +153,17 @@ async def init_blacklist_table(db: aiosqlite.Connection):
     """)
     await db.commit()
 
+
 async def is_blacklisted(db: aiosqlite.Connection, user_id: int) -> bool:
     async with db.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)) as cursor:
         row = await cursor.fetchone()
         return row is not None
 
+
 async def get_blacklist_info(db: aiosqlite.Connection, user_id: int):
     async with db.execute("SELECT reason, created_at FROM blacklist WHERE user_id = ?", (user_id,)) as cursor:
         return await cursor.fetchone()
+
 
 async def add_blacklist(db: aiosqlite.Connection, user_id: int, reason: str):
     now = discord.utils.utcnow().isoformat()
@@ -170,6 +173,7 @@ async def add_blacklist(db: aiosqlite.Connection, user_id: int, reason: str):
     )
     await db.commit()
 
+
 async def remove_blacklist(db: aiosqlite.Connection, user_id: int):
     await db.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
     await db.commit()
@@ -177,15 +181,15 @@ async def remove_blacklist(db: aiosqlite.Connection, user_id: int):
 
 # ==================== [티켓 / 커미션 데이터베이스 헬퍼] ====================
 
-def is_ticket_channel(channel):
+def is_ticket_channel(channel) -> bool:
     return isinstance(channel, discord.TextChannel) and channel.name.startswith("티켓-")
 
 
-def is_ticket_or_archive_channel(channel):
+def is_ticket_or_archive_channel(channel) -> bool:
     return isinstance(channel, discord.TextChannel) and (channel.name.startswith("티켓-") or channel.name.startswith("보관-티켓-"))
 
 
-async def find_ticket_owner(channel):
+async def find_ticket_owner(channel: discord.TextChannel):
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("SELECT customer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
             row = await cursor.fetchone()
@@ -208,7 +212,7 @@ async def find_ticket_owner(channel):
     return None
 
 
-async def find_ticket_designer_id(channel):
+async def find_ticket_designer_id(channel: discord.TextChannel) -> int | None:
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
             row = await cursor.fetchone()
@@ -229,7 +233,7 @@ async def find_ticket_designer_id(channel):
     return None
 
 
-def can_manage_ticket(member, user_id, designer_id):
+def can_manage_ticket(member: discord.Member, user_id: int, designer_id: int | None) -> bool:
     if member is None:
         return False
     if member.guild_permissions.administrator:
@@ -239,7 +243,7 @@ def can_manage_ticket(member, user_id, designer_id):
     return has_designer_role(member)
 
 
-async def update_commission_progress(channel, progress):
+async def update_commission_progress(channel: discord.TextChannel, progress: int):
     now_str = discord.utils.utcnow().isoformat()
     status = "completed" if progress == 100 else "in_progress"
     async with aiosqlite.connect(DATABASE) as db:
@@ -264,7 +268,7 @@ async def update_commission_progress(channel, progress):
         await db.commit()
 
 
-async def upsert_commission_record(data):
+async def upsert_commission_record(data: dict):
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute(
             """
@@ -288,7 +292,7 @@ async def upsert_commission_record(data):
         await db.commit()
 
 
-async def send_payment_info(channel, designer_id):
+async def send_payment_info(channel: discord.TextChannel, designer_id: int) -> bool:
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
             "SELECT bank_name, account_number, holder FROM bank_accounts WHERE developer_id = ?",
@@ -695,7 +699,7 @@ class DialianBot(commands.Bot):
         self.add_view(ClaimTicketView())
         self.add_view(TicketCallView())
 
-        # DailyNotice Cog 등록 (정기 6시 Sales 및 가이드 공지 관리)
+        # DailyNotice Cog 등록 (정기 Sales 및 가이드 공지 관리)
         await self.add_cog(DailyNotice(self))
 
         if not cleanup_processed_records.is_running():
@@ -868,7 +872,7 @@ async def init_extended_db():
 
 # ==================== [디자이너 등급 패널 로직] ====================
 
-async def build_designer_tier_embed(guild):
+async def build_designer_tier_embed(guild: discord.Guild):
     gfx_role_id = DESIGNER_ROLE_IDS["gfx"]
     uniform_role_id = DESIGNER_ROLE_IDS["uniform"]
 
@@ -990,13 +994,13 @@ async def on_member_join(member: discord.Member):
 
 
 @bot.event
-async def on_member_update(before, after):
+async def on_member_update(before: discord.Member, after: discord.Member):
     if before.roles != after.roles:
         await update_designer_tier_panel_message(bot)
 
 
 @bot.event
-async def on_member_remove(member):
+async def on_member_remove(member: discord.Member):
     await update_designer_tier_panel_message(bot)
     
     guild = member.guild
@@ -1011,7 +1015,7 @@ async def on_member_remove(member):
 
 
 @bot.event
-async def on_member_ban(guild, user):
+async def on_member_ban(guild: discord.Guild, user: discord.User):
     try:
         await asyncio.sleep(1.0)
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
@@ -1023,7 +1027,7 @@ async def on_member_ban(guild, user):
 
 
 @bot.event
-async def on_webhooks_update(channel):
+async def on_webhooks_update(channel: discord.TextChannel):
     guild = channel.guild
     try:
         await asyncio.sleep(1.0)
@@ -1036,7 +1040,7 @@ async def on_webhooks_update(channel):
 
 
 @bot.event
-async def on_guild_role_update(before, after):
+async def on_guild_role_update(before: discord.Role, after: discord.Role):
     if after.is_default():
         dangerous_perms = ['administrator', 'manage_roles', 'manage_channels', 'kick_members', 'ban_members', 'mention_everyone']
         
@@ -1070,7 +1074,7 @@ async def on_guild_role_update(before, after):
 
 
 @bot.event
-async def on_guild_channel_delete(channel):
+async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
     try:
         await asyncio.sleep(1.0)
@@ -1083,7 +1087,7 @@ async def on_guild_channel_delete(channel):
 
 
 @bot.event
-async def on_guild_channel_create(channel):
+async def on_guild_channel_create(channel: discord.abc.GuildChannel):
     guild = channel.guild
     try:
         await asyncio.sleep(1.0)
@@ -1096,7 +1100,7 @@ async def on_guild_channel_create(channel):
 
 
 @bot.event
-async def on_guild_role_delete(role):
+async def on_guild_role_delete(role: discord.Role):
     guild = role.guild
     try:
         await asyncio.sleep(1.0)
@@ -1109,7 +1113,7 @@ async def on_guild_role_delete(role):
 
 
 @bot.event
-async def on_guild_role_create(role):
+async def on_guild_role_create(role: discord.Role):
     guild = role.guild
     try:
         await asyncio.sleep(1.0)
@@ -1123,7 +1127,7 @@ async def on_guild_role_create(role):
 
 # ==================== [포인트 랭킹 패널 헬퍼] ====================
 
-async def build_point_ranking_embed(guild):
+async def build_point_ranking_embed(guild: discord.Guild):
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("""
             SELECT user_id, points 
@@ -1180,7 +1184,7 @@ async def update_point_ranking_message(bot_instance):
 
 # ==================== [채널 유효성 및 일일 제한 헬퍼] ====================
 
-async def check_command_channel(ctx):
+async def check_command_channel(ctx) -> bool:
     if ctx.channel.id != COMMAND_CHANNEL_ID:
         await ctx.send(f"❌ 해당 명령어는 <#{COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.", delete_after=5)
         return False
@@ -1212,7 +1216,7 @@ async def check_and_increment_daily_limit(user_id: int, action_type: str, max_li
 # ==================== [메시지 이벤트 & 보안 검사] ====================
 
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
@@ -1645,7 +1649,6 @@ async def point_gacha(ctx):
     if not await check_command_channel(ctx):
         return
 
-    # Race Condition (동시 실행) 방지 검사
     if ctx.author.id in active_minigame_users:
         return await ctx.send("⏳ 이미 미니게임이 진행 중입니다. 잠시 후 다시 시도해주세요!", delete_after=3)
 
@@ -1701,7 +1704,6 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
     if choice not in choices:
         return await ctx.send("❌ 올바른 선택을 해주세요: `!가위바위보 [가위/바위/보] [배팅포인트]`")
 
-    # 엄격한 배팅 금액 범위 검증 (음수, 0, 인플레이션 차단)
     if bet < 10 or bet > MAX_BET:
         return await ctx.send(f"❌ 배팅 금액은 최소 `10 P` 이상, 최대 `{MAX_BET:,} P` 이하이어야 합니다.")
 
@@ -1767,7 +1769,6 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
     if choice not in choices:
         return await ctx.send("❌ 올바른 선택을 해주세요: `!묵찌빠 [가위/바위/보] [배팅포인트]`")
 
-    # 엄격한 배팅 금액 범위 검증
     if bet < 20 or bet > MAX_BET:
         return await ctx.send(f"❌ 묵찌빠 배팅 금액은 최소 `20 P` 이상, 최대 `{MAX_BET:,} P` 이하이어야 합니다.")
 
