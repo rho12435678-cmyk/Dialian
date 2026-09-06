@@ -667,24 +667,25 @@ class CategorySelectView(ui.View):
             color=discord.Color.blue()
         )
         
+        # GFX 단품 및 묶음가 통합 수치 표기 (일반 가격)
         gfx_table = (
             "```\n"
-            "┌──────────────┬──────────────┐\n"
-            "│   등  급     │   단  가     │\n"
-            "├──────────────┼──────────────┤\n"
-            "│  초급 GFX    │   5,000 원   │\n"
-            "│  중급 GFX    │   6,500 원   │\n"
-            "│  상급 GFX    │   8,500 원   │\n"
-            "└──────────────┴──────────────┘\n"
+            "┌──────────┬──────────┬───────────┬───────────┐\n"
+            "│  등  급  │  단  품  │ 2+1 묶음  │ 3+1 묶음  │\n"
+            "├──────────┼──────────┼───────────┼───────────┤\n"
+            "│ 초급 GFX │ 5,000 원 │ 10,000 원 │ 15,000 원 │\n"
+            "│ 중급 GFX │ 6,500 원 │ 13,000 원 │ 19,500 원 │\n"
+            "│ 상급 GFX │ 8,500 원 │ 17,000 원 │ 25,500 원 │\n"
+            "└──────────┴──────────┴───────────┴───────────┘\n"
             "```"
         )
-        embed.add_field(name="🎨 GFX 단품 가격표", value=gfx_table, inline=False)
+        embed.add_field(name="🎨 GFX 단품 & 묶음 공식 가격표", value=gfx_table, inline=False)
 
         bundle_info = (
             "```\n"
-            "• GFX 2+1 묶음 : 2개 가격으로 총 3개 제작!\n"
-            "• GFX 3+1 묶음 : 3개 가격으로 총 4개 제작!\n"
-            "• Roblox 복장  : 단품 / 세트 묶음 할인 가능\n"
+            "• GFX 2+1 묶음 : 2개 가격으로 총 3개 제작! (1개 무료 혜택)\n"
+            "• GFX 3+1 묶음 : 3개 가격으로 총 4개 제작! (1개 무료 혜택)\n"
+            "• Roblox 복장  : 단품 / 세트 묶음 할인 상담 가능\n"
             "```"
         )
         embed.add_field(name="🎁 묶음 할인 혜택 (Bundle Sale)", value=bundle_info, inline=False)
@@ -700,23 +701,24 @@ class CategorySelectView(ui.View):
             color=discord.Color.gold()
         )
 
+        # GFX 단품 및 묶음가 통합 수치 표기 (단골 20% 할인가 적용)
         vip_gfx_table = (
             "```\n"
-            "┌──────────────┬─────────────┬─────────────┐\n"
-            "│   등  급     │  정상 가격  │  20% 할인가 │\n"
-            "├──────────────┼─────────────┼─────────────┤\n"
-            "│  초급 GFX    │   5,000 원  │   4,000 원  │\n"
-            "│  중급 GFX    │   6,500 원  │   5,200 원  │\n"
-            "│  상급 GFX    │   8,500 원  │   6,800 원  │\n"
-            "└──────────────┴─────────────┴─────────────┘\n"
+            "┌──────────┬──────────┬───────────┬───────────┐\n"
+            "│  등  급  │ 20% 단품 │ 2+1 묶음  │ 3+1 묶음  │\n"
+            "├──────────┼──────────┼───────────┼───────────┤\n"
+            "│ 초급 GFX │ 4,000 원 │  8,000 원 │ 12,000 원 │\n"
+            "│ 중급 GFX │ 5,200 원 │ 10,400 원 │ 15,600 원 │\n"
+            "│ 상급 GFX │ 6,800 원 │ 13,600 원 │ 20,400 원 │\n"
+            "└──────────┴──────────┴───────────┴───────────┘\n"
             "```"
         )
-        embed.add_field(name="🎨 GFX 단골 할인가", value=vip_gfx_table, inline=False)
+        embed.add_field(name="🎨 GFX 단골 20% 할인 단품 & 묶음가", value=vip_gfx_table, inline=False)
 
         vip_info = (
             "```\n"
             "• 혜택 대상 : 1,000 P 이상 달성 유저 (단골 역할 자동 부여)\n"
-            "• 적용 범위 : 모든 커미션 제작 시 20% 자동 할인 적용\n"
+            "• 적용 범위 : 단품 및 2+1, 3+1 묶음 결제 시 20% 자동 할인가 적용\n"
             "```"
         )
         embed.add_field(name="👑 단골 혜택 안내", value=vip_info, inline=False)
@@ -1575,8 +1577,8 @@ async def send_point_guide_embed(ctx):
     )
 
     embed.add_field(
-        name="2️⃣ 단골 손님 혜택 (15% 자동 할인)",
-        value="**1000P 달성 시 `@Regular Customer/단골 손님` 역할 자동 지급!**\n*(이후 주문하는 모든 커미션에 15% 자동 할인 혜택이 적용됩니다.)*",
+        name="2️⃣ 단골 손님 혜택 (20% 자동 할인)",
+        value="**1000P 달성 시 `@Regular Customer/단골 손님` 역할 자동 지급!**\n*(이후 주문하는 모든 커미션에 20% 자동 할인 혜택이 적용됩니다.)*",
         inline=False
     )
 
@@ -1696,10 +1698,10 @@ async def show_points(ctx, member: discord.Member = None):
     embed.add_field(name="현재 포인트", value=f"`{points:,} P` / (골드 기준: `1,000 P`)", inline=False)
 
     if points >= 1000:
-        embed.add_field(name="🎁 해제된 최고 혜택", value="✅ **골드 단골 손님 (모든 커미션 15% 자동 할인 적용 중)**", inline=False)
+        embed.add_field(name="🎁 해제된 최고 혜택", value="✅ **골드 단골 손님 (모든 커미션 20% 자동 할인 적용 중)**", inline=False)
     else:
         remaining = 1000 - points
-        embed.add_field(name="승급까지 남은 길", value=f"최고 등급 **골드(단골 15% 할인)**까지 **{remaining:,} P** 남았습니다!", inline=False)
+        embed.add_field(name="승급까지 남은 길", value=f"최고 등급 **골드(단골 20% 할인)**까지 **{remaining:,} P** 남았습니다!", inline=False)
 
     await ctx.send(embed=embed)
 
