@@ -183,13 +183,79 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 5. 메인 카테고리 선택 뷰
+# 5. 메인 카테고리 선택 뷰 (가격표 안내 포함)
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn")
+    # --------------------------------------
+    # ROW 0: 가격표 조회 (클릭 시 개인 메시지)
+    # --------------------------------------
+    @discord.ui.button(label="💳 일반 가격표", style=discord.ButtonStyle.secondary, custom_id="cat_std_price_btn", row=0)
+    async def select_std_price(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="💳 일반 고객용 가격표 (Standard Price)",
+            color=0x2b2d31
+        )
+        embed.add_field(
+            name="🎨 GFX 커미션",
+            value=(
+                "• **초급 (Beginner)**: 5,000원\n"
+                "  ┗ 🎁 2+1: 10,000원 / 3+1: 15,000원\n"
+                "• **중급 (Intermediate)**: 6,500원\n"
+                "  ┗ 🎁 2+1: 13,000원 / 3+1: 19,500원\n"
+                "• **상급 (Advanced)**: 8,500원\n"
+                "  ┗ 🎁 2+1: 17,000원 / 3+1: 25,500원"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="👕 Roblox 복장 커미션",
+            value=(
+                "• **상/하의 개별**: 5,000원\n"
+                "  ┗ 🎁 2+1: 10,000원 / 3+1: 15,000원"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="💡 복장 바리에이션 요청 시 개당 +500원 추가 | 작업 난이도에 따라 변동 가능")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="👑 단골 20% 가격표", style=discord.ButtonStyle.secondary, custom_id="cat_vip_price_btn", row=0)
+    async def select_vip_price(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="👑 단골 손님 특별 가격표 (VIP 20% OFF)",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="🎨 GFX 커미션 (20% 할인)",
+            value=(
+                "• **초급 (Beginner)**: 4,000원\n"
+                "  ┗ 🎁 2+1: 8,000원 / 3+1: 12,000원\n"
+                "• **중급 (Intermediate)**: 5,200원\n"
+                "  ┗ 🎁 2+1: 10,400원 / 3+1: 15,600원\n"
+                "• **상급 (Advanced)**: 6,800원\n"
+                "  ┗ 🎁 2+1: 13,600원 / 3+1: 20,400원"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="👕 Roblox 복장 커미션 (20% 할인)",
+            value=(
+                "• **상/하의 개별**: 4,000원\n"
+                "  ┗ 🎁 2+1: 8,000원 / 3+1: 12,000원"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="💡 Regular Customer 역할 보유자 전용 혜택 | 추가 옵션 비용은 할인 제외")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # --------------------------------------
+    # ROW 1: 주문 및 커미션 신청
+    # --------------------------------------
+    @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn", row=1)
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
@@ -197,18 +263,21 @@ class CategoryView(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="👕 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="cat_uniform_btn")
+    @discord.ui.button(label="👕 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="cat_uniform_btn", row=1)
     async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             content="📦 **Roblox 복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
             view=BundleSelectView(category="uniform"),
             ephemeral=True
         )
-        
-    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_apply_btn")
+
+    # --------------------------------------
+    # ROW 2: 기타 지원 및 협업 문의
+    # --------------------------------------
+    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_apply_btn", row=2)
     async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DeveloperApplyModal())
 
-    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="cat_partner_btn")
+    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="cat_partner_btn", row=2)
     async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PartnerApplyModal())
