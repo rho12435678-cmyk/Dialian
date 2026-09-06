@@ -100,8 +100,9 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
         await channel.send(content=f"{user.mention} 님의 파트너 문의 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView(channel))
         await interaction.response.send_message(f"✅ 파트너 문의가 접수되었습니다! 생성된 채널: {channel.mention}", ephemeral=True)
 
+
 # ==========================================
-# 4. 담당 디자이너 선택 드롭다운
+# 3. 담당 디자이너 선택 드롭다운
 # ==========================================
 class DesignerSelect(discord.ui.Select):
     def __init__(self, category: str, bundle_type: str, options: list):
@@ -112,7 +113,7 @@ class DesignerSelect(discord.ui.Select):
             options=options[:25],
             min_values=1,
             max_values=1,
-            custom_id=f"designer_select_{category}_{bundle_type.replace(' ', '_')}"
+            custom_id=f"designer_select_{category.lower()}_{bundle_type.replace(' ', '_')}"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -134,7 +135,7 @@ class DesignerSelectView(discord.ui.View):
 
 
 # ==========================================
-# 5. 묶음 선택 뷰 (수량 선택)
+# 4. 묶음 선택 뷰 (수량 선택)
 # ==========================================
 class BundleSelectView(discord.ui.View):
     def __init__(self, category: str):
@@ -182,7 +183,7 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 6. 메인 카테고리 선택 뷰 (버튼 5개)
+# 5. 메인 카테고리 선택 뷰
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
