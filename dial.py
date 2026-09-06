@@ -635,7 +635,7 @@ class CategorySelectView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="ticket_gfx")
+    @ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="ticket_gfx", row=0)
     async def btn_gfx(self, interaction: discord.Interaction, button: ui.Button):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
@@ -643,7 +643,7 @@ class CategorySelectView(ui.View):
         embed = discord.Embed(title="🎨 GFX 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-    @ui.button(label="👔 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="ticket_uniform")
+    @ui.button(label="👔 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="ticket_uniform", row=0)
     async def btn_uniform(self, interaction: discord.Interaction, button: ui.Button):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
@@ -651,13 +651,78 @@ class CategorySelectView(ui.View):
         embed = discord.Embed(title="👔 Roblox 복장 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-    @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply")
+    @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply", row=1)
     async def btn_dev_apply(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(DevApplyModal())
 
-    @ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="ticket_partner_apply")
+    @ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="ticket_partner_apply", row=1)
     async def btn_partner_apply(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(PartnerApplyModal())
+
+    @ui.button(label="📋 일반 / 묶음 가격표", style=discord.ButtonStyle.secondary, custom_id="price_standard", row=2)
+    async def btn_price_standard(self, interaction: discord.Interaction, button: ui.Button):
+        embed = discord.Embed(
+            title="📋 DDS 일반 / 묶음 커미션 가격표",
+            description="가독성을 높인 공식 가격표입니다. 아래에서 개별 및 묶음 가격을 확인해보세요!",
+            color=discord.Color.blue()
+        )
+        
+        gfx_table = (
+            "```\n"
+            "┌──────────────┬──────────────┐\n"
+            "│   등  급     │   단  가     │\n"
+            "├──────────────┼──────────────┤\n"
+            "│  초급 GFX    │   5,000 원   │\n"
+            "│  중급 GFX    │   6,500 원   │\n"
+            "│  상급 GFX    │   8,500 원   │\n"
+            "└──────────────┴──────────────┘\n"
+            "```"
+        )
+        embed.add_field(name="🎨 GFX 단품 가격표", value=gfx_table, inline=False)
+
+        bundle_info = (
+            "```\n"
+            "• GFX 2+1 묶음 : 2개 가격으로 총 3개 제작!\n"
+            "• GFX 3+1 묶음 : 3개 가격으로 총 4개 제작!\n"
+            "• Roblox 복장  : 단품 / 세트 묶음 할인 가능\n"
+            "```"
+        )
+        embed.add_field(name="🎁 묶음 할인 혜택 (Bundle Sale)", value=bundle_info, inline=False)
+        embed.set_footer(text="💡 가격 문의 및 특수 주문은 커미션 티켓 생성을 이용해 주세요.")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @ui.button(label="⭐ 단골 전용 (20% 할인) 가격표", style=discord.ButtonStyle.success, custom_id="price_vip", row=2)
+    async def btn_price_vip(self, interaction: discord.Interaction, button: ui.Button):
+        embed = discord.Embed(
+            title="⭐ DDS 단골 전용 (20% 할인) 가격표",
+            description="단골 회원님(1,000P 이상 달성)을 위한 Special 20% 할인 가격표입니다!",
+            color=discord.Color.gold()
+        )
+
+        vip_gfx_table = (
+            "```\n"
+            "┌──────────────┬─────────────┬─────────────┐\n"
+            "│   등  급     │  정상 가격  │  20% 할인가 │\n"
+            "├──────────────┼─────────────┼─────────────┤\n"
+            "│  초급 GFX    │   5,000 원  │   4,000 원  │\n"
+            "│  중급 GFX    │   6,500 원  │   5,200 원  │\n"
+            "│  상급 GFX    │   8,500 원  │   6,800 원  │\n"
+            "└──────────────┴─────────────┴─────────────┘\n"
+            "```"
+        )
+        embed.add_field(name="🎨 GFX 단골 할인가", value=vip_gfx_table, inline=False)
+
+        vip_info = (
+            "```\n"
+            "• 혜택 대상 : 1,000 P 이상 달성 유저 (단골 역할 자동 부여)\n"
+            "• 적용 범위 : 모든 커미션 제작 시 20% 자동 할인 적용\n"
+            "```"
+        )
+        embed.add_field(name="👑 단골 혜택 안내", value=vip_info, inline=False)
+        embed.set_footer(text="✨ 늘 이용해 주셔서 감사합니다!")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ==================== [자동 DB 정기 Clean-up 태스크] ====================
@@ -1986,20 +2051,18 @@ async def update_bot(ctx):
 @bot.command(name="티켓생성")
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
-    file = discord.File("price.png", filename="price.png")
-    file2 = discord.File("price2.png", filename="price2.png")
-
     embed = discord.Embed(
         title="💼 커미션 및 문의 상담 공간",
-        description="상담, 구매 진행, 문의사항이 있으시다면\n아래 원하시는 항목의 버튼을 클릭해주세요!\n\n📌 구매 전 가격표를 확인해주세요.",
+        description=(
+            "상담, 구매 진행, 문의사항이 있으시다면\n"
+            "아래 원하시는 항목의 버튼을 클릭해주세요!\n\n"
+            "📌 **구매 전 아래 가격표 버튼을 눌러 상세 가격을 확인하실 수 있습니다.**"
+        ),
         color=0x5865F2
     )
-    embed.set_image(url="attachment://price.png")
+    embed.set_footer(text="DDS 커미션 시스템")
 
-    embed2 = discord.Embed(color=0x5865F2)
-    embed2.set_image(url="attachment://price2.png")
-
-    await ctx.send(files=[file, file2], embeds=[embed, embed2], view=CategorySelectView())
+    await ctx.send(embed=embed, view=CategorySelectView())
 
 
 @bot.command(name="호출", aliases=["손님호출", "고객호출"])
@@ -2292,67 +2355,4 @@ async def show_ticket_customer(ctx):
     if customer:
         await ctx.send(f"👤 이 티켓의 주문 고객님은 {customer.mention} (`{customer.id}`) 님입니다.")
     else:
-        await ctx.send("❌ 티켓 주문 고객 정보를 찾을 수 없습니다.")
-
-
-@bot.command(name="소유자변경", aliases=["고객변경"])
-@commands.has_permissions(administrator=True)
-async def change_ticket_owner(ctx, new_owner: discord.Member):
-    if not is_ticket_channel(ctx.channel):
-        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
-
-    async with aiosqlite.connect(DATABASE) as db:
-        await db.execute(
-            "UPDATE commissions SET customer_id = ?, updated_at = ? WHERE ticket_channel = ?",
-            (new_owner.id, discord.utils.utcnow().isoformat(), ctx.channel.id)
-        )
-        await db.commit()
-
-    try:
-        await ctx.channel.set_permissions(new_owner, read_messages=True, send_messages=True, attach_files=True)
-    except Exception:
-        pass
-
-    await ctx.send(f"✅ 티켓 소유자(고객)가 {new_owner.mention} 님으로 변경되었습니다.")
-
-
-@bot.command(name="강제종료")
-@commands.has_permissions(administrator=True)
-async def force_close_ticket(ctx):
-    if not is_ticket_channel(ctx.channel):
-        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
-
-    await ctx.send("🚨 관리자 권한으로 티켓을 강제 종료하고 보관합니다.")
-    await archive_ticket_channel(ctx.channel)
-    await log_security_event(ctx.guild, "티켓 강제 종료", f"수행자: {ctx.author.mention}\n채널: {ctx.channel.name}", discord.Color.gold())
-
-
-@bot.command(name="청소")
-@commands.has_permissions(manage_messages=True)
-async def clear(ctx, amount: int):
-    if amount < 1 or amount > 100:
-        return await ctx.send("사용법: `!청소 1~100`")
-
-    await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(f"✅ {amount}개의 메시지를 삭제했습니다.")
-    await msg.delete(delay=3)
-    await log_security_event(ctx.guild, "메시지 대량 청소", f"수행자: {ctx.author.mention}\n채널: {ctx.channel.mention}\n삭제 개수: `{amount}`개", discord.Color.light_grey())
-
-
-@bot.command(name="인증패널")
-@commands.has_permissions(administrator=True)
-async def verify_panel(ctx):
-    embed = discord.Embed(title="✅ 서버 인증", description="아래 버튼을 눌러 인증을 완료해주세요.", color=discord.Color.green())
-    await ctx.send(embed=embed, view=VerifyView())
-
-
-@bot.event
-async def on_ready():
-    print(f"🤖 {bot.user.name} 봇 준비 완료 (ID: {bot.user.id})")
-
-
-if __name__ == "__main__":
-    if TOKEN:
-        bot.run(TOKEN)
-    else:
-        print("❌ TOKEN 환경 변수가 설정되어 있지 않습니다.")
+        await ctx.send("❌ 티켓 주문 고객 정보를 확인할 수 없습니다.")
