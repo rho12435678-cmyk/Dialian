@@ -32,15 +32,33 @@ class SimpleTicketModal(discord.ui.Modal):
 
         self.selected_designer = selected_designer
 
-        self.content = discord.ui.TextInput(
-            label=self.FIELD_NAME,
-            placeholder="원하시는 내용을 상세하게 작성해 주세요.",
-            style=discord.TextStyle.paragraph,
-            required=True,
-            max_length=1000
-        )
-
-        self.add_item(self.content)
+        # 파트너/제휴 신청인 경우 개편된 2개 입력란 구성
+        if any(keyword in ticket_type for keyword in ["파트너", "제휴"]):
+            self.member_count = discord.ui.TextInput(
+                label="서버 총 인원",
+                placeholder="0~100,000 (파트너십 조건: 100명 이상)",
+                style=discord.TextStyle.short,
+                required=True,
+                max_length=50
+            )
+            self.invite_link = discord.ui.TextInput(
+                label="서버 영구링크",
+                placeholder="https://discord.gg/... 형식의 영구 초대 링크",
+                style=discord.TextStyle.short,
+                required=True,
+                max_length=200
+            )
+            self.add_item(self.member_count)
+            self.add_item(self.invite_link)
+        else:
+            self.content = discord.ui.TextInput(
+                label=self.FIELD_NAME,
+                placeholder="원하시는 내용을 상세하게 작성해 주세요.",
+                style=discord.TextStyle.paragraph,
+                required=True,
+                max_length=1000
+            )
+            self.add_item(self.content)
 
     async def on_submit(self, interaction: discord.Interaction):
         # 1. 3초 타임아웃 방지를 위한 defer 선제 처리
@@ -110,7 +128,13 @@ class SimpleTicketModal(discord.ui.Modal):
 
         embed = discord.Embed(title=self.FORM_TITLE, color=0x5865F2, timestamp=datetime.now())
         embed.add_field(name="👨‍💻 담당 디자이너", value=designer_name, inline=False)
-        embed.add_field(name=self.FIELD_NAME, value=self.content.value, inline=False)
+
+        # 파트너/제휴 신청일 경우 출력할 임베드 항목 구분
+        if any(keyword in self.COMMISSION_NAME for keyword in ["파트너", "제휴"]):
+            embed.add_field(name="👥 서버 총 인원", value=self.member_count.value, inline=False)
+            embed.add_field(name="🔗 서버 영구링크", value=self.invite_link.value, inline=False)
+        else:
+            embed.add_field(name=self.FIELD_NAME, value=self.content.value, inline=False)
 
         await ticket_channel.send(
             content=f"{user.mention}\n신청이 접수되었습니다. 담당자가 확인 후 안내드릴 예정입니다.",
@@ -143,7 +167,7 @@ class SimpleTicketModal(discord.ui.Modal):
         except Exception as log_err:
             print(f"[로그 전송 실패] {log_err}")
 
-        # 디자이너 컨트롤러 DM 발송 (ProgressView 완전히 제거됨)
+        # 디자이너 컨트롤러 DM 발송
         if developer:
             try:
                 await developer.send(f"🔔 새로운 문의가 들어왔습니다.\n{ticket_channel.mention}")
