@@ -119,7 +119,6 @@ class DesignerSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         designer_id = None if self.values[0] == "none" else int(self.values[0])
         
-        # 카테고리 판별 (GFX 인지 Uniform 인지)
         if self.category.lower() in ["gfx", "gfx 커미션"]:
             modal = PurchaseModal(bundle_type=self.bundle_type, selected_designer=designer_id)
         else:
@@ -163,7 +162,6 @@ class BundleSelectView(discord.ui.View):
 
         view = DesignerSelectView(self.category, bundle_type, options)
         
-        # 기존 메시지를 수정
         await interaction.response.edit_message(
             content=f"👨‍💻 **{self.category} [{bundle_type}]**\n작업을 진행할 담당 디자이너를 선택해주세요.",
             view=view
@@ -183,79 +181,16 @@ class BundleSelectView(discord.ui.View):
 
 
 # ==========================================
-# 5. 메인 카테고리 선택 뷰 (가격표 안내 포함)
+# 5. 메인 카테고리 선택 뷰 (버튼 배치 및 가독성 표 연동)
 # ==========================================
 class CategoryView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     # --------------------------------------
-    # ROW 0: 가격표 조회 (클릭 시 개인 메시지)
+    # ROW 0: 커미션 신청 (기존 상단 2개)
     # --------------------------------------
-    @discord.ui.button(label="💳 일반 가격표", style=discord.ButtonStyle.secondary, custom_id="cat_std_price_btn", row=0)
-    async def select_std_price(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="💳 일반 고객용 가격표 (Standard Price)",
-            color=0x2b2d31
-        )
-        embed.add_field(
-            name="🎨 GFX 커미션",
-            value=(
-                "• **초급 (Beginner)**: 5,000원\n"
-                "  ┗ 🎁 2+1: 10,000원 / 3+1: 15,000원\n"
-                "• **중급 (Intermediate)**: 6,500원\n"
-                "  ┗ 🎁 2+1: 13,000원 / 3+1: 19,500원\n"
-                "• **상급 (Advanced)**: 8,500원\n"
-                "  ┗ 🎁 2+1: 17,000원 / 3+1: 25,500원"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="👕 Roblox 복장 커미션",
-            value=(
-                "• **상/하의 개별**: 5,000원\n"
-                "  ┗ 🎁 2+1: 10,000원 / 3+1: 15,000원"
-            ),
-            inline=False
-        )
-        embed.set_footer(text="💡 복장 바리에이션 요청 시 개당 +500원 추가 | 작업 난이도에 따라 변동 가능")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @discord.ui.button(label="👑 단골 20% 가격표", style=discord.ButtonStyle.secondary, custom_id="cat_vip_price_btn", row=0)
-    async def select_vip_price(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="👑 단골 손님 특별 가격표 (VIP 20% OFF)",
-            color=0xf1c40f
-        )
-        embed.add_field(
-            name="🎨 GFX 커미션 (20% 할인)",
-            value=(
-                "• **초급 (Beginner)**: 4,000원\n"
-                "  ┗ 🎁 2+1: 8,000원 / 3+1: 12,000원\n"
-                "• **중급 (Intermediate)**: 5,200원\n"
-                "  ┗ 🎁 2+1: 10,400원 / 3+1: 15,600원\n"
-                "• **상급 (Advanced)**: 6,800원\n"
-                "  ┗ 🎁 2+1: 13,600원 / 3+1: 20,400원"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="👕 Roblox 복장 커미션 (20% 할인)",
-            value=(
-                "• **상/하의 개별**: 4,000원\n"
-                "  ┗ 🎁 2+1: 8,000원 / 3+1: 12,000원"
-            ),
-            inline=False
-        )
-        embed.set_footer(text="💡 Regular Customer 역할 보유자 전용 혜택 | 추가 옵션 비용은 할인 제외")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    # --------------------------------------
-    # ROW 1: 주문 및 커미션 신청
-    # --------------------------------------
-    @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn", row=1)
+    @discord.ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="cat_gfx_btn", row=0)
     async def select_gfx(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             content="📦 **GFX 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
@@ -263,7 +198,7 @@ class CategoryView(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="👕 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="cat_uniform_btn", row=1)
+    @discord.ui.button(label="👕 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="cat_uniform_btn", row=0)
     async def select_uniform(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             content="📦 **Roblox 복장 커미션** - 원하시는 수량(묶음)을 선택해주세요.", 
@@ -272,12 +207,51 @@ class CategoryView(discord.ui.View):
         )
 
     # --------------------------------------
-    # ROW 2: 기타 지원 및 협업 문의
+    # ROW 1: 기타 지원 및 협업 (기존 하단 2개)
     # --------------------------------------
-    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_apply_btn", row=2)
+    @discord.ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="cat_dev_apply_btn", row=1)
     async def select_dev_apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DeveloperApplyModal())
 
-    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="cat_partner_btn", row=2)
+    @discord.ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="cat_partner_btn", row=1)
     async def select_partner(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PartnerApplyModal())
+
+    # --------------------------------------
+    # ROW 2: 신규 추가 가격표 버튼 2개 (ROW 1 바로 밑 배치)
+    # --------------------------------------
+    @discord.ui.button(label="📋 일반/묶음 가격표", style=discord.ButtonStyle.secondary, custom_id="cat_std_price_btn", row=2)
+    async def select_std_price(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="📋 DIAL DESIGN STUDIO - 일반 / 묶음 가격표",
+            color=0x3498db
+        )
+        embed.description = (
+            "```text\n"
+            "구분     | 단품 가격 | 2+1 묶음가 | 3+1 묶음가\n"
+            "---------------------------------------------\n"
+            "GFX 초급 |  5,000원  |  10,000원  |  15,000원\n"
+            "GFX 중급 |  6,500원  |  13,000원  |  19,500원\n"
+            "GFX 상급 |  8,500원  |  17,000원  |  25,500원\n"
+            "복장 개별|  5,000원  |  10,000원  |  15,000원\n"
+            "```"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="👑 단골 전용 20% 할인 가격표", style=discord.ButtonStyle.secondary, custom_id="cat_vip_price_btn", row=2)
+    async def select_vip_price(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="👑 DIAL DESIGN STUDIO - 단골 전용 20% 할인 가격표",
+            color=0xf1c40f
+        )
+        embed.description = (
+            "```text\n"
+            "구분     | 20% 단품가 | 20% 2+1 묶음 | 20% 3+1 묶음\n"
+            "--------------------------------------------------\n"
+            "GFX 초급 |   4,000원  |   8,000원    |  12,000원\n"
+            "GFX 중급 |   5,200원  |  10,400원    |  15,600원\n"
+            "GFX 상급 |   6,800원  |  13,600원    |  20,400원\n"
+            "복장 개별|   4,000원  |   8,000원    |  12,000원\n"
+            "```"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
