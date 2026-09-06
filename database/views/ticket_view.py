@@ -9,14 +9,47 @@ from database.views.ticket_guard import block_if_ticket_exists
 
 
 # --------------------------------------------------
-# 0. 공통 손님 호출 함수 (자동 멘션 & 진행상황 재확인 기능 강화)
+# 0. 개편된 파트너 문의 신청서 모달 (신규/수정)
+# --------------------------------------------------
+class PartnerModal(Modal, title="🤝 파트너 문의 신청서"):
+    server_name = TextInput(
+        label="파트너 유형 / 서버(단체)명",
+        placeholder="예: [DDS] 서버 커뮤니티",
+        required=True
+    )
+    member_count = TextInput(
+        label="서버 총 인원 (0~100,000명)",
+        placeholder="파트너십 조건: 100명 이상",
+        required=True
+    )
+    invite_link = TextInput(
+        label="서버 영구링크",
+        placeholder="예: https://discord.gg/yourlink",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # 파트너 접수 로직 (채널 전송 및 DB 저장)
+        embed = discord.Embed(
+            title="🤝 새로운 파트너 문의가 접수되었습니다.",
+            color=0xF1C40F
+        )
+        embed.add_field(name="📌 서버/단체명", value=self.server_name.value, inline=False)
+        embed.add_field(name="👥 서버 총 인원", value=self.member_count.value, inline=False)
+        embed.add_field(name="🔗 영구 링크", value=self.invite_link.value, inline=False)
+        embed.set_footer(text=f"신청자: {interaction.user} ({interaction.user.id})")
+
+        await interaction.response.send_message("✅ 파트너 문의 신청서가 정상적으로 접수되었습니다.", ephemeral=True)
+
+
+# --------------------------------------------------
+# 1. 공통 손님 호출 함수 (자동 멘션 & 진행상황 재확인)
 # --------------------------------------------------
 async def handle_customer_call(
     channel: discord.TextChannel,
     sender: discord.Member,
     interaction: discord.Interaction = None
 ):
-    # DB에서 손님 ID, 진행률, 상태 정보를 한 번에 조회
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
             "SELECT user_id, progress, status FROM commissions WHERE ticket_channel = ?",
@@ -43,12 +76,10 @@ async def handle_customer_call(
             await channel.send(msg)
         return
 
-    # 진행 상황 요약 텍스트 구성
     progress_val = progress if progress is not None else 0
     status_val = status if status else "진행 중"
     status_info = f"📊 **현재 진행률:** `{progress_val}%` | 📌 **상태:** `{status_val}`"
 
-    # 1) DM 전용 알림 임베드
     embed = discord.Embed(
         title="🔔 디자이너 호출 및 진행 상황 안내",
         description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 호출하셨습니다!\n아래 링크를 통해 채널로 이동하여 확인해 주세요.",
@@ -64,7 +95,6 @@ async def handle_customer_call(
     except discord.Forbidden:
         dm_notice = "\n*(⚠️ 손님의 DM이 차단되어 있어 채널 멘션만 수행되었습니다.)*"
 
-    # 2) 티켓 채널 내 자동 멘션 메시지 작성
     call_message = (
         f"🔔 {customer.mention} 손님! **{sender.display_name}** 디자이너님이 호출하셨습니다.\n"
         f"> {status_info}{dm_notice}"
@@ -77,7 +107,7 @@ async def handle_customer_call(
 
 
 # --------------------------------------------------
-# 1. 메인 티켓 오픈 View & 티켓 채널 호출 View
+# 2. 메인 티켓 오픈 View & 티켓 채널 호출 View
 # --------------------------------------------------
 class TicketOpenView(discord.ui.View):
     def __init__(self):
@@ -121,7 +151,7 @@ class TicketCallView(discord.ui.View):
 
 
 # --------------------------------------------------
-# 2. DM 전용 모달 (진행률 설정 / 상태 변경)
+# 3. DM 전용 모달 (진행률 설정 / 상태 변경)
 # --------------------------------------------------
 class ProgressModal(Modal, title="📊 진행률 설정"):
     progress = TextInput(
@@ -188,7 +218,7 @@ class StatusModal(Modal, title="📌 커미션 상태 변경"):
 
 
 # --------------------------------------------------
-# 3. 디자이너 DM 전용 컨트롤 패널 View
+# 4. 디자이너 DM 전용 컨트롤 패널 View
 # --------------------------------------------------
 class DesignerDMControlView(View):
     def __init__(self, ticket_channel_id: int):
