@@ -9,7 +9,7 @@ from database.views.ticket_guard import block_if_ticket_exists
 
 
 # --------------------------------------------------
-# 0. 공통 손님 호출 함수 (2번: 자동 멘션 & 진행상황 재확인 기능 강화)
+# 0. 공통 손님 호출 함수 (자동 멘션 & 진행상황 재확인 기능 강화)
 # --------------------------------------------------
 async def handle_customer_call(
     channel: discord.TextChannel,
