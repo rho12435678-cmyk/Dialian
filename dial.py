@@ -320,7 +320,7 @@ async def handle_customer_call(
     sender: discord.Member,
     interaction: discord.Interaction = None
 ):
-    """손님에게 DM 알림을 전송하고 채널에서 직접 호출 및 진행 상황을 공유하는 공통 함수"""
+    """손님에게 DM 알림 및 채널 직접 멘션 호출을 수행하여 진행 상황을 재확인하도록 돕는 자동 호출 함수"""
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
             "SELECT customer_id, progress, status FROM commissions WHERE ticket_channel = ?",
@@ -352,8 +352,8 @@ async def handle_customer_call(
     status_info = f"📊 **현재 진행률:** `{progress_val}%` | 📌 **상태:** `{status_val}`"
 
     embed = discord.Embed(
-        title="🔔 디자이너 호출 및 진행 상황 안내",
-        description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 호출하셨습니다!\n아래 링크를 통해 채널로 이동하여 확인해 주세요.",
+        title="🔔 디자이너 자동 호출 및 진행 상황 안내",
+        description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 호출하셨습니다!\n아래 링크를 통해 채널로 이동하여 진행 상황을 확인해 주세요.",
         color=0x5865F2
     )
     embed.add_field(name="📋 현재 진행 상황", value=status_info, inline=False)
@@ -564,9 +564,25 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
 
 
 class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
-    partner_type = ui.TextInput(label="파트너 유형 / 서버(단체)명", placeholder="예: [DDS] 서버 커뮤니티", required=True)
-    proposal = ui.TextInput(label="제휴 및 제안 내용", style=discord.TextStyle.paragraph, placeholder="상세 제안 내용을 입력해주세요.", required=True)
-    contact = ui.TextInput(label="기타 문의사항", style=discord.TextStyle.paragraph, placeholder="추가 문의사항이 있다면 입력해주세요.", required=False)
+    """개편된 DDS 파트너 문의 양식 (서버 총 인원 및 영구 초대 링크 반영)"""
+    partner_type = ui.TextInput(
+        label="파트너 유형 / 서버(단체)명",
+        placeholder="예: [DDS] 서버 커뮤니티",
+        required=True
+    )
+    member_count = ui.TextInput(
+        label="서버 총 인원 (0~100,000명)",
+        placeholder="예: 150 (파트너십 조건: 100명 이상)",
+        required=True,
+        min_length=1,
+        max_length=15
+    )
+    invite_link = ui.TextInput(
+        label="서버 영구링크",
+        placeholder="예: https://discord.gg/yourserver 또는 영구 링크 입력",
+        style=discord.TextStyle.short,
+        required=True
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         if not interaction.response.is_done():
@@ -594,9 +610,8 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
             timestamp=discord.utils.utcnow()
         )
         embed.add_field(name="🏢 대표 단체 / 서버명", value=self.partner_type.value, inline=False)
-        embed.add_field(name="📝 제휴 제안 내용", value=self.proposal.value, inline=False)
-        if self.contact.value:
-            embed.add_field(name="💬 기타 문의사항", value=self.contact.value, inline=False)
+        embed.add_field(name="👥 서버 총 인원", value=f"{self.member_count.value} 명", inline=False)
+        embed.add_field(name="🔗 서버 영구링크", value=self.invite_link.value, inline=False)
 
         await channel.send(content=f"{user.mention} 님, 파트너 문의 티켓이 생성되었습니다.", embed=embed, view=TicketCloseView())
 
