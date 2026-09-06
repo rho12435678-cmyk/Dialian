@@ -309,7 +309,203 @@ async def send_payment_info(channel, designer_id):
     return True
 
 
-# ==================== [티켓 지원 / 파트너 모달 및 뷰] ====================
+# ==================== [손님 호출 / 진행상황 연동 핵심 함수] ====================
+
+async def handle_customer_call(
+    channel: discord.TextChannel,
+    sender: discord.Member,
+    interaction: discord.Interaction = None
+):
+    """손님에게 DM 알림을 전송하고 채널에서 직접 호출 및 진행 상황을 공유하는 공통 함수"""
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute(
+            "SELECT customer_id, progress, status FROM commissions WHERE ticket_channel = ?",
+            (channel.id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if not row or not row[0]:
+        msg = "❌ 이 채널의 손님 정보를 DB에서 찾을 수 없습니다."
+        if interaction and not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await channel.send(msg)
+        return
+
+    customer_id, progress, status = row[0], row[1], row[2]
+    customer = await fetch_member_or_none(channel.guild, customer_id)
+
+    if not customer:
+        msg = "❌ 서버에서 손님 멤버를 찾을 수 없습니다."
+        if interaction and not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await channel.send(msg)
+        return
+
+    progress_val = progress if progress is not None else 0
+    status_val = status if status else "진행 중"
+    status_info = f"📊 **현재 진행률:** `{progress_val}%` | 📌 **상태:** `{status_val}`"
+
+    embed = discord.Embed(
+        title="🔔 디자이너 호출 및 진행 상황 안내",
+        description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 호출하셨습니다!\n아래 링크를 통해 채널로 이동하여 확인해 주세요.",
+        color=0x5865F2
+    )
+    embed.add_field(name="📋 현재 진행 상황", value=status_info, inline=False)
+    embed.add_field(name="🔗 티켓 채널 바로가기", value=f"[여기 클릭해서 이동하기]({channel.jump_url})", inline=False)
+
+    dm_notice = ""
+    try:
+        await customer.send(embed=embed)
+        dm_notice = "\n*(✉️ 손님 DM으로도 알림을 전송했습니다.)*"
+    except discord.Forbidden:
+        dm_notice = "\n*(⚠️ 손님의 DM이 차단되어 있어 채널 멘션만 수행되었습니다.)*"
+
+    call_message = (
+        f"🔔 {customer.mention} 손님! **{sender.display_name}** 디자이너님이 호출하셨습니다.\n"
+        f"> {status_info}{dm_notice}"
+    )
+
+    if interaction and not interaction.response.is_done():
+        await interaction.response.send_message(call_message)
+    else:
+        await channel.send(call_message)
+
+
+# ==================== [티켓 지원 / 파트너 모달 및 뷰 & 디자이너 컨트롤] ====================
+
+class TicketCallView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(
+        label="🔔 손님 호출",
+        style=discord.ButtonStyle.primary,
+        custom_id="ticket_call_btn"
+    )
+    async def call_button(self, interaction: discord.Interaction, button: ui.Button):
+        await handle_customer_call(interaction.channel, interaction.user, interaction)
+
+
+class ProgressModal(ui.Modal, title="📊 진행률 설정"):
+    progress = ui.TextInput(
+        label="진행률 (%)",
+        placeholder="0~100 사이 숫자만 입력해주세요 (예: 50)",
+        min_length=1,
+        max_length=3,
+        required=True
+    )
+
+    def __init__(self, ticket_channel_id: int):
+        super().__init__()
+        self.ticket_channel_id = ticket_channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+
+        val = self.progress.value.strip().replace("%", "")
+        if not val.isdigit() or not (0 <= int(val) <= 100):
+            return await interaction.response.send_message("❌ 0에서 100 사이의 숫자를 입력해 주세요.", ephemeral=True)
+
+        int_val = int(val)
+        await update_commission_progress(channel, int_val)
+
+        await channel.send(f"📊 **{interaction.user.mention}** 님이 진행률을 **{int_val}%**로 변경했습니다.")
+        await interaction.response.send_message(f"✅ 진행률이 **{int_val}%**로 변경되었습니다.", ephemeral=True)
+
+
+class StatusModal(ui.Modal, title="📌 커미션 상태 변경"):
+    status_text = ui.TextInput(
+        label="상태 내용",
+        placeholder="예: 작업 시작, 작업 중, 마무리, 완료",
+        required=True
+    )
+
+    def __init__(self, ticket_channel_id: int):
+        super().__init__()
+        self.ticket_channel_id = ticket_channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+
+        status = self.status_text.value.strip()
+
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute(
+                "UPDATE commissions SET status = ?, updated_at = ? WHERE ticket_channel = ?",
+                (status, discord.utils.utcnow().isoformat(), channel.id)
+            )
+            await db.commit()
+
+        await channel.send(f"📌 **{interaction.user.mention}** 님이 상태를 변경했습니다.\n**상태:** `{status}`")
+        await interaction.response.send_message(f"✅ 상태가 `{status}`(으)로 연동되었습니다.", ephemeral=True)
+
+
+class DesignerDMControlView(ui.View):
+    def __init__(self, ticket_channel_id: int):
+        super().__init__(timeout=None)
+        self.ticket_channel_id = ticket_channel_id
+
+    @ui.button(label="🔔 손님 호출", style=discord.ButtonStyle.primary)
+    async def call_customer(self, interaction: discord.Interaction, button: ui.Button):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+        await handle_customer_call(channel, interaction.user, interaction)
+
+    @ui.button(label="📊 진행률 설정", style=discord.ButtonStyle.secondary)
+    async def set_progress(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(ProgressModal(self.ticket_channel_id))
+
+    @ui.button(label="💳 계좌 전송", style=discord.ButtonStyle.success)
+    async def send_account(self, interaction: discord.Interaction, button: ui.Button):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+
+        sent = await send_payment_info(channel, interaction.user.id)
+        if sent:
+            await interaction.response.send_message("✅ 티켓 채널에 계좌 안내를 전송했습니다.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 등록된 계좌 정보가 없습니다. `!계좌등록` 명령어로 먼저 등록해 주세요.", ephemeral=True)
+
+    @ui.button(label="📌 상태 변경", style=discord.ButtonStyle.secondary)
+    async def change_status(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(StatusModal(self.ticket_channel_id))
+
+    @ui.button(label="✅ 작업 완료", style=discord.ButtonStyle.success)
+    async def complete_job(self, interaction: discord.Interaction, button: ui.Button):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+
+        await update_commission_progress(channel, 100)
+        review_embed = discord.Embed(
+            title="⭐ 작업이 완료되었습니다!",
+            description="모든 작업이 마무리되었습니다.\n아래 버튼을 눌러 담당 디자이너의 만족도를 평가해주세요!",
+            color=discord.Color.gold()
+        )
+        await channel.send(embed=review_embed, view=StarRatingView(interaction.user.id))
+        await interaction.response.send_message("✅ 티켓 채널에 작업 완료 및 평점 요청을 전송했습니다.", ephemeral=True)
+
+    @ui.button(label="🔒 티켓 닫기", style=discord.ButtonStyle.danger)
+    async def close_ticket(self, interaction: discord.Interaction, button: ui.Button):
+        channel = interaction.client.get_channel(self.ticket_channel_id)
+        if not channel:
+            return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
+
+        await channel.send("🔒 **디자이너 요청으로 5초 후 티켓 종료가 진행됩니다.**")
+        await interaction.response.send_message("✅ 티켓 종료 안내 메시지를 전송했습니다.", ephemeral=True)
+
+        await update_commission_progress(channel, 100)
+        await asyncio.sleep(5)
+        await archive_ticket_channel(channel)
+
 
 class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
     dev_field = ui.TextInput(label="지원 분야", placeholder="예: GFX 디자이너, 복장 디자이너, 스크립터 등", required=True)
@@ -497,6 +693,7 @@ class DialianBot(commands.Bot):
         self.add_view(VerifyView())
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
+        self.add_view(TicketCallView())
 
         # DailyNotice Cog 등록 (정기 6시 Sales 및 가이드 공지 관리)
         await self.add_cog(DailyNotice(self))
@@ -1183,7 +1380,7 @@ async def command_list(ctx):
         title="Dialian 명령어 목록",
         description=(
             "**[티켓 및 일반 서비스]**\n"
-            "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널` `!담당 @유저`\n"
+            "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널` `!담당 @유저` `!호출`\n"
             "`!진행 0|25|50|75|100` `!예상 [시간]` `!완료` `!티켓정보` `!고객` `!소유자변경 @유저` `!청소 1~100`\n"
             "`!계좌등록 @유저 은행 계좌번호 예금주` `!계좌목록` `!계좌삭제 @유저`\n"
             "`!통계` `!진행티켓` `!강제종료`\n\n"
@@ -1804,6 +2001,18 @@ async def t_create_panel(ctx):
     embed2.set_image(url="attachment://price2.png")
 
     await ctx.send(files=[file, file2], embeds=[embed, embed2], view=CombinedTicketOpenView())
+
+
+@bot.command(name="호출", aliases=["손님호출", "고객호출"])
+async def call_customer_command(ctx):
+    if not is_ticket_channel(ctx.channel):
+        return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
+
+    designer_id = await find_ticket_designer_id(ctx.channel)
+    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+        return await ctx.send("❌ 담당 디자이너 또는 관리자만 손님을 호출할 수 있습니다.")
+
+    await handle_customer_call(ctx.channel, ctx.author)
 
 
 @bot.command(name="통계")
