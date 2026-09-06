@@ -667,7 +667,7 @@ class CategorySelectView(ui.View):
             color=discord.Color.blue()
         )
         
-        # GFX 단품 및 묶음가 통합 수치 표기 (일반 가격)
+        # GFX 단품 및 묶음가
         gfx_table = (
             "```\n"
             "┌──────────┬──────────┬───────────┬───────────┐\n"
@@ -681,11 +681,24 @@ class CategorySelectView(ui.View):
         )
         embed.add_field(name="🎨 GFX 단품 & 묶음 공식 가격표", value=gfx_table, inline=False)
 
+        # Roblox 복장 단품 및 묶음가 (디자이너 등급 제외)
+        uniform_table = (
+            "```\n"
+            "┌──────────────┬──────────┬───────────┬───────────┐\n"
+            "│    구  분    │  단  품  │ 2+1 묶음  │ 3+1 묶음  │\n"
+            "├──────────────┼──────────┼───────────┼───────────┤\n"
+            "│  상•하 개별  │ 5,000 원 │ 10,000 원 │ 15,000 원 │\n"
+            "│  바리에이션  │   500 원 │     -     │     -     │\n"
+            "└──────────────┴──────────┴───────────┴───────────┘\n"
+            "```"
+        )
+        embed.add_field(name="👔 Roblox 복장 단품 & 묶음 공식 가격표", value=uniform_table, inline=False)
+
         bundle_info = (
             "```\n"
-            "• GFX 2+1 묶음 : 2개 가격으로 총 3개 제작! (1개 무료 혜택)\n"
-            "• GFX 3+1 묶음 : 3개 가격으로 총 4개 제작! (1개 무료 혜택)\n"
-            "• Roblox 복장  : 단품 / 세트 묶음 할인 상담 가능\n"
+            "• GFX / 복장 2+1 묶음 : 2개 가격으로 총 3개 제작! (1개 무료 혜택)\n"
+            "• GFX / 복장 3+1 묶음 : 3개 가격으로 총 4개 제작! (1개 무료 혜택)\n"
+            "• 복장 바리에이션     : 색상/디자인 변형 추가 시 개당 500원\n"
             "```"
         )
         embed.add_field(name="🎁 묶음 할인 혜택 (Bundle Sale)", value=bundle_info, inline=False)
@@ -701,7 +714,7 @@ class CategorySelectView(ui.View):
             color=discord.Color.gold()
         )
 
-        # GFX 단품 및 묶음가 통합 수치 표기 (단골 20% 할인가 적용)
+        # GFX 단골 할인가
         vip_gfx_table = (
             "```\n"
             "┌──────────┬──────────┬───────────┬───────────┐\n"
@@ -714,6 +727,19 @@ class CategorySelectView(ui.View):
             "```"
         )
         embed.add_field(name="🎨 GFX 단골 20% 할인 단품 & 묶음가", value=vip_gfx_table, inline=False)
+
+        # Roblox 복장 단골 할인가
+        vip_uniform_table = (
+            "```\n"
+            "┌──────────────┬──────────┬───────────┬───────────┐\n"
+            "│    구  분    │ 20% 단품 │ 2+1 묶음  │ 3+1 묶음  │\n"
+            "├──────────────┼──────────┼───────────┼───────────┤\n"
+            "│  상•하 개별  │ 4,000 원 │  8,000 원 │ 12,000 원 │\n"
+            "│  바리에이션  │   400 원 │     -     │     -     │\n"
+            "└──────────────┴──────────┴───────────┴───────────┘\n"
+            "```"
+        )
+        embed.add_field(name="👔 Roblox 복장 단골 20% 할인 단품 & 묶음가", value=vip_uniform_table, inline=False)
 
         vip_info = (
             "```\n"
