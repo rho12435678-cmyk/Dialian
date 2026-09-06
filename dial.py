@@ -645,22 +645,6 @@ class CategorySelectView(ui.View):
         await interaction.response.send_modal(PartnerApplyModal())
 
 
-class CombinedTicketOpenView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @ui.button(label="📩 티켓 문의하기", style=discord.ButtonStyle.primary, custom_id="open_ticket_main_btn")
-    async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        embed = discord.Embed(
-            title="🎯 원하시는 문의 유형을 선택해주세요",
-            description="아래 버튼 중 진행하고 싶으신 종류를 클릭해주세요.",
-            color=discord.Color.blurple()
-        )
-        await interaction.followup.send(embed=embed, view=CategorySelectView(), ephemeral=True)
-
-
 # ==================== [자동 DB 정기 Clean-up 태스크] ====================
 
 @tasks.loop(hours=6)
@@ -692,7 +676,6 @@ class DialianBot(commands.Bot):
         await create_tables()
         await init_extended_db()
 
-        self.add_view(CombinedTicketOpenView())
         self.add_view(CategorySelectView())
         self.add_view(VerifyView())
         self.add_view(TicketCloseView())
@@ -1993,7 +1976,7 @@ async def t_create_panel(ctx):
 
     embed = discord.Embed(
         title="💼 커미션 및 문의 상담 공간",
-        description="상담, 구매 진행, 문의사항이 있으시다면\n아래 📩 버튼을 눌러주세요!\n\n📌 구매 전 가격표를 확인해주세요.",
+        description="상담, 구매 진행, 문의사항이 있으시다면\n아래 원하시는 항목의 버튼을 클릭해주세요!\n\n📌 구매 전 가격표를 확인해주세요.",
         color=0x5865F2
     )
     embed.set_image(url="attachment://price.png")
@@ -2001,7 +1984,7 @@ async def t_create_panel(ctx):
     embed2 = discord.Embed(color=0x5865F2)
     embed2.set_image(url="attachment://price2.png")
 
-    await ctx.send(files=[file, file2], embeds=[embed, embed2], view=CombinedTicketOpenView())
+    await ctx.send(files=[file, file2], embeds=[embed, embed2], view=CategorySelectView())
 
 
 @bot.command(name="호출", aliases=["손님호출", "고객호출"])
