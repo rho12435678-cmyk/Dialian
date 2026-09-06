@@ -2364,4 +2364,4 @@ if __name__ == "__main__":
     if TOKEN:
         bot.run(TOKEN)
     else:
-        print("❌ 오류: 환경변수에 Discord TOKEN이 설정되지 않았습니다."
+        print("❌ 오류: 환경변수에 Discord TOKEN이 설정되지 않았습니다.")
