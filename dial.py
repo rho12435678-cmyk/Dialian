@@ -2356,3 +2356,12 @@ async def show_ticket_customer(ctx):
         await ctx.send(f"👤 이 티켓의 주문 고객님은 {customer.mention} (`{customer.id}`) 님입니다.")
     else:
         await ctx.send("❌ 티켓 주문 고객 정보를 확인할 수 없습니다.")
+
+
+# ==================== [봇 메인 실행부] ====================
+
+if __name__ == "__main__":
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("❌ 오류: 환경변수에 Discord TOKEN이 설정되지 않았습니다."
