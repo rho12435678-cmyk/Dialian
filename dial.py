@@ -1920,7 +1920,8 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             logs.append("**[종료]** 6턴 넘게 치열한 접전이 이어져 무승부 처리되었습니다.")
 
         if winner == "user":
-            win_profit = int(bet * 1.5)
+            # [수정됨]: 묵찌빠 승리 시 1.5배로 인한 인플레이션 방지를 위해 0.98배(2% 수수료)로 조정 
+            win_profit = int(bet * 0.98) 
             await add_user_points(ctx.guild, ctx.author, win_profit)
             final_points = await get_user_points(ctx.author.id)
             embed = discord.Embed(
@@ -2384,6 +2385,23 @@ async def show_ticket_customer(ctx):
         await ctx.send(f"👤 이 티켓의 주문 고객님은 {customer.mention} (`{customer.id}`) 님입니다.")
     else:
         await ctx.send("❌ 티켓 주문 고객 정보를 확인할 수 없습니다.")
+
+
+# ==================== [채널 청소 명령어] ====================
+@bot.command(name="청소", aliases=["clear", "purge"])
+@commands.has_permissions(manage_messages=True)
+async def clear_messages(ctx, amount: int):
+    # [추가됨]: 관리자 권한 확인 및 과부하 방지 리미트(최대 100개)
+    if amount < 1 or amount > 100:
+        return await ctx.send("❌ 1에서 100 사이의 숫자를 입력해주세요.", delete_after=3)
+    
+    # 명령어 원본 메시지 포함하여 삭제 (amount + 1)
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    
+    # 처리 결과 전송 후 3초 뒤 메시지 자동 삭제
+    msg = await ctx.send(f"🧹 **{ctx.author.display_name}**님이 {len(deleted)-1}개의 메시지를 삭제했습니다.")
+    await asyncio.sleep(3)
+    await msg.delete()
 
 
 # ==================== [봇 메인 실행부] ====================
