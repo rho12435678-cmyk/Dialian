@@ -417,6 +417,9 @@ class ProgressModal(ui.Modal, title="📊 진행률 설정"):
 
         int_val = int(val)
         await update_commission_progress(channel, int_val)
+        
+        # 월간 통계 메시지 자동 갱신 연동
+        await update_monthly_stats_message(interaction.client)
 
         await channel.send(f"📊 **{interaction.user.mention}** 님이 진행률을 **{int_val}%**로 변경했습니다.")
         await interaction.response.send_message(f"✅ 진행률이 **{int_val}%**로 변경되었습니다.", ephemeral=True)
@@ -446,6 +449,9 @@ class StatusModal(ui.Modal, title="📌 커미션 상태 변경"):
                 (status, discord.utils.utcnow().isoformat(), channel.id)
             )
             await db.commit()
+            
+        # 월간 통계 메시지 자동 갱신 연동
+        await update_monthly_stats_message(interaction.client)
 
         await channel.send(f"📌 **{interaction.user.mention}** 님이 상태를 변경했습니다.\n**상태:** `{status}`")
         await interaction.response.send_message(f"✅ 상태가 `{status}`(으)로 연동되었습니다.", ephemeral=True)
@@ -490,6 +496,10 @@ class DesignerDMControlView(ui.View):
             return await interaction.response.send_message("❌ 티켓 채널을 찾을 수 없습니다.", ephemeral=True)
 
         await update_commission_progress(channel, 100)
+        
+        # 월간 통계 메시지 자동 갱신 연동
+        await update_monthly_stats_message(interaction.client)
+
         review_embed = discord.Embed(
             title="⭐ 작업이 완료되었습니다!",
             description="모든 작업이 마무리되었습니다.\n아래 버튼을 눌러 담당 디자이너의 만족도를 평가해주세요!",
@@ -508,6 +518,10 @@ class DesignerDMControlView(ui.View):
         await interaction.response.send_message("✅ 티켓 종료 안내 메시지를 전송했습니다.", ephemeral=True)
 
         await update_commission_progress(channel, 100)
+        
+        # 월간 통계 메시지 자동 갱신 연동
+        await update_monthly_stats_message(interaction.client)
+
         await asyncio.sleep(5)
         await archive_ticket_channel(channel)
 
@@ -561,6 +575,10 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
             "updated_at": now_str,
         }
         await upsert_commission_record(data)
+        
+        # 월간 통계 메시지 자동 갱신 연동
+        await update_monthly_stats_message(interaction.client)
+
         await interaction.followup.send(f"✅ 지원 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -629,6 +647,10 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
             "updated_at": now_str,
         }
         await upsert_commission_record(data)
+        
+        # 월간 통계 메시지 자동 갱신 연동
+        await update_monthly_stats_message(interaction.client)
+
         await interaction.followup.send(f"✅ 파트너 문의 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -773,6 +795,20 @@ async def cleanup_processed_records():
         print(f"[DB Cleanup Error] {e}")
 
 
+# ==================== [월간 통계 자동 갱신 태스크] ====================
+
+@tasks.loop(hours=1)
+async def auto_update_monthly_stats():
+    try:
+        await update_monthly_stats_message(bot)
+    except Exception as e:
+        print(f"[월간 통계 자동 갱신 오류] {e}")
+
+@auto_update_monthly_stats.before_loop
+async def before_auto_update_stats():
+    await bot.wait_until_ready()
+
+
 # ==================== [봇 클래스 정의 및 Persistent View / DB 초기화] ====================
 
 class DialianBot(commands.Bot):
@@ -796,6 +832,9 @@ class DialianBot(commands.Bot):
 
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
+
+        if not auto_update_monthly_stats.is_running():
+            auto_update_monthly_stats.start()
 
 
 intents = discord.Intents.default()
@@ -2120,6 +2159,10 @@ async def close_ticket_by_command(ctx):
         await delete_ticket_dm_messages(bot.user, designer, channel)
 
     await update_commission_progress(channel, 100)
+    
+    # 월간 통계 메시지 자동 갱신 연동
+    await update_monthly_stats_message(bot)
+
     await notice.edit(content="✅ 티켓 종료 처리 완료. 곧 보관함으로 이동합니다.")
     await asyncio.sleep(5)
     await archive_ticket_channel(channel)
@@ -2161,6 +2204,9 @@ async def progress(ctx, percent: int):
     label = status_labels[percent]
 
     await update_commission_progress(ctx.channel, percent)
+    
+    # 월간 통계 메시지 자동 갱신 연동
+    await update_monthly_stats_message(bot)
 
     embed = discord.Embed(
         title="📊 커미션 진행 상황 업데이트",
@@ -2197,6 +2243,9 @@ async def complete(ctx):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 완료 처리할 수 있습니다.")
 
     await update_commission_progress(ctx.channel, 100)
+    
+    # 월간 통계 메시지 자동 갱신 연동
+    await update_monthly_stats_message(bot)
 
     review_embed = discord.Embed(
         title="⭐ 작업이 완료되었습니다!",
