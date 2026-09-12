@@ -3,7 +3,11 @@ import aiosqlite
 import discord
 from discord.ext import commands
 
-from config import REGULAR_CUSTOMER_ROLE_ID, TARGET_REGULAR_POINTS, DATABASE
+from config import REGULAR_CUSTOMER_ROLE_ID, TARGET_REGULAR_POINTS
+
+# config에 DATABASE가 없다면 직접 경로 지정 (예: "database/database.db" 또는 설정에 맞는 이름)
+DATABASE = "database/database.db" 
+
 
 
 # ==========================================
