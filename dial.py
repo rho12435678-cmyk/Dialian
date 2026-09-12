@@ -793,6 +793,9 @@ class DialianBot(commands.Bot):
         # DailyNotice Cog 등록 (정기 Sales 및 가이드 공지 관리)
         await self.add_cog(DailyNotice(self))
 
+        # 새로 분리된 포인트 Cog 등록
+        await self.load_extension("database.services.points")
+
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
 
@@ -1493,9 +1496,9 @@ async def command_list(ctx):
             "`!출석체크` (매일 1회 출석 체크 시 **+10P** 지급!)\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용 / 최대 배팅: 500P)*\n"
-            "`!뽑기` - 20P 소모 (최대 300P 획득 가능)\n"
-            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 수수료 5% 제외 후 지급!\n"
-            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 정식 심리전 대결 (승리 시 1.5배 지급!)"
+            "`!뽑기` - 20P 소모 (최대 150P 획득 가능)\n"
+            "`!가위바위보 [가위/바위/보] [배팅포인트]` - 승리 시 배팅액의 1.95배 지급!\n"
+            "`!묵찌빠 [가위/바위/보] [배팅포인트]` - 정식 심리전 대결 (승리 시 2.0배 지급!)"
         ),
         color=discord.Color.blurple(),
     )
@@ -1579,65 +1582,6 @@ async def check_blacklist(ctx, user_input: str):
         await ctx.send(f"ℹ️ **ID: `{user_id}`** 님은 블랙리스트에 등록되어 있지 않습니다.")
 
 
-@bot.command(name="포인트안내")
-@commands.has_permissions(administrator=True)
-async def send_point_guide_embed(ctx):
-    target_channel = bot.get_channel(POINT_INFO_CHANNEL_ID) or ctx.channel
-
-    embed = discord.Embed(
-        title="💼 [ 포인트 적립 및 이용 안내 ]",
-        description="서버 활동을 통해 포인트를 쌓고, 다양한 혜택과 재미를 즐겨보세요! ✨",
-        color=discord.Color.gold()
-    )
-
-    embed.add_field(
-        name="1️⃣ 포인트 적립 방법 안내",
-        value=(
-            "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
-            "• **후기 작성**\n"
-            "  - GFX / 복장 단품 구매 후기: **50P**\n"
-            "  - 2 + 1 묶음 구매 후기: **100P**\n"
-            "  - 3 + 1 묶음 구매 후기: **150P**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="2️⃣ 단골 손님 혜택 (20% 자동 할인)",
-        value="**1000P 달성 시 `@Regular Customer/단골 손님` 역할 자동 지급!**\n*(이후 주문하는 모든 커미션에 20% 자동 할인 혜택이 적용됩니다.)*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="3️⃣ 포인트 관련 명령어 & 미니오락실 (봇명령 채널 / 최대 배팅 500P)",
-        value=(
-            "```\n"
-            "[ 포인트 확인 & 출석체크 ]\n"
-            "!출석체크 (또는 !출석, !출체) - 매일 1회 10P 적립\n"
-            "!포인트 (또는 !마일리지, !p) [@유저 선택]\n"
-            "- 보유 포인트 및 티어/혜택 현황 확인\n\n"
-            "[ 포인트 오락실 & 미니게임 ]\n"
-            "!뽑기 (또는 !가챠, !럭키드로우)\n"
-            "- 20P 소모 / 최대 300P 잭팟!\n\n"
-            "!가위바위보 [가위/바위/보] [배팅포인트]\n"
-            "- 최소 10P ~ 최대 500P / 승리 시 수수료 5% 제외 지급!\n\n"
-            "!묵찌빠 [가위/바위/보] [배팅포인트]\n"
-            "- 최소 20P ~ 최대 500P / 묵찌빠 심리전 대결!\n\n"
-            "[ 관리자 전용 ]\n"
-            "!포인트지급 [@유저] [금액]\n"
-            "!포인트차감 [@유저] [금액]\n"
-            "!포인트리셋 [@유저]\n"
-            "```"
-        ),
-        inline=False
-    )
-
-    embed.set_footer(text="DDS Point System | 즐거운 서버 활동 되세요!")
-    await target_channel.send(embed=embed)
-    if target_channel.id != ctx.channel.id:
-        await ctx.send(f"✅ <#{POINT_INFO_CHANNEL_ID}> 채널에 포인트 안내 임베드를 전송했습니다.")
-
-
 @bot.command(name="디자이너등급패널")
 @commands.has_permissions(administrator=True)
 async def setup_designer_tier_panel(ctx):
@@ -1663,75 +1607,6 @@ async def setup_designer_tier_panel(ctx):
         pass
 
 
-# ==================== [📅 출석체크 및 포인트 명령어] ====================
-
-@bot.command(name="출석체크", aliases=["출석", "출체", "checkin"])
-async def attendance_check(ctx):
-    if not await check_command_channel(ctx):
-        return
-
-    success, current_count = await check_and_increment_daily_limit(ctx.author.id, "attendance", max_limit=1)
-    if not success:
-        return await ctx.send(f"❌ {ctx.author.mention}님, 이미 오늘 출석체크를 완료하셨습니다! 내일 다시 시도해주세요. 📅")
-
-    reward = ATTENDANCE_REWARD
-    new_points = await add_user_points(ctx.guild, ctx.author, reward)
-    
-    await update_point_ranking_message(bot)
-
-    embed = discord.Embed(
-        title="📅 출석체크 완료!",
-        description=f"{ctx.author.mention}님, 출석체크가 정상적으로 처리되었습니다!\n🎁 출석 보상으로 **+{reward} P**가 적립되었습니다.",
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.add_field(name="현재 보유 포인트", value=f"`{new_points:,} P`", inline=False)
-    embed.set_footer(text="매일 UTC 00:00(한국 시간 오전 9:00) 기준 초기화")
-
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="포인트", aliases=["마일리지", "p"])
-async def show_points(ctx, member: discord.Member = None):
-    if not await check_command_channel(ctx):
-        return
-
-    target = member or ctx.author
-    points = await get_user_points(target.id)
-
-    if points >= 1000:
-        tier_icon = "🥇"
-        tier_name = "골드 (최상위 VVIP 단골)"
-        color = discord.Color.gold()
-    elif points >= 500:
-        tier_icon = "🥈"
-        tier_name = "실버 (단골 유망주)"
-        color = discord.Color.light_grey()
-    elif points >= 200:
-        tier_icon = "🥉"
-        tier_name = "브론즈"
-        color = discord.Color.dark_orange()
-    else:
-        tier_icon = "🌱"
-        tier_name = "뉴비"
-        color = discord.Color.green()
-
-    embed = discord.Embed(
-        title=f"📊 {target.display_name} 님의 프로필",
-        color=color
-    )
-    embed.add_field(name="현재 계급 (티어)", value=f"{tier_icon} **{tier_name}**", inline=False)
-    embed.add_field(name="현재 포인트", value=f"`{points:,} P` / (골드 기준: `1,000 P`)", inline=False)
-
-    if points >= 1000:
-        embed.add_field(name="🎁 해제된 최고 혜택", value="✅ **골드 단골 손님 (모든 커미션 20% 자동 할인 적용 중)**", inline=False)
-    else:
-        remaining = 1000 - points
-        embed.add_field(name="승급까지 남은 길", value=f"최고 등급 **골드(단골 20% 할인)**까지 **{remaining:,} P** 남았습니다!", inline=False)
-
-    await ctx.send(embed=embed)
-
-
 # ==================== [🎰 보안 강화 미니게임 섹션] ====================
 
 @bot.command(name="뽑기", aliases=["가챠", "럭키드로우"])
@@ -1753,8 +1628,9 @@ async def point_gacha(ctx):
 
         await add_user_points(ctx.guild, ctx.author, -cost)
 
-        prizes = [0, 10, 20, 30, 50, 100, 300]
-        weights = [30, 30, 20, 12, 5, 2.7, 0.3]
+        # 꽝(60%): 0P / 소액(25%): 10P / 당첨(10%): 50P / 잭팟(5%): 150P 에 맞춘 배당률 변경
+        prizes = [0, 10, 50, 150]
+        weights = [60, 25, 10, 5]
         result = random.choices(prizes, weights=weights, k=1)[0]
 
         if result > 0:
@@ -1766,17 +1642,11 @@ async def point_gacha(ctx):
         if result == 0:
             color, title, desc = discord.Color.dark_grey(), "😭 아쉬운 꽝!", "포인트를 얻지 못했습니다."
         elif result == 10:
-            color, title, desc = discord.Color.light_grey(), "💧 절반 보전!", "소모한 포인트의 절반인 **10P**를 돌려받았습니다."
-        elif result == 20:
-            color, title, desc = discord.Color.blue(), "😐 본전치기!", "소모한 20P를 그대로 찾아왔습니다."
-        elif result == 30:
-            color, title, desc = discord.Color.green(), "✨ 소소한 이득!", "소모 포인트 대비 **+10P** 이득 (**30P** 획득)!"
+            color, title, desc = discord.Color.light_grey(), "💧 소액 환급!", "소모한 포인트의 절반인 **10P**를 돌려받았습니다."
         elif result == 50:
             color, title, desc = discord.Color.gold(), "🎉 축하합니다! 당첨!", f"**+{result}P**를 얻으셨습니다!"
-        elif result == 100:
-            color, title, desc = discord.Color.purple(), "💎 대박 당첨!", f"무려 **+{result}P**를 획득하셨습니다!"
-        else:
-            color, title, desc = discord.Color.magenta(), "🔥 300P 잭팟 터짐!!!", f"극악의 확률을 뚫고 무려 **{result}P**를 획득했습니다!"
+        elif result == 150:
+            color, title, desc = discord.Color.magenta(), "🔥 150P 잭팟 터짐!!!", f"극악의 확률을 뚫고 무려 **{result}P**를 획득했습니다!"
 
         embed = discord.Embed(title=title, description=desc, color=color)
         embed.add_field(name="현재 잔여 포인트", value=f"`{final_points:,} P`", inline=False)
@@ -1824,7 +1694,7 @@ async def rock_paper_scissors(ctx, choice: str, bet: int):
             final_points = await get_user_points(ctx.author.id)
             embed = discord.Embed(
                 title="✌️🖐️✊ 가위바위보 승리!",
-                description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n🎉 승리하여 **+{win_profit:,}P** (수수료 5% 제외)를 획득했습니다!",
+                description=f"유저: **{choice}** vs 봇: **{bot_choice}**\n\n🎉 승리하여 **+{win_profit:,}P** (배팅액의 1.95배)를 획득했습니다!",
                 color=discord.Color.green()
             )
         elif result == "draw":
@@ -1920,8 +1790,8 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             logs.append("**[종료]** 6턴 넘게 치열한 접전이 이어져 무승부 처리되었습니다.")
 
         if winner == "user":
-            # [수정됨]: 묵찌빠 승리 시 1.5배로 인한 인플레이션 방지를 위해 0.98배(2% 수수료)로 조정 
-            win_profit = int(bet * 0.98) 
+            # [수정됨]: 인플레이션 없이 2.0배(배팅금+수익) 지급을 완벽히 맞추기 위해 수익(win_profit) = 배팅금액(bet)으로 설정
+            win_profit = bet 
             await add_user_points(ctx.guild, ctx.author, win_profit)
             final_points = await get_user_points(ctx.author.id)
             embed = discord.Embed(
@@ -2192,7 +2062,7 @@ async def delete_bank_account(ctx, member: discord.Member):
         await ctx.send(f"✅ {member.mention} 님의 계좌 정보가 삭제되었습니다.")
         await log_security_event(ctx.guild, "계좌 삭제", f"수행자: {ctx.author.mention}\n대상: {member.mention}", discord.Color.red())
     else:
-        await ctx.send(f"❌ {member.mention} 님의 등록된 계좌 정보를 찾을 수 없습니다.")
+        await ctx.send(f"❌ {member.mention} 님의 등록된 계좌 정보를 찾을 수 정습니다.")
 
 
 @bot.command(name="계좌전송", aliases=["계좌번호", "결제정보", "결제"])
@@ -2391,14 +2261,11 @@ async def show_ticket_customer(ctx):
 @bot.command(name="청소", aliases=["clear", "purge"])
 @commands.has_permissions(manage_messages=True)
 async def clear_messages(ctx, amount: int):
-    # [추가됨]: 관리자 권한 확인 및 과부하 방지 리미트(최대 100개)
     if amount < 1 or amount > 100:
         return await ctx.send("❌ 1에서 100 사이의 숫자를 입력해주세요.", delete_after=3)
     
-    # 명령어 원본 메시지 포함하여 삭제 (amount + 1)
     deleted = await ctx.channel.purge(limit=amount + 1)
     
-    # 처리 결과 전송 후 3초 뒤 메시지 자동 삭제
     msg = await ctx.send(f"🧹 **{ctx.author.display_name}**님이 {len(deleted)-1}개의 메시지를 삭제했습니다.")
     await asyncio.sleep(3)
     await msg.delete()
