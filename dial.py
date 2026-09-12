@@ -23,6 +23,7 @@ from database.monthly_stats import (
 from database.services.points import (
     add_user_points,
     get_user_points,
+    process_daily_attendance,
 )
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
@@ -667,7 +668,6 @@ class CategorySelectView(ui.View):
             color=discord.Color.blue()
         )
         
-        # GFX 단품 및 묶음가
         gfx_table = (
             "```\n"
             "┌──────────┬──────────┬───────────┬───────────┐\n"
@@ -681,7 +681,6 @@ class CategorySelectView(ui.View):
         )
         embed.add_field(name="🎨 GFX 단품 & 묶음 공식 가격표", value=gfx_table, inline=False)
 
-        # Roblox 복장 단품 및 묶음가 (디자이너 등급 제외)
         uniform_table = (
             "```\n"
             "┌──────────────┬──────────┬───────────┬───────────┐\n"
@@ -714,7 +713,6 @@ class CategorySelectView(ui.View):
             color=discord.Color.gold()
         )
 
-        # GFX 단골 할인가
         vip_gfx_table = (
             "```\n"
             "┌──────────┬──────────┬───────────┬───────────┐\n"
@@ -728,7 +726,6 @@ class CategorySelectView(ui.View):
         )
         embed.add_field(name="🎨 GFX 단골 20% 할인 단품 & 묶음가", value=vip_gfx_table, inline=False)
 
-        # Roblox 복장 단골 할인가
         vip_uniform_table = (
             "```\n"
             "┌──────────────┬──────────┬───────────┬───────────┐\n"
@@ -757,7 +754,6 @@ class CategorySelectView(ui.View):
 
 @tasks.loop(hours=6)
 async def cleanup_processed_records():
-    """DB 용량 누수 방지를 위해 5,000건 초과된 오래된 처리 기록을 정기 삭제"""
     try:
         async with aiosqlite.connect(DATABASE) as db:
             await db.execute("""
@@ -790,11 +786,7 @@ class DialianBot(commands.Bot):
         self.add_view(ClaimTicketView())
         self.add_view(TicketCallView())
 
-        # DailyNotice Cog 등록 (정기 Sales 및 가이드 공지 관리)
         await self.add_cog(DailyNotice(self))
-
-        # 새로 분리된 포인트 Cog 등록
-        await self.load_extension("database.services.points")
 
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
@@ -1319,7 +1311,6 @@ async def on_message(message: discord.Message):
     sec_channel = await get_security_channel(guild)
 
     try:
-        # 1. 실행 파일 감지
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith(DANGEROUS_EXTENSIONS):
@@ -1338,7 +1329,6 @@ async def on_message(message: discord.Message):
                         await sec_channel.send(embed=embed)
                     return
 
-        # 2. 민감한 개인정보/토큰 보호
         clean_content = re.sub(r"<@!?\d+>|<@&\d+>|<#\d+>", "", message.content)
         if re.search(DISCORD_TOKEN_REGEX, clean_content) or re.search(RRN_REGEX, clean_content) or re.search(PHONE_REGEX, clean_content):
             try:
@@ -1359,7 +1349,6 @@ async def on_message(message: discord.Message):
         is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
         if not is_staff and author.id != guild.owner_id:
             
-            # 3. 사적 거래 (뒷매) 키워드 차단
             msg_content = message.content.replace(" ", "").lower()
             found_keyword = [word for word in DM_TRADE_KEYWORDS if word.replace(" ", "") in msg_content]
 
@@ -1382,7 +1371,6 @@ async def on_message(message: discord.Message):
                     await sec_channel.send(embed=embed)
                 return
 
-            # 4. 외부 디스코드 초대 링크 유포 차단
             if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
                 try:
                     await message.delete()
@@ -1399,7 +1387,6 @@ async def on_message(message: discord.Message):
                     await sec_channel.send(embed=embed)
                 return
 
-            # 5. 무단 대량 멘션 감지
             total_mentions = len(message.mentions) + len(message.role_mentions)
             if message.mention_everyone or total_mentions >= MAX_MENTION_LIMIT:
                 try:
@@ -1417,7 +1404,6 @@ async def on_message(message: discord.Message):
                     await sec_channel.send(embed=embed)
                 return
 
-            # 6. 유연한 채팅 도배(Spam) 감지
             now = discord.utils.utcnow()
             for k, ts_list in list(user_message_tracker.items()):
                 valid_ts = [t for t in ts_list if (now - t).total_seconds() < SPAM_TIME_WINDOW]
@@ -1468,6 +1454,85 @@ async def on_command_error(ctx, error):
     else:
         print(f"[Command Error in {ctx.command}]: {error}")
         traceback.print_exception(type(error), error, error.__traceback__)
+
+
+# ==================== [출석 및 포인트 관련 명령어 (재추가됨)] ====================
+
+@bot.command(name="출석", aliases=["출석체크", "출체"])
+async def attendance_cmd(ctx):
+    """매일 1회 출석체크 명령어"""
+    success, added_points, total_points = await process_daily_attendance(ctx.guild, ctx.author)
+    if success:
+        await ctx.send(f"✅ **{ctx.author.display_name}**님, 출석체크 완료! **+{added_points}P**가 적립되었습니다. (현재: **{total_points:,}P**)")
+    else:
+        await ctx.send(f"⚠️ **{ctx.author.display_name}**님, 오늘은 이미 출석체크를 하셨습니다. 내일 다시 시도해주세요! (현재: **{total_points:,}P**)")
+
+@bot.command(name="포인트", aliases=["마일리지", "p"])
+async def check_points_cmd(ctx, member: discord.Member = None):
+    """보유 포인트 확인 명령어"""
+    target = member or ctx.author
+    pts = await get_user_points(target.id)
+    await ctx.send(f"🪙 **{target.display_name}**님의 현재 보유 포인트: **{pts:,}P**")
+
+@bot.command(name="포인트안내", aliases=["포인트안내문", "안내"])
+async def point_guide_cmd(ctx):
+    """수정된 포인트 적립 기준 안내 임베드 출력"""
+    embed = discord.Embed(
+        title="💼 [ 포인트 적립 및 이용 안내 ]",
+        description="서버 활동을 통해 포인트를 쌓고, 다양한 혜택과 재미를 즐겨보세요! ✨",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="1️⃣ 포인트 적립 방법 안내",
+        value=(
+            "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
+            "• **후기 작성**\n"
+            "  - 단품 구매 후기: **50P**\n"
+            "  - 2+1 묶음 구매 후기: **100P**\n"
+            "  - 3+1 묶음 구매 후기: **150P**"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="2️⃣ 단골 손님 혜택 (15% 자동 할인)",
+        value=(
+            f"**{TARGET_REGULAR_POINTS:,}P** 달성 시 `@Regular Customer/단골 손님` 역할 자동 지급!\n"
+            "*(이후 주문하는 모든 커미션에 15% 자동 할인 혜택이 적용됩니다.)*"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="3️⃣ 포인트 관련 명령어 & 미니오락실 (봇명령어 채널)",
+        value=(
+            "```text\n"
+            "[ 포인트 확인 & 출석체크 ]\n"
+            "!출석체크 (또는 !출석, !출체) - 매일 1회 10P 적립\n"
+            "!포인트 (또는 !마일리지, !p) [@유저 선택]\n"
+            "- 보유 포인트 및 티어/혜택 현황 확인\n\n"
+            "[ 포인트 오락실 & 미니게임 확률 안내 ]\n"
+            "!뽑기 (또는 !가챠, !럭키드로우)\n"
+            "- 1회 20P 소모 (환급률 75% 밸런스 패치 적용)\n"
+            "- 꽝(60%): 0P / 소액(25%): 10P / 당첨(10%): 50P / 잭팟(5%): 150P\n\n"
+            "!가위바위보 [가위/바위/보] [배팅포인트]\n"
+            "- 최소 배팅 10P 이상\n"
+            "- 승리(33.3%): 배팅액의 1.95배 지급 / 무승부(33.3%): 환불 / 패배(33.3%): 차감\n\n"
+            "!묵찌빠 [가위/바위/보] [배팅포인트]\n"
+            "- 최소 배팅 20P 이상 / 묵찌빠 심리전 대결\n"
+            "- 승리 시 배팅액의 2.0배 지급 (무승부 시 재경기 진행)\n\n"
+            "[ 관리자 전용 ]\n"
+            "!포인트지급 [@유저] [금액]\n"
+            "!포인트차감 [@유저] [금액]\n"
+            "!포인트리셋 [@유저]\n"
+            "```"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="DDS Point System | 즐거운 서버 활동 되세요!")
+    await ctx.send(embed=embed)
 
 
 # ==================== [명령어 모음] ====================
@@ -1628,7 +1693,6 @@ async def point_gacha(ctx):
 
         await add_user_points(ctx.guild, ctx.author, -cost)
 
-        # 꽝(60%): 0P / 소액(25%): 10P / 당첨(10%): 50P / 잭팟(5%): 150P 에 맞춘 배당률 변경
         prizes = [0, 10, 50, 150]
         weights = [60, 25, 10, 5]
         result = random.choices(prizes, weights=weights, k=1)[0]
@@ -1790,7 +1854,6 @@ async def muk_jji_bba(ctx, choice: str, bet: int):
             logs.append("**[종료]** 6턴 넘게 치열한 접전이 이어져 무승부 처리되었습니다.")
 
         if winner == "user":
-            # [수정됨]: 인플레이션 없이 2.0배(배팅금+수익) 지급을 완벽히 맞추기 위해 수익(win_profit) = 배팅금액(bet)으로 설정
             win_profit = bet 
             await add_user_points(ctx.guild, ctx.author, win_profit)
             final_points = await get_user_points(ctx.author.id)
@@ -2062,7 +2125,7 @@ async def delete_bank_account(ctx, member: discord.Member):
         await ctx.send(f"✅ {member.mention} 님의 계좌 정보가 삭제되었습니다.")
         await log_security_event(ctx.guild, "계좌 삭제", f"수행자: {ctx.author.mention}\n대상: {member.mention}", discord.Color.red())
     else:
-        await ctx.send(f"❌ {member.mention} 님의 등록된 계좌 정보를 찾을 수 정습니다.")
+        await ctx.send(f"❌ {member.mention} 님의 등록된 계좌 정보를 찾을 수 없습니다.")
 
 
 @bot.command(name="계좌전송", aliases=["계좌번호", "결제정보", "결제"])
