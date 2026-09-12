@@ -787,6 +787,12 @@ class DialianBot(commands.Bot):
         self.add_view(TicketCallView())
 
         await self.add_cog(DailyNotice(self))
+        
+        # 외부 포인트 Cog 로드 추가
+        try:
+            await self.load_extension("database.services.points")
+        except Exception as e:
+            print(f"[포인트 Cog 로드 실패]: {e}")
 
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
@@ -1454,85 +1460,6 @@ async def on_command_error(ctx, error):
     else:
         print(f"[Command Error in {ctx.command}]: {error}")
         traceback.print_exception(type(error), error, error.__traceback__)
-
-
-# ==================== [출석 및 포인트 관련 명령어 (재추가됨)] ====================
-
-@bot.command(name="출석", aliases=["출석체크", "출체"])
-async def attendance_cmd(ctx):
-    """매일 1회 출석체크 명령어"""
-    success, added_points, total_points = await process_daily_attendance(ctx.guild, ctx.author)
-    if success:
-        await ctx.send(f"✅ **{ctx.author.display_name}**님, 출석체크 완료! **+{added_points}P**가 적립되었습니다. (현재: **{total_points:,}P**)")
-    else:
-        await ctx.send(f"⚠️ **{ctx.author.display_name}**님, 오늘은 이미 출석체크를 하셨습니다. 내일 다시 시도해주세요! (현재: **{total_points:,}P**)")
-
-@bot.command(name="포인트", aliases=["마일리지", "p"])
-async def check_points_cmd(ctx, member: discord.Member = None):
-    """보유 포인트 확인 명령어"""
-    target = member or ctx.author
-    pts = await get_user_points(target.id)
-    await ctx.send(f"🪙 **{target.display_name}**님의 현재 보유 포인트: **{pts:,}P**")
-
-@bot.command(name="포인트안내", aliases=["포인트안내문", "안내"])
-async def point_guide_cmd(ctx):
-    """수정된 포인트 적립 기준 안내 임베드 출력"""
-    embed = discord.Embed(
-        title="💼 [ 포인트 적립 및 이용 안내 ]",
-        description="서버 활동을 통해 포인트를 쌓고, 다양한 혜택과 재미를 즐겨보세요! ✨",
-        color=discord.Color.blue()
-    )
-
-    embed.add_field(
-        name="1️⃣ 포인트 적립 방법 안내",
-        value=(
-            "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
-            "• **후기 작성**\n"
-            "  - 단품 구매 후기: **50P**\n"
-            "  - 2+1 묶음 구매 후기: **100P**\n"
-            "  - 3+1 묶음 구매 후기: **150P**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="2️⃣ 단골 손님 혜택 (15% 자동 할인)",
-        value=(
-            f"**{TARGET_REGULAR_POINTS:,}P** 달성 시 `@Regular Customer/단골 손님` 역할 자동 지급!\n"
-            "*(이후 주문하는 모든 커미션에 15% 자동 할인 혜택이 적용됩니다.)*"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="3️⃣ 포인트 관련 명령어 & 미니오락실 (봇명령어 채널)",
-        value=(
-            "```text\n"
-            "[ 포인트 확인 & 출석체크 ]\n"
-            "!출석체크 (또는 !출석, !출체) - 매일 1회 10P 적립\n"
-            "!포인트 (또는 !마일리지, !p) [@유저 선택]\n"
-            "- 보유 포인트 및 티어/혜택 현황 확인\n\n"
-            "[ 포인트 오락실 & 미니게임 확률 안내 ]\n"
-            "!뽑기 (또는 !가챠, !럭키드로우)\n"
-            "- 1회 20P 소모 (환급률 75% 밸런스 패치 적용)\n"
-            "- 꽝(60%): 0P / 소액(25%): 10P / 당첨(10%): 50P / 잭팟(5%): 150P\n\n"
-            "!가위바위보 [가위/바위/보] [배팅포인트]\n"
-            "- 최소 배팅 10P 이상\n"
-            "- 승리(33.3%): 배팅액의 1.95배 지급 / 무승부(33.3%): 환불 / 패배(33.3%): 차감\n\n"
-            "!묵찌빠 [가위/바위/보] [배팅포인트]\n"
-            "- 최소 배팅 20P 이상 / 묵찌빠 심리전 대결\n"
-            "- 승리 시 배팅액의 2.0배 지급 (무승부 시 재경기 진행)\n\n"
-            "[ 관리자 전용 ]\n"
-            "!포인트지급 [@유저] [금액]\n"
-            "!포인트차감 [@유저] [금액]\n"
-            "!포인트리셋 [@유저]\n"
-            "```"
-        ),
-        inline=False
-    )
-
-    embed.set_footer(text="DDS Point System | 즐거운 서버 활동 되세요!")
-    await ctx.send(embed=embed)
 
 
 # ==================== [명령어 모음] ====================
