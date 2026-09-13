@@ -2008,10 +2008,23 @@ async def call_customer_command(ctx):
 @bot.command(name="통계")
 @commands.has_permissions(administrator=True)
 async def stats(ctx):
-    embed = await build_monthly_stats_embed(ctx.guild)
-    message = await ctx.send(embed=embed)
-    await save_monthly_stats_message(message)
-    await ctx.reply("✅ 월간 통계 패널을 등록했습니다.", mention_author=False, delete_after=5)
+    try:
+        # 월간 통계 임베드 생성
+        embed = await build_monthly_stats_embed(ctx.guild)
+        
+        # 지정 채널에 메시지 발송
+        message = await ctx.send(embed=embed)
+        
+        # DB에 해당 메시지 정보 저장 (자동 갱신용)
+        await save_monthly_stats_message(message)
+        
+        # 성공 메시지 출력
+        await ctx.reply("✅ 월간 통계 패널을 정상적으로 생성 및 등록했습니다.", mention_author=False, delete_after=5)
+    except Exception as e:
+        # 예외 발생 시 디스코드 채널 및 터미널 콘솔에 상세 에러 출력
+        await ctx.send(f"❌ **통계 패널 생성 중 오류 발생:** `{e}`")
+        print(f"[통계 명령어 실행 오류] {e}")
+        traceback.print_exc()
 
 
 @bot.command(name="진행티켓", aliases=["진행목록", "티켓목록"])
