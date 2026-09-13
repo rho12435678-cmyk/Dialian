@@ -82,8 +82,6 @@ MASS_KICK_LIMIT = 3
 MASS_BAN_LIMIT = 3
 MASS_WEBHOOK_LIMIT = 2
 
-DISCORD_INVITE_REGEX = r"(discord\.gg|discord\.com/invite|discordapp\.com/invite)"
-
 DM_TRADE_KEYWORDS = [
     "디엠주세요", "디엠 주세요", "dm주세요", "dm 주세요",
     "뒷디", "개인톡", "카톡주세요", "카톡 주세요",
@@ -926,7 +924,7 @@ async def claim_once(table_name: str, message_id: int) -> bool:
     async with aiosqlite.connect(DATABASE) as db:
         await db.execute("PRAGMA busy_timeout = 5000;")
         cursor = await db.execute(
-            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)",
+            f"INSERT OR IGNORE INTO {table_name}(message_id) VALUES (?)" ,
             (message_id,)
         )
         await db.commit()
@@ -1410,22 +1408,6 @@ async def on_message(message: discord.Message):
                                     f"**적발 키워드:** `{found_keyword[0]}`\n"
                                     f"**원본 메시지:** {message.content}\n"
                                     f"**발생 채널:** {message.channel.mention}",
-                        color=discord.Color.orange(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    await sec_channel.send(embed=embed)
-                return
-
-            if re.search(DISCORD_INVITE_REGEX, message.content, re.IGNORECASE):
-                try:
-                    await message.delete()
-                except Exception:
-                    pass
-                
-                if sec_channel:
-                    embed = discord.Embed(
-                        title="🚨 [보안 경고] 외부 초대 링크 유포 감지",
-                        description=f"**유저:** {author.mention} (`{author.id}`)\n**발생 채널:** {message.channel.mention}",
                         color=discord.Color.orange(),
                         timestamp=discord.utils.utcnow()
                     )
