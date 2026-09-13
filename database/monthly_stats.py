@@ -409,6 +409,12 @@ async def build_monthly_stats_embed(guild):
         try:
             created = datetime.fromisoformat(created_at)
             completed = datetime.fromisoformat(completed_at)
+
+            # 시간대(timezone) 오프셋 차이로 인한 offset-naive / aware 뺄셈 에러 방지
+            if created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
+            if completed.tzinfo is not None:
+                completed = completed.replace(tzinfo=None)
         except (TypeError, ValueError):
             continue
 
