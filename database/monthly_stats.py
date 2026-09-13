@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import re
 import aiosqlite
 import discord
@@ -61,6 +61,14 @@ async def set_setting(key, value):
 
 async def get_setting(key):
     async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
         cursor = await db.execute(
             "SELECT value FROM bot_settings WHERE key = ?",
             (key,)
@@ -73,6 +81,8 @@ async def get_setting(key):
 def member_name(guild, member_id):
     if not member_id:
         return "미지정"
+    if not guild:
+        return str(member_id)
 
     member = guild.get_member(int(member_id))
     return member.display_name if member else str(member_id)
@@ -83,7 +93,6 @@ def member_name(guild, member_id):
 # ==========================================
 
 class ProgressView(ui.View):
-    # *args, **kwargs를 추가하여 외부에서 불필요한 인자(예: ticket_channel_id 등)가 전달되어도 에러가 나지 않도록 방어 코드 추가
     def __init__(self, designer_id: int = None, active_progress: int = 0, *args, **kwargs):
         super().__init__(timeout=None)
         self.designer_id = int(designer_id) if designer_id else None
@@ -123,7 +132,7 @@ class ProgressView(ui.View):
             
         channel_id = int(match.group(1))
         
-        guild = message._state._get_client().guilds[0]
+        guild = message._state._get_client().guilds[0] if message._state._get_client().guilds else None
         for g in message._state._get_client().guilds:
             if g.get_channel(channel_id):
                 guild = g
@@ -257,7 +266,20 @@ async def build_monthly_stats_embed(guild):
     start_iso = iso(start)
     end_iso = iso(end)
 
+    guild_name = guild.name if guild else "서버"
+
     async with aiosqlite.connect(DATABASE) as db:
+        # reviews 테이블 미존재 시 자동 생성 (오류 방지)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                developer_id INTEGER,
+                stars REAL,
+                created_at TEXT
+            )
+        """)
+        await db.commit()
+
         cursor = await db.execute(
             """
             SELECT COUNT(*)
@@ -309,9 +331,9 @@ async def build_monthly_stats_embed(guild):
             """,
             (start_iso, end_iso)
         )
-        review_count, avg_rating = await cursor.fetchone()
-        review_count = review_count or 0
-        avg_rating = avg_rating or 0
+        row = await cursor.fetchone()
+        review_count = row[0] if row and row[0] else 0
+        avg_rating = row[1] if row and row[1] else 0.0
 
         cursor = await db.execute(
             """
@@ -395,13 +417,13 @@ async def build_monthly_stats_embed(guild):
 
     avg_work_days = sum(work_days) / len(work_days) if work_days else 0
 
-    if top_designer:
+    if top_designer and top_designer[0]:
         top_name = member_name(guild, top_designer[0])
         top_text = f"{top_name} ⭐{top_designer[1]:.2f}"
     else:
         top_text = "없음"
 
-    if most_active:
+    if most_active and most_active[0]:
         active_name = member_name(guild, most_active[0])
         active_text = f"{active_name} (완료 {most_active[1]}건)"
     else:
@@ -409,7 +431,7 @@ async def build_monthly_stats_embed(guild):
 
     description = (
         "```text\n"
-        f"🗓️ {start.year}년 {start.month}월 {guild.name}\n\n"
+        f"🗓️ {start.year}년 {start.month}월 {guild_name}\n\n"
         f"📦 총 주문 : {total_orders}\n"
         f"✅ 완료 : {completed_orders}\n"
         f"⌛ 진행 중 : {active_orders}\n"
@@ -434,6 +456,8 @@ async def build_monthly_stats_embed(guild):
 
 
 async def save_monthly_stats_message(message):
+    if not message:
+        return
     await set_setting(STATS_CHANNEL_KEY, message.channel.id)
     await set_setting(STATS_MESSAGE_KEY, message.id)
 
@@ -458,7 +482,7 @@ async def find_existing_monthly_stats_message(bot):
                     if is_monthly_stats_message(message, bot.user.id):
                         candidates.append(message)
                         break
-            except (discord.Forbidden, discord.HTTPException):
+            except (discord.Forbidden, discord.HTTPException, Exception):
                 continue
 
     if not candidates:
@@ -470,32 +494,36 @@ async def find_existing_monthly_stats_message(bot):
 
 
 async def update_monthly_stats_message(bot):
-    channel_id = await get_setting(STATS_CHANNEL_KEY)
-    message_id = await get_setting(STATS_MESSAGE_KEY)
-
-    if not channel_id or not message_id:
-        message = await find_existing_monthly_stats_message(bot)
-        if message is None:
-            return False
-        channel_id = message.channel.id
-        message_id = message.id
-
-    channel = bot.get_channel(int(channel_id))
-
-    if channel is None:
-        try:
-            channel = await bot.fetch_channel(int(channel_id))
-        except Exception:
-            return False
-
     try:
-        message = await channel.fetch_message(int(message_id))
-    except Exception:
-        message = await find_existing_monthly_stats_message(bot)
-        if message is None:
-            return False
+        channel_id = await get_setting(STATS_CHANNEL_KEY)
+        message_id = await get_setting(STATS_MESSAGE_KEY)
 
-    embed = await build_monthly_stats_embed(message.channel.guild)
-    await message.edit(embed=embed)
-    await save_monthly_stats_message(message)
-    return True
+        if not channel_id or not message_id:
+            message = await find_existing_monthly_stats_message(bot)
+            if message is None:
+                return False
+            channel_id = message.channel.id
+            message_id = message.id
+
+        channel = bot.get_channel(int(channel_id))
+
+        if channel is None:
+            try:
+                channel = await bot.fetch_channel(int(channel_id))
+            except Exception:
+                return False
+
+        try:
+            message = await channel.fetch_message(int(message_id))
+        except Exception:
+            message = await find_existing_monthly_stats_message(bot)
+            if message is None:
+                return False
+
+        embed = await build_monthly_stats_embed(message.guild)
+        await message.edit(embed=embed)
+        await save_monthly_stats_message(message)
+        return True
+    except Exception as e:
+        print(f"[월간 통계 갱신 중 에러 발생]: {e}")
+        return False
