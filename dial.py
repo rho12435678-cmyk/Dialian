@@ -1291,19 +1291,22 @@ async def build_point_ranking_embed(guild: discord.Guild):
 
 
 async def update_point_ranking_message(bot_instance):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("SELECT channel_id, message_id FROM point_ranking_panel WHERE id = 1") as cursor:
-            row = await cursor.fetchone()
-
-    if not row:
-        return
-
-    channel_id, message_id = row
-    channel = bot_instance.get_channel(channel_id)
-    if not channel:
-        return
-
     try:
+        async with aiosqlite.connect(DATABASE) as db:
+            async with db.execute("SELECT channel_id, message_id FROM point_ranking_panel WHERE id = 1") as cursor:
+                row = await cursor.fetchone()
+
+        if not row:
+            return
+
+        channel_id, message_id = row
+        channel = bot_instance.get_channel(channel_id)
+        if not channel:
+            try:
+                channel = await bot_instance.fetch_channel(channel_id)
+            except Exception:
+                return
+
         message = await channel.fetch_message(message_id)
         embed = await build_point_ranking_embed(channel.guild)
         await message.edit(embed=embed)
@@ -1491,7 +1494,7 @@ async def command_list(ctx):
         title="Dialian 명령어 목록",
         description=(
             "**[티켓 및 일반 서비스]**\n"
-            "`!티켓생성` `!계좌전송` `!티켓닫기` `!티켓삭제` `!인증패널` `!담당 @유저` `!호출`\n"
+            "`!티켓생성` `!계좌전송 [@유저]` `!티켓닫기` `!티켓삭제` `!인증패널` `!담당 @유저` `!호출`\n"
             "`!진행 0|25|50|75|100` `!예상 [시간]` `!완료` `!티켓정보` `!고객` `!소유자변경 @유저` `!청소 1~100`\n"
             "`!계좌등록 @유저 은행 계좌번호 예금주` `!계좌목록` `!계좌삭제 @유저`\n"
             "`!통계` `!진행티켓` `!강제종료`\n\n"
@@ -2096,21 +2099,31 @@ async def send_bank_to_ticket(ctx, member: discord.Member = None):
 
     author = ctx.guild.get_member(ctx.author.id) if ctx.guild else None
     is_admin = author and author.guild_permissions.administrator
-    designer_id = member.id if member else await find_ticket_designer_id(ctx.channel)
+    is_staff_designer = author and has_designer_role(author)
 
-    if designer_id is None and author and has_designer_role(author):
-        designer_id = ctx.author.id
+    # 타 디자이너 계좌를 대리 전송(인자 지정)하거나 기본 담당 디자이너 조회
+    target_designer_id = member.id if member else await find_ticket_designer_id(ctx.channel)
 
-    if designer_id is None:
-        return await ctx.send("❌ 담당 디자이너를 찾지 못했습니다.")
+    if target_designer_id is None and is_staff_designer:
+        target_designer_id = ctx.author.id
 
-    if not is_admin and ctx.author.id != designer_id:
-        return await ctx.send("❌ 담당 디자이너 또는 관리자만 계좌를 전송할 수 있습니다.")
+    if target_designer_id is None:
+        return await ctx.send("❌ 전송할 대상 디자이너 정보나 티켓 담당 디자이너를 찾지 못했습니다.")
 
-    if not await send_payment_info(ctx.channel, designer_id):
-        return await ctx.send("❌ 담당 디자이너의 계좌가 등록되어 있지 않습니다.")
+    # 권한 검사: 관리자 또는 디자이너 역할을 가진 경우 다른 디자이너의 계좌도 대리 전송 가능
+    if not (is_admin or is_staff_designer or ctx.author.id == target_designer_id):
+        return await ctx.send("❌ 담당 디자이너, 디자이너 역할 보유자 또는 관리자만 계좌를 전송할 수 있습니다.")
 
-    await ctx.reply("✅ 결제 정보를 티켓에 전송했습니다.", mention_author=False, delete_after=3)
+    if not await send_payment_info(ctx.channel, target_designer_id):
+        target_name = member.mention if member else "해당 디자이너"
+        return await ctx.send(f"❌ {target_name} 님의 계좌가 등록되어 있지 않습니다. `!계좌등록` 명령어로 먼저 등록해 주세요.")
+
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+    await ctx.send("✅ 결제 정보를 티켓에 성공적으로 전송했습니다.")
 
 
 @bot.command(name="담당변경", aliases=["담당", "담당자"])
