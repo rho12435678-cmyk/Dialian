@@ -69,7 +69,7 @@ DESIGNER_ROLE_IDS = {
 # ----------------------------------------------------
 user_message_tracker = {}     # 도배 감지용 변수
 admin_action_tracker = {}      # 대량 행위 추적용 변수
-active_minigame_users = set()  # 미니게임 동시 실행(Race Condition) 방지용 유저 세트
+active_minigame_users = set()  # 미니게임 동시 실행 방지용 유저 세트
 
 SPAM_MESSAGE_LIMIT = 5       # 감지 시간 내 허용 메시지 수
 SPAM_TIME_WINDOW = 3.0       # 감지 시간 간격 (초)
@@ -199,9 +199,11 @@ async def find_ticket_owner(channel: discord.TextChannel):
 
     try:
         if channel.topic:
-            match = re.search(r"\d+", channel.topic)
+            match = re.search(r"손님 ID:\s*(\d+)", channel.topic)
+            if not match:
+                match = re.search(r"\d+", channel.topic)
             if match:
-                return await fetch_member_or_none(channel.guild, int(match.group(0)))
+                return await fetch_member_or_none(channel.guild, int(match.group(1)))
     except (TypeError, ValueError):
         pass
 
@@ -322,7 +324,7 @@ async def handle_customer_call(
     """손님에게 DM 알림 및 채널 직접 멘션 호출을 수행하여 진행 상황을 재확인하도록 돕는 자동 호출 함수"""
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
-            "SELECT customer_id, progress, status FROM commissions WHERE ticket_channel = ?",
+            "SELECT customer_id, progress, status, category FROM commissions WHERE ticket_channel = ?",
             (channel.id,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -335,7 +337,7 @@ async def handle_customer_call(
             await channel.send(msg)
         return
 
-    customer_id, progress, status = row[0], row[1], row[2]
+    customer_id, progress, status, category = row[0], row[1], row[2], row[3]
     customer = await fetch_member_or_none(channel.guild, customer_id)
 
     if not customer:
@@ -348,14 +350,15 @@ async def handle_customer_call(
 
     progress_val = progress if progress is not None else 0
     status_val = status if status else "진행 중"
-    status_info = f"📊 **현재 진행률:** `{progress_val}%` | 📌 **상태:** `{status_val}`"
+    category_val = category if category else "문의"
+    status_info = f"🏷️ **항목:** `{category_val}` | 📊 **현재 진행률:** `{progress_val}%` | 📌 **상태:** `{status_val}`"
 
     embed = discord.Embed(
         title="🔔 디자이너 자동 호출 및 진행 상황 안내",
         description=f"**{channel.guild.name}**의 **{sender.display_name}** 디자이너님이 호출하셨습니다!\n아래 링크를 통해 채널로 이동하여 진행 상황을 확인해 주세요.",
         color=0x5865F2
     )
-    embed.add_field(name="📋 현재 진행 상황", value=status_info, inline=False)
+    embed.add_field(name="📋 커미션 정보 및 진행 상황", value=status_info, inline=False)
     embed.add_field(name="🔗 티켓 채널 바로가기", value=f"[여기 클릭해서 이동하기]({channel.jump_url})", inline=False)
 
     dm_notice = ""
@@ -543,9 +546,10 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-지원-{clean_username}",
+            name=f"티켓-지원-미지정-{clean_username}",
             reason=f"{user.display_name} 님의 개발자 지원 티켓",
-            overwrites=overwrites
+            overwrites=overwrites,
+            topic=f"손님 ID: {user.id} | 카테고리: 개발자 지원 | 담당 디자이너: 미지정"
         )
 
         embed = discord.Embed(
@@ -581,7 +585,6 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
 
 
 class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
-    """개편된 DDS 파트너 문의 양식 (서버 총 인원 및 영구 초대 링크 반영)"""
     partner_type = ui.TextInput(
         label="파트너 유형 / 서버(단체)명",
         placeholder="예: [DDS] 서버 커뮤니티",
@@ -615,9 +618,10 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-파트너-{clean_username}",
+            name=f"티켓-파트너-미지정-{clean_username}",
             reason=f"{user.display_name} 님의 파트너 문의 티켓",
-            overwrites=overwrites
+            overwrites=overwrites,
+            topic=f"손님 ID: {user.id} | 카테고리: 파트너 문의 | 담당 디자이너: 미지정"
         )
 
         embed = discord.Embed(
