@@ -45,6 +45,9 @@ def get_open_ticket_channel(
     guild: discord.Guild,
     user
 ):
+    """
+    이전 티켓 조회용 함수 (필요 시 참조용으로 남겨둠)
+    """
     if guild is None or user is None:
         return None
 
@@ -55,24 +58,17 @@ def get_open_ticket_channel(
         if is_archive_channel(channel):
             continue
 
-        if channel.topic == str(user.id):
+        if channel.topic and str(user.id) in channel.topic:
             return channel
 
-        if channel.name == f"티켓-{user.id}":
+        if str(user.id) in channel.name:
             return channel
 
     return None
 
 
 async def block_if_ticket_exists(interaction: discord.Interaction):
-    channel = get_open_ticket_channel(interaction.guild, interaction.user)
-
-    if channel is None:
-        return False
-
-    await interaction.response.send_message(
-        f"이미 생성된 티켓이 있습니다.\n{channel.mention}",
-        ephemeral=True
-    )
-
-    return True
+    """
+    [수정] 더 빠른 방대한 작업을 위해 동일 손님이 티켓을 중복 오픈할 수 있도록 제한을 해제했습니다.
+    """
+    return False
