@@ -1,3 +1,4 @@
+import time
 import discord
 from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
@@ -26,6 +27,7 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         user = interaction.user
+        time_suffix = str(int(time.time()))[-4:]  # 중복 티켓 생성을 위한 타임스탬프 고유값
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -34,8 +36,8 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
         }
 
         channel = await guild.create_text_channel(
-            name=f"지원-{user.id}",
-            topic=f"💻 개발자 지원 티켓 | 신청자: {user.name} ({user.id})",
+            name=f"지원-{user.id}-{time_suffix}",
+            topic=f"💻 개발자 지원 티켓 | 신청자: {user.name} ({user.id}) | 담당: 미지정",
             overwrites=overwrites
         )
 
@@ -74,6 +76,7 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         user = interaction.user
+        time_suffix = str(int(time.time()))[-4:]  # 중복 티켓 생성을 위한 타임스탬프 고유값
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -82,8 +85,8 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
         }
 
         channel = await guild.create_text_channel(
-            name=f"파트너-{user.id}",
-            topic=f"🤝 파트너 문의 티켓 | 신청자: {user.name} ({user.id})",
+            name=f"파트너-{user.id}-{time_suffix}",
+            topic=f"🤝 파트너 문의 티켓 | 신청자: {user.name} ({user.id}) | 담당: 미지정",
             overwrites=overwrites
         )
 
