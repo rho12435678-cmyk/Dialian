@@ -1,3 +1,5 @@
+import time
+import re
 import discord
 import aiosqlite
 from datetime import datetime
@@ -10,7 +12,6 @@ from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
-    get_open_ticket_channel,
     release_ticket_creation_lock,
 )
 
@@ -105,18 +106,13 @@ class PurchaseModal(discord.ui.Modal):
         guild = interaction.guild
         user = interaction.user
 
-        # 2. 이미 열린 티켓 검사
-        if get_open_ticket_channel(guild, user):
-            return await interaction.followup.send("❌ 이미 진행 중인 티켓이 있습니다.", ephemeral=True)
+        # [수정] 중복 티켓 생성을 막던 기존 검사 블록(get_open_ticket_channel) 전면 삭제
 
         # 디자이너 배정 여부에 따른 텍스트 및 Claim View 준비
-        if self.selected_designer:
-            developer = guild.get_member(self.selected_designer)
-            designer_name = developer.mention if developer else "미지정"
-            claim_view = ClaimTicketView(is_claimed=True)   # 이미 배정됨 -> 버튼 비활성화
-        else:
-            designer_name = "미지정"
-            claim_view = ClaimTicketView(is_claimed=False)  # 미배정 -> [내가 담당하기] 활성화
+        developer = guild.get_member(self.selected_designer) if self.selected_designer else None
+        designer_name = developer.display_name if developer else "미지정"
+        designer_mention = developer.mention if developer else "미지정"
+        claim_view = ClaimTicketView(is_claimed=bool(developer))
 
         # 티켓 채널 권한 제어
         overwrites = {
@@ -125,15 +121,25 @@ class PurchaseModal(discord.ui.Modal):
             guild.me: discord.PermissionOverwrite(read_messages=True, view_channel=True, send_messages=True, manage_channels=True)
         }
 
-        if self.selected_designer:
-            developer = guild.get_member(self.selected_designer)
-            if developer:
-                overwrites[developer] = discord.PermissionOverwrite(read_messages=True, view_channel=True, send_messages=True, attach_files=True)
+        if developer:
+            overwrites[developer] = discord.PermissionOverwrite(read_messages=True, view_channel=True, send_messages=True, attach_files=True)
+
+        # --------------------------------------------------
+        # 채널명 및 Topic 구별 설정 (중복 티켓 생성 허용)
+        # --------------------------------------------------
+        safe_category = re.sub(r'[^a-zA-Z0-9가-힣]', '', self.COMMISSION_NAME).lower()
+        safe_designer = re.sub(r'[^a-zA-Z0-9가-힣]', '', designer_name).lower()
+        safe_user = re.sub(r'[^a-zA-Z0-9가-힣]', '', user.display_name).lower()
+        time_suffix = str(int(time.time()))[-4:]  # 중복 생성 시 채널명 충돌 방지용 고유 번호
+
+        # 예시: 티켓-gfx-홍길동-손님닉-1234
+        channel_name = f"티켓-{safe_category}-{safe_designer}-{safe_user}-{time_suffix}"
+        channel_topic = f"손님 ID: {user.id} | 카테고리: {self.COMMISSION_NAME} ({self.bundle_type}) | 담당: {designer_name}"
 
         ticket_channel = await guild.create_text_channel(
-            name=f"티켓-{user.id}",
+            name=channel_name,
             overwrites=overwrites,
-            topic=str(user.id)
+            topic=channel_topic
         )
 
         # DB 저장 로직
@@ -146,9 +152,9 @@ class PurchaseModal(discord.ui.Modal):
 
         # 신청서 임베드 생성
         embed = discord.Embed(title=f"📋 {self.COMMISSION_NAME} 신청서 ({self.bundle_type})", color=0x5865F2, timestamp=datetime.now())
-        embed.add_field(name="👨‍💻 담당 디자이너", value=designer_name, inline=False)
+        embed.add_field(name="👨‍💻 담당 디자이너", value=designer_mention, inline=False)
         
-        # Roblox 닉네임과 GFX 장르는 유무에 따라 조건부 추가 (UniformModal 등에서는 없을 수 있음)
+        # Roblox 닉네임과 GFX 장르는 유무에 따라 조건부 추가
         if hasattr(self, 'roblox_nickname') and self.roblox_nickname and self.roblox_nickname.value:
             embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_nickname.value, inline=False)
         if hasattr(self, 'gfx_genre') and self.gfx_genre and self.gfx_genre.value:
@@ -165,7 +171,7 @@ class PurchaseModal(discord.ui.Modal):
             embed.add_field(name=bonus_title, value=self.fourth_style.value, inline=False)
 
         # 1. 신청서 전송 (하단에 [내가 담당하기] 버튼 View 부착)
-        await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다.", embed=embed, view=claim_view)
+        await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다. (**{self.COMMISSION_NAME}** / 담당: {designer_mention})", embed=embed, view=claim_view)
 
         # 2. 안내, 참고자료 전송
         try:
@@ -182,70 +188,64 @@ class PurchaseModal(discord.ui.Modal):
 
         # 3. 구매 로그 전송
         try:
-            log_channel = discord.utils.get(
-                guild.text_channels,
-                name=LOG_CHANNEL_NAME
-            )
+            log_channel_name = globals().get('LOG_CHANNEL_NAME', '구매-로그')
+            log_channel = discord.utils.get(guild.text_channels, name=log_channel_name)
             if log_channel:
                 await send_purchase_log(guild, content=(
-                    f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성\n"
-                    f"{ticket_channel.mention}\n"
+                    f"📩 새로운 [{self.COMMISSION_NAME}] 티켓 생성\n"
+                    f"담당: {designer_mention}\n"
+                    f"채널: {ticket_channel.mention}\n"
                     f"신청자 : {user.mention}"
                 ))
         except Exception as log_err:
             print(f"[로그 전송 실패] {log_err}")
 
         # 4. 담당 디자이너에게 DM으로 관리 버튼 개별 발송 (오류 분리 처리)
-        if self.selected_designer:
-            developer = guild.get_member(self.selected_designer)
+        if developer:
+            dm_blocked = False
 
-            if developer:
-                dm_blocked = False
+            # 1) 알림 메시지 발송
+            try:
+                await developer.send(
+                    f"🔔 새로운 [{self.COMMISSION_NAME}] 커미션이 들어왔습니다.\n{ticket_channel.mention}"
+                )
+            except Exception as e:
+                print(f"[DM 1단계 전송 실패 - DM 차단 가능성] {e}")
+                dm_blocked = True
 
-                # 1) 알림 메시지 발송
+            if not dm_blocked:
+                # 2) 결제 및 티켓 관리 버튼 발송
                 try:
                     await developer.send(
-                        f"🔔 새로운 커미션이 들어왔습니다.\n{ticket_channel.mention}"
-                    )
-                except Exception as e:
-                    print(f"[DM 1단계 전송 실패 - DM 차단 가능성] {e}")
-                    dm_blocked = True
-
-                if not dm_blocked:
-                    # 2) 결제 및 티켓 관리 버튼 발송
-                    try:
-                        await developer.send(
-                            f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                            view=PaymentView(ticket_channel, self.selected_designer)
-                        )
-                    except Exception as e:
-                        print(f"[DM 2단계(PaymentView) 전송 에러] {e}")
-
-                    # 3) 티켓 종료/삭제 버튼 발송
-                    try:
-                        await developer.send(
-                            f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
-                            view=TicketCloseView(ticket_channel)
-                        )
-                    except Exception as e:
-                        print(f"[DM 3단계(TicketCloseView) 전송 에러] {e}")
-
-                # 첫 DM 자체가 차단되어 아예 안 들어간 경우에만 백업 안내문 출력
-                else:
-                    await ticket_channel.send(
-                        f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
-                        allowed_mentions=discord.AllowedMentions(users=True)
-                    )
-                    await ticket_channel.send(
-                        "💳 결제 및 티켓 관리",
+                        f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                         view=PaymentView(ticket_channel, self.selected_designer)
                     )
-                    await ticket_channel.send(
-                        "🔒 티켓 종료 / 🗑️ 티켓 삭제",
+                except Exception as e:
+                    print(f"[DM 2단계(PaymentView) 전송 에러] {e}")
+
+                # 3) 티켓 종료/삭제 버튼 발송
+                try:
+                    await developer.send(
+                        f"🔒 티켓 종료 / 🗑️ 티켓 삭제\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                         view=TicketCloseView(ticket_channel)
                     )
+                except Exception as e:
+                    print(f"[DM 3단계(TicketCloseView) 전송 에러] {e}")
+
+            # 차단 시 채널 백업 출력
             else:
-                print(f"[DM 전송 실패] 서버에서 디자이너를 찾지 못했습니다: {self.selected_designer}")
+                await ticket_channel.send(
+                    f"{developer.mention} DM 전송에 실패하여 티켓에 관리 버튼을 전송합니다.",
+                    allowed_mentions=discord.AllowedMentions(users=True)
+                )
+                await ticket_channel.send(
+                    "💳 결제 및 티켓 관리",
+                    view=PaymentView(ticket_channel, self.selected_designer)
+                )
+                await ticket_channel.send(
+                    "🔒 티켓 종료 / 🗑️ 티켓 삭제",
+                    view=TicketCloseView(ticket_channel)
+                )
 
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
 
