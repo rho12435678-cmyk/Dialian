@@ -1,4 +1,5 @@
 import re
+import time
 import discord
 import aiosqlite
 from datetime import datetime
@@ -12,7 +13,6 @@ from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
-    get_open_ticket_channel,
     release_ticket_creation_lock,
 )
 
@@ -97,12 +97,10 @@ class SimpleTicketModal(discord.ui.Modal):
         guild = interaction.guild
         user = interaction.user
 
-        # 2. 이미 열린 티켓 검사
-        if get_open_ticket_channel(guild, user):
-            return await interaction.followup.send("❌ 이미 생성된 티켓이 있습니다.", ephemeral=True)
-
+        # [중복 허용 관련 모듈] 더 이상 이전 티켓 체크로 막지 않음
         developer = guild.get_member(self.selected_designer) if self.selected_designer else None
-        designer_name = developer.mention if developer else "미지정"
+        designer_name = developer.display_name if developer else "미지정"
+        designer_mention = developer.mention if developer else "미지정"
         claim_view = ClaimTicketView(is_claimed=bool(developer))
 
         overwrites = {
@@ -114,10 +112,25 @@ class SimpleTicketModal(discord.ui.Modal):
         if developer:
             overwrites[developer] = discord.PermissionOverwrite(read_messages=True, view_channel=True, send_messages=True, attach_files=True)
 
+        # --------------------------------------------------
+        # 채널명 및 토픽 가독성 개선 (카테고리/디자이너 구별)
+        # --------------------------------------------------
+        # 영문/숫자 외 디스코드 채널명 호환을 위한 단순 정리
+        safe_category = re.sub(r'[^a-zA-Z0-9가-힣]', '', self.COMMISSION_NAME).lower()
+        safe_designer = re.sub(r'[^a-zA-Z0-9가-힣]', '', designer_name).lower()
+        safe_user = re.sub(r'[^a-zA-Z0-9가-힣]', '', user.display_name).lower()
+        time_suffix = str(int(time.time()))[-4:] # 중복 생성 시 채널명 충돌 방지용 고유 번호
+
+        # 채널명 예시: 티켓-gfx-홍길동-손님닉네임-1234 또는 티켓-복장-미지정-손님닉네임-5678
+        channel_name = f"티켓-{safe_category}-{safe_designer}-{safe_user}-{time_suffix}"
+
+        # 채널 토픽에 카테고리, 디자이너, 손님 ID 명시
+        channel_topic = f"손님 ID: {user.id} | 카테고리: {self.COMMISSION_NAME} | 담당 디자이너: {designer_name}"
+
         ticket_channel = await guild.create_text_channel(
-            name=f"티켓-{user.id}",
+            name=channel_name,
             overwrites=overwrites,
-            topic=str(user.id)
+            topic=channel_topic
         )
 
         async with aiosqlite.connect(DATABASE) as db:
@@ -141,7 +154,8 @@ class SimpleTicketModal(discord.ui.Modal):
             await db.commit()
 
         embed = discord.Embed(title=self.FORM_TITLE, color=0x5865F2, timestamp=datetime.now())
-        embed.add_field(name="👨‍💻 담당 디자이너", value=designer_name, inline=False)
+        embed.add_field(name="🏷️ 신청 카테고리", value=f"`{self.COMMISSION_NAME}`", inline=True)
+        embed.add_field(name="👨‍💻 담당 디자이너", value=designer_mention, inline=True)
 
         # 파트너/제휴 신청일 경우 출력할 임베드 항목 구분
         if any(keyword in self.COMMISSION_NAME for keyword in ["파트너", "제휴"]):
@@ -153,7 +167,7 @@ class SimpleTicketModal(discord.ui.Modal):
             embed.add_field(name=self.FIELD_NAME, value=self.content.value, inline=False)
 
         await ticket_channel.send(
-            content=f"{user.mention}\n신청이 접수되었습니다. 담당자가 확인 후 안내드릴 예정입니다.",
+            content=f"{user.mention}\n신청이 접수되었습니다. (**{self.COMMISSION_NAME}** / 담당: {designer_mention})",
             embed=embed,
             view=claim_view
         )
@@ -176,8 +190,9 @@ class SimpleTicketModal(discord.ui.Modal):
             log_channel_name = globals().get('LOG_CHANNEL_NAME', None)
             if log_channel_name and discord.utils.get(guild.text_channels, name=log_channel_name):
                 await send_purchase_log(guild, content=(
-                    f"📩 새로운 {self.COMMISSION_NAME} 티켓 생성\n"
-                    f"{ticket_channel.mention}\n"
+                    f"📩 새로운 [{self.COMMISSION_NAME}] 티켓 생성\n"
+                    f"담당: {designer_mention}\n"
+                    f"채널: {ticket_channel.mention}\n"
                     f"신청자 : {user.mention}"
                 ))
         except Exception as log_err:
@@ -186,7 +201,7 @@ class SimpleTicketModal(discord.ui.Modal):
         # 디자이너 컨트롤러 DM 발송
         if developer:
             try:
-                await developer.send(f"🔔 새로운 문의가 들어왔습니다.\n{ticket_channel.mention}")
+                await developer.send(f"🔔 새로운 [{self.COMMISSION_NAME}] 문의가 들어왔습니다.\n{ticket_channel.mention}")
                 await developer.send(
                     f"💳 결제 및 티켓 관리\n티켓: {ticket_channel.mention}\nID: {ticket_channel.id}",
                     view=PaymentView(ticket_channel, self.selected_designer)
