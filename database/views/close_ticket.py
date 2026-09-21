@@ -479,6 +479,22 @@ class TicketCloseView(discord.ui.View):
             )
 
             await channel.send(embed=archive_notice)
+
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute(
+                    """
+                    UPDATE commissions
+                    SET status = CASE
+                        WHEN status = 'completed' THEN status
+                        ELSE 'closed'
+                    END,
+                    updated_at = ?
+                    WHERE ticket_channel = ?
+                    """,
+                    (discord.utils.utcnow().isoformat(), channel.id),
+                )
+                await db.commit()
+
             await asyncio.sleep(5)
             await archive_ticket_channel(channel)
 
