@@ -46,8 +46,8 @@ async def create_tables():
 
         await db.execute("""
         DELETE FROM commissions
-        WHERE id NOT IN (
-            SELECT MIN(id)
+        WHERE rowid NOT IN (
+            SELECT MIN(rowid)
             FROM commissions
             WHERE ticket_channel IS NOT NULL
             GROUP BY ticket_channel
