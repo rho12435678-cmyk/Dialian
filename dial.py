@@ -819,6 +819,7 @@ class DialianBot(commands.Bot):
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
         self.add_view(TicketCallView())
+        self.add_view(PaymentView())
         self.add_view(StarRatingView())
 
         await self.add_cog(DailyNotice(self))
@@ -1389,7 +1390,14 @@ async def on_message(message: discord.Message):
                     return
 
         clean_content = re.sub(r"<@!?\d+>|<@&\d+>|<#\d+>", "", message.content)
-        if re.search(DISCORD_TOKEN_REGEX, clean_content) or re.search(RRN_REGEX, clean_content) or re.search(PHONE_REGEX, clean_content):
+        if (
+            message.channel.id not in EXCLUDED_PII_CHANNELS
+            and (
+                re.search(DISCORD_TOKEN_REGEX, clean_content)
+                or re.search(RRN_REGEX, clean_content)
+                or re.search(PHONE_REGEX, clean_content)
+            )
+        ):
             try:
                 await message.delete()
             except Exception:
@@ -1405,7 +1413,11 @@ async def on_message(message: discord.Message):
                 await sec_channel.send(embed=embed)
             return
 
-        is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
+        is_staff = (
+            author.guild_permissions.administrator
+            or has_designer_role(author)
+            or any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
+        )
         if not is_staff and author.id != guild.owner_id:
             
             msg_content = message.content.replace(" ", "").lower()
