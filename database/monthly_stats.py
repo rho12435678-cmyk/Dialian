@@ -118,30 +118,34 @@ class ProgressView(ui.View):
             except ValueError:
                 pass
 
-    def extract_channel_id_and_guild(self, message: discord.Message):
-        """DM 메시지의 임베드 설명에서 티켓 채널 ID와 서버 객체를 안전하게 추출합니다."""
+    def extract_channel_id_and_guild(
+        self,
+        message: discord.Message,
+        client: discord.Client,
+    ):
+        """DM 임베드에서 티켓 채널 ID를 읽고 공개 API로 서버를 찾습니다."""
         if not message.embeds:
             return None, None
-            
+
         embed = message.embeds[0]
         desc = embed.description or ""
-        
+
         match = re.search(r"<#(\d+)>", desc)
         if not match:
             return None, None
-            
+
         channel_id = int(match.group(1))
-        
-        guild = message._state._get_client().guilds[0] if message._state._get_client().guilds else None
-        for g in message._state._get_client().guilds:
-            if g.get_channel(channel_id):
-                guild = g
-                break
-                
-        return channel_id, guild
+        for guild in client.guilds:
+            if guild.get_channel(channel_id):
+                return channel_id, guild
+
+        return channel_id, None
 
     async def update_progress(self, interaction: discord.Interaction, progress: int, status: str, estimate: str):
-        channel_id, guild = self.extract_channel_id_and_guild(interaction.message)
+        channel_id, guild = self.extract_channel_id_and_guild(
+            interaction.message,
+            interaction.client,
+        )
         if not channel_id or not guild:
             return await interaction.response.send_message(
                 "❌ 이 패널에 연결된 티켓 채널 정보를 찾을 수 없습니다.", 
@@ -305,7 +309,7 @@ async def build_monthly_stats_embed(guild):
             """
             SELECT COUNT(*)
             FROM commissions
-            WHERE status NOT IN ('completed', 'cancelled')
+            WHERE status NOT IN ('completed', 'cancelled', 'closed')
               AND created_at >= ? AND created_at < ?
             """,
             (start_iso, end_iso)

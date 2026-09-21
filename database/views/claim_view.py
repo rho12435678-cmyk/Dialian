@@ -30,26 +30,63 @@ class ClaimTicketView(discord.ui.View):
 
         channel = interaction.channel
 
-        # DB 검증 (이미 담당자가 있는지)
+        # DB에서 조건부 UPDATE로 담당권을 원자적으로 획득합니다.
         async with aiosqlite.connect(DATABASE) as db:
-            cursor = await db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,))
-            row = await cursor.fetchone()
-            
-            if row and row[0] is not None and row[0] != 0:
-                return await interaction.response.send_message(
-                    f"❌ 이미 다른 디자이너(<@{row[0]}>)가 담당으로 지정되었습니다.",
-                    ephemeral=True
-                )
-
-            # DB 담당자 갱신
-            await db.execute(
-                "UPDATE commissions SET designer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE ticket_channel = ?",
-                (member.id, channel.id)
+            cursor = await db.execute(
+                """
+                UPDATE commissions
+                SET designer_id = ?,
+                    designer_name = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE ticket_channel = ?
+                  AND (designer_id IS NULL OR designer_id = 0)
+                """,
+                (member.id, member.display_name, channel.id),
             )
             await db.commit()
 
-        # 디자이너 채널 권한 추가
-        await channel.set_permissions(member, read_messages=True, send_messages=True, attach_files=True, view_channel=True)
+            if cursor.rowcount != 1:
+                current = await db.execute(
+                    "SELECT designer_id FROM commissions WHERE ticket_channel = ?",
+                    (channel.id,),
+                )
+                row = await current.fetchone()
+                if row and row[0]:
+                    return await interaction.response.send_message(
+                        f"❌ 이미 다른 디자이너(<@{row[0]}>)가 담당으로 지정되었습니다.",
+                        ephemeral=True,
+                    )
+                return await interaction.response.send_message(
+                    "❌ 이 티켓의 DB 정보를 찾을 수 없습니다.",
+                    ephemeral=True,
+                )
+
+        # 디자이너 채널 권한 추가. 실패하면 방금 획득한 담당권을 되돌립니다.
+        try:
+            await channel.set_permissions(
+                member,
+                read_messages=True,
+                send_messages=True,
+                attach_files=True,
+                view_channel=True,
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute(
+                    """
+                    UPDATE commissions
+                    SET designer_id = NULL,
+                        designer_name = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE ticket_channel = ? AND designer_id = ?
+                    """,
+                    (channel.id, member.id),
+                )
+                await db.commit()
+            return await interaction.response.send_message(
+                "❌ 채널 권한을 설정하지 못해 담당 배정을 취소했습니다.",
+                ephemeral=True,
+            )
 
         # 1. 버튼 상태 업데이트
         button.disabled = True

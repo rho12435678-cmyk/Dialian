@@ -46,8 +46,8 @@ async def create_tables():
 
         await db.execute("""
         DELETE FROM commissions
-        WHERE id NOT IN (
-            SELECT MIN(id)
+        WHERE rowid NOT IN (
+            SELECT MIN(rowid)
             FROM commissions
             WHERE ticket_channel IS NOT NULL
             GROUP BY ticket_channel
@@ -145,8 +145,8 @@ async def create_tables():
         await db.execute("""
         DELETE FROM reviews
         WHERE ticket_channel IS NOT NULL
-          AND id NOT IN (
-              SELECT MIN(id)
+          AND rowid NOT IN (
+              SELECT MIN(rowid)
               FROM reviews
               WHERE ticket_channel IS NOT NULL
               GROUP BY ticket_channel
@@ -164,9 +164,20 @@ async def create_tables():
             points INTEGER DEFAULT 0,
             last_share_date TEXT,
             last_feedback_date TEXT,
-            feedback_today_count INTEGER DEFAULT 0
+            feedback_today_count INTEGER DEFAULT 0,
+            last_attendance_date TEXT,
+            is_regular_notified INTEGER DEFAULT 0
         )
         """)
+
+        for column_sql in (
+            "ALTER TABLE user_points ADD COLUMN last_attendance_date TEXT",
+            "ALTER TABLE user_points ADD COLUMN is_regular_notified INTEGER DEFAULT 0",
+        ):
+            try:
+                await db.execute(column_sql)
+            except aiosqlite.OperationalError:
+                pass
 
         # 7. 패널 및 시스템 설정 (포인트 랭킹, 디자이너 등급 패널 등)
         await db.execute("""
@@ -218,6 +229,22 @@ async def create_tables():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
+
+        # 구버전 DB에는 created_at 컬럼이 없을 수 있으므로 정리 쿼리 전에 보강합니다.
+        for table_name in ("processed_commands", "processed_command_errors"):
+            try:
+                await db.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN created_at TEXT"
+                )
+            except aiosqlite.OperationalError:
+                pass
+            await db.execute(
+                f"""
+                UPDATE {table_name}
+                SET created_at = CURRENT_TIMESTAMP
+                WHERE created_at IS NULL
+                """
+            )
 
         await db.execute("""
         CREATE TABLE IF NOT EXISTS bot_settings (

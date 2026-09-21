@@ -46,7 +46,7 @@ class PaymentView(discord.ui.View):
                 ephemeral=True
             )
 
-        async with aiosqlite.connect("data/dialian.db") as db:
+        async with aiosqlite.connect(DATABASE) as db:
 
             cursor = await db.execute(
                 """

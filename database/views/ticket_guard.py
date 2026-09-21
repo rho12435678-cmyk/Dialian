@@ -21,10 +21,16 @@ async def acquire_ticket_creation_lock(interaction: discord.Interaction):
     lock = get_ticket_creation_lock(interaction.user.id)
 
     if lock.locked():
-        await interaction.response.send_message(
-            "티켓 생성이 처리 중입니다. 잠시만 기다려주세요.",
-            ephemeral=True
-        )
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "티켓 생성이 처리 중입니다. 잠시만 기다려주세요.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "티켓 생성이 처리 중입니다. 잠시만 기다려주세요.",
+                ephemeral=True,
+            )
         return None
 
     await lock.acquire()

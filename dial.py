@@ -41,28 +41,12 @@ from database.views.verify_view import VerifyView
 TOKEN = os.getenv("TOKEN")
 
 # ----------------------------------------------------
-# 📌 핵심 채널, 역할 ID 및 미정의 상수 통합 관리
+# 📌 런타임 전용 설정
+# 채널/역할/포인트 정책 값은 config.py를 단일 소스로 사용합니다.
 # ----------------------------------------------------
-POINT_RANKING_CHANNEL_ID = 1532599012316938321
-POINT_INFO_CHANNEL_ID = 1532373833783316610
-DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
-
-KR_CHAT_CHANNEL_ID = 1505074223356317771
-EN_CHAT_CHANNEL_ID = 1527725232864100362
-
-SECURITY_LOG_CHANNEL_ID = 1505122707098828806 
-COMMAND_CHANNEL_ID = 1531287070281040054 
-
-# 포인트 및 미니게임 설정 상수
-GACHA_COST = 20
 ATTENDANCE_REWARD = 10
 DAILY_ACTION_LIMIT = 3
 MAX_BET = 500  # 포인트 폭주 방지용 최대 배팅 제한
-
-DESIGNER_ROLE_IDS = {
-    "gfx": 1518906536095776868,
-    "uniform": 1522539025691312168,
-}
 
 # ----------------------------------------------------
 # 🛡️ 통합 보안 설정 및 상태 변수
@@ -797,6 +781,18 @@ async def cleanup_processed_records():
         print(f"[DB Cleanup Error] {e}")
 
 
+# ==================== [DB 자동 백업 태스크] ====================
+
+@tasks.loop(hours=24)
+async def scheduled_database_backup():
+    try:
+        backup_path = await backup_database()
+        if backup_path:
+            print(f"[DB Backup] 백업 완료: {backup_path}")
+    except Exception as e:
+        print(f"[DB Backup Error] {e}")
+
+
 # ==================== [월간 통계 자동 갱신 태스크] ====================
 
 @tasks.loop(hours=1)
@@ -823,17 +819,31 @@ class DialianBot(commands.Bot):
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
         self.add_view(TicketCallView())
+        self.add_view(PaymentView())
+        self.add_view(StarRatingView())
 
         await self.add_cog(DailyNotice(self))
-        
-        # 외부 포인트 Cog 로드 추가
+
+        # 외부 포인트 Cog 로드
         try:
             await self.load_extension("database.services.points")
         except Exception as e:
             print(f"[포인트 Cog 로드 실패]: {e}")
 
+        # OpenAI 키가 있을 때만 자동 번역 확장을 활성화합니다.
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                await self.load_extension("database.services.auto_translator")
+            except Exception as e:
+                print(f"[자동 번역 Cog 로드 실패]: {e}")
+        else:
+            print("[Auto Translator] OPENAI_API_KEY 미설정: 자동 번역 비활성화")
+
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
+
+        if not scheduled_database_backup.is_running():
+            scheduled_database_backup.start()
 
         if not auto_update_monthly_stats.is_running():
             auto_update_monthly_stats.start()
@@ -1272,7 +1282,7 @@ async def build_point_ranking_embed(guild: discord.Guild):
 
     embed = discord.Embed(
         title="🏆 Dialian 포인트 랭킹 (TOP 10)",
-        description="실시간으로 동기화되는 포인트 순위입니다! ✨\n*(매월 1일 00시에 포인트가 초기화됩니다)*",
+        description="실시간으로 동기화되는 포인트 순위입니다! ✨",
         color=discord.Color.gold(),
         timestamp=discord.utils.utcnow()
     )
@@ -1290,7 +1300,7 @@ async def build_point_ranking_embed(guild: discord.Guild):
 
         embed.add_field(name="📊 실시간 TOP 10", value="\n".join(ranking_list), inline=False)
 
-    embed.set_footer(text="자동 동기화 주기 작동 중 | 매월 1일 포인트 초기화")
+    embed.set_footer(text="자동 동기화 주기 작동 중")
     return embed
 
 
@@ -1380,7 +1390,14 @@ async def on_message(message: discord.Message):
                     return
 
         clean_content = re.sub(r"<@!?\d+>|<@&\d+>|<#\d+>", "", message.content)
-        if re.search(DISCORD_TOKEN_REGEX, clean_content) or re.search(RRN_REGEX, clean_content) or re.search(PHONE_REGEX, clean_content):
+        if (
+            message.channel.id not in EXCLUDED_PII_CHANNELS
+            and (
+                re.search(DISCORD_TOKEN_REGEX, clean_content)
+                or re.search(RRN_REGEX, clean_content)
+                or re.search(PHONE_REGEX, clean_content)
+            )
+        ):
             try:
                 await message.delete()
             except Exception:
@@ -1396,7 +1413,11 @@ async def on_message(message: discord.Message):
                 await sec_channel.send(embed=embed)
             return
 
-        is_staff = any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
+        is_staff = (
+            author.guild_permissions.administrator
+            or has_designer_role(author)
+            or any(role.name in ["관리자", "Staff", "디자이너"] for role in author.roles)
+        )
         if not is_staff and author.id != guild.owner_id:
             
             msg_content = message.content.replace(" ", "").lower()

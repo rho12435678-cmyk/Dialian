@@ -52,7 +52,7 @@ async def handle_customer_call(
 ):
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
-            "SELECT user_id, progress, status FROM commissions WHERE ticket_channel = ?",
+            "SELECT customer_id, progress, status FROM commissions WHERE ticket_channel = ?",
             (channel.id,)
         ) as cursor:
             row = await cursor.fetchone()

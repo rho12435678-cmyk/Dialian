@@ -1,12 +1,20 @@
-from datetime import date
+from datetime import datetime, timedelta, timezone
+
 import aiosqlite
 import discord
 from discord.ext import commands
 
-from config import REGULAR_CUSTOMER_ROLE_ID, TARGET_REGULAR_POINTS
+from config import (
+    REGULAR_CUSTOMER_ROLE_ID,
+    REGULAR_DISCOUNT_RATE,
+    REVIEW_POINTS_2_PLUS_1,
+    REVIEW_POINTS_3_PLUS_1,
+    REVIEW_POINTS_SINGLE,
+    TARGET_REGULAR_POINTS,
+)
+from database.database import DATABASE
 
-# config에 DATABASE가 없다면 직접 경로 지정 (예: "database/database.db" 또는 설정에 맞는 이름)
-DATABASE = "database/database.db" 
+KST = timezone(timedelta(hours=9))
 
 
 # ==========================================
@@ -43,7 +51,7 @@ async def add_user_points(guild, member, amount: int) -> int:
             await db.execute(
                 "ALTER TABLE user_points ADD COLUMN is_regular_notified INTEGER DEFAULT 0"
             )
-        except Exception:
+        except aiosqlite.OperationalError:
             pass
 
         # 포인트 적립
@@ -88,7 +96,7 @@ async def add_user_points(guild, member, amount: int) -> int:
                 await target_member.send(
                     f"🎉 축하합니다! **{TARGET_REGULAR_POINTS:,} P**를 달성하여"
                     f" **@{role.name}** 등급으로 승급하셨습니다!\n앞으로 모든 커미션 이용 시"
-                    " **20% 할인** 혜택이 자동 적용됩니다."
+                    f" **{int(REGULAR_DISCOUNT_RATE * 100)}% 할인** 혜택이 자동 적용됩니다."
                 )
 
                 # 발송 완료 상태 기록
@@ -106,7 +114,7 @@ async def add_user_points(guild, member, amount: int) -> int:
 
 async def process_daily_attendance(guild, member) -> tuple[bool, int, int]:
     """매일 1회 출석체크 처리 (+10P)"""
-    today_str = date.today().isoformat()
+    today_str = datetime.now(KST).date().isoformat()
     user_id = member.id
 
     async with aiosqlite.connect(DATABASE) as db:
@@ -148,13 +156,13 @@ async def process_daily_attendance(guild, member) -> tuple[bool, int, int]:
 async def add_review_points_by_bundle(
     guild, member, bundle_type: str = "단품"
 ) -> tuple[int, int]:
-    """후기 작성 시 묶음 종류에 따라 포인트를 차등 적립 (50P / 100P / 150P)"""
+    """후기 작성 시 묶음 종류에 따라 설정된 포인트를 차등 적립합니다."""
     if "2+1" in bundle_type:
-        points_to_add = 100
+        points_to_add = REVIEW_POINTS_2_PLUS_1
     elif "3+1" in bundle_type:
-        points_to_add = 150
+        points_to_add = REVIEW_POINTS_3_PLUS_1
     else:
-        points_to_add = 50
+        points_to_add = REVIEW_POINTS_SINGLE
 
     new_total = await add_user_points(guild, member, points_to_add)
     return points_to_add, new_total
@@ -212,18 +220,18 @@ class PointsCog(commands.Cog):
             value=(
                 "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
                 "• **후기 작성**\n"
-                "  - 단품 구매 후기: **50P**\n"
-                "  - 2+1 묶음 구매 후기: **100P**\n"
-                "  - 3+1 묶음 구매 후기: **150P**"
+                f"  - 단품 구매 후기: **{REVIEW_POINTS_SINGLE}P**\n"
+                f"  - 2+1 묶음 구매 후기: **{REVIEW_POINTS_2_PLUS_1}P**\n"
+                f"  - 3+1 묶음 구매 후기: **{REVIEW_POINTS_3_PLUS_1}P**"
             ),
             inline=False,
         )
 
         embed.add_field(
-            name="2️⃣ 단골 손님 혜택 (20% 자동 할인)",
+            name=f"2️⃣ 단골 손님 혜택 ({int(REGULAR_DISCOUNT_RATE * 100)}% 자동 할인)",
             value=(
                 f"**{TARGET_REGULAR_POINTS:,}P** 달성 시 `@Regular Customer/단골"
-                " 손님` 역할 자동 지급!\n*(이후 주문하는 모든 커미션에 20% 자동 할인"
+                f" 손님` 역할 자동 지급!\n*(이후 주문하는 모든 커미션에 {int(REGULAR_DISCOUNT_RATE * 100)}% 자동 할인"
                 " 혜택이 적용됩니다.)*"
             ),
             inline=False,

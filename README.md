@@ -40,3 +40,7 @@ python dial.py
 - DB는 시작 시와 이후 24시간마다 `data/backups/`에 백업하며, 14일이 지난 백업은 정리합니다.
 - 자동 번역 전송 전 이메일, 전화번호, 긴 숫자 형식의 식별 정보는 마스킹합니다.
 - GitHub 배포 Secrets에는 `HOST`, `USERNAME`, `SSH_PRIVATE_KEY`, `TOKEN`이 필요하며 자동 번역 사용 시 `OPENAI_API_KEY`도 추가해야 합니다.
+
+## 검증
+
+Pull Request와 `main` 푸시에서는 GitHub Actions가 `python -m compileall -q .`을 실행해 전체 Python 소스의 문법 오류를 검사합니다.
