@@ -797,6 +797,18 @@ async def cleanup_processed_records():
         print(f"[DB Cleanup Error] {e}")
 
 
+# ==================== [DB 자동 백업 태스크] ====================
+
+@tasks.loop(hours=24)
+async def scheduled_database_backup():
+    try:
+        backup_path = await backup_database()
+        if backup_path:
+            print(f"[DB Backup] 백업 완료: {backup_path}")
+    except Exception as e:
+        print(f"[DB Backup Error] {e}")
+
+
 # ==================== [월간 통계 자동 갱신 태스크] ====================
 
 @tasks.loop(hours=1)
@@ -823,17 +835,30 @@ class DialianBot(commands.Bot):
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
         self.add_view(TicketCallView())
+        self.add_view(StarRatingView())
 
         await self.add_cog(DailyNotice(self))
-        
-        # 외부 포인트 Cog 로드 추가
+
+        # 외부 포인트 Cog 로드
         try:
             await self.load_extension("database.services.points")
         except Exception as e:
             print(f"[포인트 Cog 로드 실패]: {e}")
 
+        # OpenAI 키가 있을 때만 자동 번역 확장을 활성화합니다.
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                await self.load_extension("database.services.auto_translator")
+            except Exception as e:
+                print(f"[자동 번역 Cog 로드 실패]: {e}")
+        else:
+            print("[Auto Translator] OPENAI_API_KEY 미설정: 자동 번역 비활성화")
+
         if not cleanup_processed_records.is_running():
             cleanup_processed_records.start()
+
+        if not scheduled_database_backup.is_running():
+            scheduled_database_backup.start()
 
         if not auto_update_monthly_stats.is_running():
             auto_update_monthly_stats.start()
@@ -1272,7 +1297,7 @@ async def build_point_ranking_embed(guild: discord.Guild):
 
     embed = discord.Embed(
         title="🏆 Dialian 포인트 랭킹 (TOP 10)",
-        description="실시간으로 동기화되는 포인트 순위입니다! ✨\n*(매월 1일 00시에 포인트가 초기화됩니다)*",
+        description="실시간으로 동기화되는 포인트 순위입니다! ✨",
         color=discord.Color.gold(),
         timestamp=discord.utils.utcnow()
     )
@@ -1290,7 +1315,7 @@ async def build_point_ranking_embed(guild: discord.Guild):
 
         embed.add_field(name="📊 실시간 TOP 10", value="\n".join(ranking_list), inline=False)
 
-    embed.set_footer(text="자동 동기화 주기 작동 중 | 매월 1일 포인트 초기화")
+    embed.set_footer(text="자동 동기화 주기 작동 중")
     return embed
 
 
