@@ -63,6 +63,11 @@ DESIGNER_ROLE_IDS = {
 TARGET_REGULAR_POINTS = 1000   # 단골 승급 기준 포인트
 REGULAR_DISCOUNT_RATE = 0.15   # 단골 할인율 (15%)
 
+# 후기 작성 포인트 (묶음 구성별)
+REVIEW_POINTS_SINGLE = 30
+REVIEW_POINTS_2_PLUS_1 = 45
+REVIEW_POINTS_3_PLUS_1 = 60
+
 GACHA_COST = 20                # 뽑기 1회 소모 포인트
 
 # ==========================================
