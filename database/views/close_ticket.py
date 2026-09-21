@@ -254,11 +254,19 @@ class TicketCloseView(discord.ui.View):
             designer_id = None
 
             # 채널 Topic에 저장된 구매자 ID 읽기
-            try:
-                if channel.topic:
-                    ticket_owner = guild.get_member(int(channel.topic))
-            except Exception:
-                pass
+            if channel.topic:
+                owner_match = re.search(r"손님 ID:\s*(\d+)", channel.topic)
+                if owner_match is None and channel.topic.strip().isdigit():
+                    owner_match = re.match(r"(\d+)", channel.topic.strip())
+
+                if owner_match:
+                    owner_id = int(owner_match.group(1))
+                    ticket_owner = guild.get_member(owner_id)
+                    if ticket_owner is None:
+                        try:
+                            ticket_owner = await guild.fetch_member(owner_id)
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            ticket_owner = None
 
             try:
 
