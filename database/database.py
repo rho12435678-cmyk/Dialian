@@ -164,9 +164,20 @@ async def create_tables():
             points INTEGER DEFAULT 0,
             last_share_date TEXT,
             last_feedback_date TEXT,
-            feedback_today_count INTEGER DEFAULT 0
+            feedback_today_count INTEGER DEFAULT 0,
+            last_attendance_date TEXT,
+            is_regular_notified INTEGER DEFAULT 0
         )
         """)
+
+        for column_sql in (
+            "ALTER TABLE user_points ADD COLUMN last_attendance_date TEXT",
+            "ALTER TABLE user_points ADD COLUMN is_regular_notified INTEGER DEFAULT 0",
+        ):
+            try:
+                await db.execute(column_sql)
+            except aiosqlite.OperationalError:
+                pass
 
         # 7. 패널 및 시스템 설정 (포인트 랭킹, 디자이너 등급 패널 등)
         await db.execute("""
