@@ -41,28 +41,12 @@ from database.views.verify_view import VerifyView
 TOKEN = os.getenv("TOKEN")
 
 # ----------------------------------------------------
-# 📌 핵심 채널, 역할 ID 및 미정의 상수 통합 관리
+# 📌 런타임 전용 설정
+# 채널/역할/포인트 정책 값은 config.py를 단일 소스로 사용합니다.
 # ----------------------------------------------------
-POINT_RANKING_CHANNEL_ID = 1532599012316938321
-POINT_INFO_CHANNEL_ID = 1532373833783316610
-DESIGNER_TIER_CHANNEL_ID = 1537806140711239760
-
-KR_CHAT_CHANNEL_ID = 1505074223356317771
-EN_CHAT_CHANNEL_ID = 1527725232864100362
-
-SECURITY_LOG_CHANNEL_ID = 1505122707098828806 
-COMMAND_CHANNEL_ID = 1531287070281040054 
-
-# 포인트 및 미니게임 설정 상수
-GACHA_COST = 20
 ATTENDANCE_REWARD = 10
 DAILY_ACTION_LIMIT = 3
 MAX_BET = 500  # 포인트 폭주 방지용 최대 배팅 제한
-
-DESIGNER_ROLE_IDS = {
-    "gfx": 1518906536095776868,
-    "uniform": 1522539025691312168,
-}
 
 # ----------------------------------------------------
 # 🛡️ 통합 보안 설정 및 상태 변수
