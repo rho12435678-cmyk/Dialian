@@ -309,7 +309,7 @@ async def build_monthly_stats_embed(guild):
             """
             SELECT COUNT(*)
             FROM commissions
-            WHERE status NOT IN ('completed', 'cancelled')
+            WHERE status NOT IN ('completed', 'cancelled', 'closed')
               AND created_at >= ? AND created_at < ?
             """,
             (start_iso, end_iso)
