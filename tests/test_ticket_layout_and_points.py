@@ -133,6 +133,24 @@ class PointCreditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, (0, points.REVIEW_POINTS_2_PLUS_1, False))
         self.assertEqual(await points.get_user_points(123), points.REVIEW_POINTS_2_PLUS_1)
 
+    async def test_unpublished_review_cannot_earn_points_before_confirmed_post(self):
+        await self.insert_review(771, "unpublished", points.REVIEW_POINTS_SINGLE)
+        with self.assertRaises(ValueError):
+            await points.credit_review_award(None, self.member, 771)
+        self.assertEqual(await points.get_user_points(123), 0)
+        # The publication checker must confirm the review post before
+        # changing status, after which the same review is credited once.
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """UPDATE review_point_awards SET status='pending',
+                       review_message_id=987 WHERE ticket_channel=771"""
+            )
+            await db.commit()
+        self.assertEqual(
+            await points.credit_review_award(None, self.member, 771),
+            (points.REVIEW_POINTS_SINGLE, points.REVIEW_POINTS_SINGLE, True),
+        )
+
     async def test_preexisting_reviews_need_explicit_administrator_approval(self):
         await self.insert_review(888)
         await database.create_tables()
