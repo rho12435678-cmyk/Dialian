@@ -13,6 +13,7 @@ from config import (
     TARGET_REGULAR_POINTS,
 )
 from database.database import DATABASE
+from database.services.point_ranking import refresh_point_ranking
 
 KST = timezone(timedelta(hours=9))
 
@@ -109,6 +110,12 @@ async def add_user_points(guild, member, amount: int) -> int:
             except Exception as e:
                 print(f"[단골 역할 부여/DM 발송 실패] {e}")
 
+    # All balance changes (attendance, reviews, games and admin commands) update the
+    # same ranking panel, rather than relying on individual command handlers.
+    try:
+        await refresh_point_ranking(guild)
+    except Exception as exc:
+        print(f"[랭킹 자동 갱신 실패] {exc}")
     return new_points
 
 
