@@ -3,6 +3,7 @@ import aiosqlite
 from database.database import DATABASE
 from database.views.close_ticket import has_designer_role, TicketCloseView
 from database.views.payment_view import PaymentView
+from database.services.ticket_layout import organize_existing_ticket
 
 
 class ClaimTicketView(discord.ui.View):
@@ -87,6 +88,22 @@ class ClaimTicketView(discord.ui.View):
                 "❌ 채널 권한을 설정하지 못해 담당 배정을 취소했습니다.",
                 ephemeral=True,
             )
+
+        # Read category/customer from the stored ticket, not the (mutable) channel name.
+        try:
+            async with aiosqlite.connect(DATABASE) as db:
+                async with db.execute(
+                    "SELECT category, customer_id FROM commissions WHERE ticket_channel=?",
+                    (channel.id,),
+                ) as cursor:
+                    assigned = await cursor.fetchone()
+            if assigned:
+                customer = channel.guild.get_member(assigned[1])
+                await organize_existing_ticket(channel, assigned[0], customer, member)
+        except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+            # Assignment succeeded; name/category changes are cosmetic, so do not
+            # misreport the confirmed assignment as a failed claim.
+            print(f"[티켓 자동 정리 실패] {exc}")
 
         # 1. 버튼 상태 업데이트
         button.disabled = True
