@@ -4,6 +4,7 @@ from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
 from database.views.close_ticket import TicketCloseView
+from database.services.ticket_layout import ticket_name, get_or_create_ticket_category
 
 # ==========================================
 # 1. 개발자 지원 모달
@@ -36,8 +37,9 @@ class DeveloperApplyModal(discord.ui.Modal, title="💻 개발자 지원 신청�
         }
 
         channel = await guild.create_text_channel(
-            name=f"지원-{user.id}-{time_suffix}",
-            topic=f"💻 개발자 지원 티켓 | 신청자: {user.name} ({user.id}) | 담당: 미지정",
+            name=ticket_name("개발자 지원", user),
+            category=await get_or_create_ticket_category(guild, "개발자 지원"),
+            topic=f"손님 ID: {user.id} | 카테고리: 개발자 지원 | 담당: 미지정",
             overwrites=overwrites
         )
 
@@ -85,8 +87,9 @@ class PartnerApplyModal(discord.ui.Modal, title="🤝 파트너 문의 신청서
         }
 
         channel = await guild.create_text_channel(
-            name=f"파트너-{user.id}-{time_suffix}",
-            topic=f"🤝 파트너 문의 티켓 | 신청자: {user.name} ({user.id}) | 담당: 미지정",
+            name=ticket_name("파트너 문의", user),
+            category=await get_or_create_ticket_category(guild, "파트너 문의"),
+            topic=f"손님 ID: {user.id} | 카테고리: 파트너 문의 | 담당: 미지정",
             overwrites=overwrites
         )
 

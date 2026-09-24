@@ -6,7 +6,7 @@ import discord
 import config
 from config import *
 from database.database import DATABASE  # 중앙 DB 경로 모듈 직접 연결
-from database.services.points import add_review_points_by_bundle
+from database.services.points import credit_review_award
 
 
 def parse_designer_id(text):
@@ -90,17 +90,21 @@ class StarRatingView(discord.ui.View):
             ticket_owner = interaction.user
             channel = interaction.channel
 
-            if isinstance(channel, discord.TextChannel) and channel.topic:
-                try:
-                    owner_id = int(channel.topic)
-                except ValueError:
-                    owner_id = None
-
-                if owner_id and interaction.user.id != owner_id:
-                    return await interaction.followup.send(
-                        "❌ 티켓을 생성한 구매자만 후기를 남길 수 있습니다.",
-                        ephemeral=True,
-                    )
+            if not isinstance(channel, discord.TextChannel):
+                return await interaction.followup.send(
+                    "티켓 채널에서만 후기를 등록할 수 있습니다.", ephemeral=True
+                )
+            async with aiosqlite.connect(DATABASE) as db:
+                async with db.execute(
+                    "SELECT customer_id FROM commissions WHERE ticket_channel=?",
+                    (channel.id,),
+                ) as cursor:
+                    owner_record = await cursor.fetchone()
+            if not owner_record or owner_record[0] != interaction.user.id:
+                return await interaction.followup.send(
+                    "❌ 해당 티켓을 생성한 구매자만 후기를 등록할 수 있습니다.",
+                    ephemeral=True,
+                )
 
             guild = interaction.guild or (
                 interaction.client.guilds[0] if interaction.client.guilds else None
@@ -202,9 +206,24 @@ class StarRatingView(discord.ui.View):
                         datetime.now().isoformat(),
                     ),
                 )
+                inserted = cursor.rowcount == 1
+                if inserted:
+                    # New reviews are recoverable after any crash between
+                    # posting the embed and delivering their points.
+                    award = (
+                        REVIEW_POINTS_3_PLUS_1 if "3+1" in bundle_type else
+                        REVIEW_POINTS_2_PLUS_1 if "2+1" in bundle_type else
+                        REVIEW_POINTS_SINGLE
+                    )
+                    await db.execute(
+                        """INSERT INTO review_point_awards
+                           (ticket_channel, customer_id, amount, status)
+                           VALUES (?, ?, ?, 'unpublished')""",
+                        (channel.id, interaction.user.id, award),
+                    )
                 await db.commit()
 
-            if cursor.rowcount != 1:
+            if not inserted:
                 return await interaction.followup.send(
                     "이 티켓에는 이미 후기가 등록되었습니다.", ephemeral=True
                 )
@@ -241,7 +260,7 @@ class StarRatingView(discord.ui.View):
                 inline=False,
             )
             review_embed.set_footer(
-                text="만족스러운 서비스를 제공하기 위해 항상 노력하겠습니다 🙏"
+                text=f"DDS Review · Ticket ID: {channel.id}"
             )
 
             try:
@@ -251,8 +270,24 @@ class StarRatingView(discord.ui.View):
                     await db.execute(
                         "DELETE FROM reviews WHERE ticket_channel = ?", (channel.id,)
                     )
+                    await db.execute(
+                        "DELETE FROM review_point_awards WHERE ticket_channel=? AND status='unpublished'",
+                        (channel.id,),
+                    )
                     await db.commit()
                 raise
+
+            # Only confirmed public postings can become payout-eligible.
+            # If the process crashes between posting and recording this update,
+            # the reconciler checks the post's ticket-ID footer before retrying.
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute(
+                    """UPDATE review_point_awards
+                       SET status='pending', review_message_id=?
+                       WHERE ticket_channel=? AND status='unpublished'""",
+                    (sent_review.id, channel.id),
+                )
+                await db.commit()
 
             role_notice = ""
             try:
@@ -275,14 +310,16 @@ class StarRatingView(discord.ui.View):
             # --------------------------------------------------
             points_notice = ""
             try:
-                points_to_add, new_total = await add_review_points_by_bundle(
-                    guild, interaction.user, bundle_type
+                points_to_add, new_total, credited = await credit_review_award(
+                    guild, interaction.user, channel.id
                 )
-                points_notice = (
-                    f"\n🪙 **{points_to_add} P**가 적립되었습니다! [{bundle_type}] (현재: `{new_total}` P)"
-                )
+                if credited:
+                    points_notice = (
+                        f"\n🪙 **{points_to_add} P** 적립 완료! (현재: `{new_total}` P)"
+                    )
             except Exception as points_err:
-                print(f"[후기 포인트 적립 실패] {points_err}")
+                print(f"[후기 포인트 처리 보류: 자동 재시도 예정] {points_err}")
+                points_notice = "\n🪙 포인트 적립이 보류되었습니다. 자동으로 재시도합니다."
 
             success_view = discord.ui.View()
             success_view.add_item(

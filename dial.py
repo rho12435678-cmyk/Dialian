@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, time, timedelta, timezone
 import os
+from pathlib import Path
 import random
 import re
 import subprocess
@@ -25,8 +26,11 @@ from database.services.points import (
     add_user_points,
     get_user_points,
     process_daily_attendance,
+    credit_review_award,
 )
 from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
+from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket, designer_tier
+from database.services.point_ranking import build_point_embed, refresh_point_ranking
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -532,7 +536,8 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-지원-미지정-{clean_username}",
+            name=ticket_name("개발자 지원", user),
+            category=await get_or_create_ticket_category(guild, "개발자 지원"),
             reason=f"{user.display_name} 님의 개발자 지원 티켓",
             overwrites=overwrites,
             topic=f"손님 ID: {user.id} | 카테고리: 개발자 지원 | 담당 디자이너: 미지정"
@@ -567,6 +572,10 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         # 월간 통계 메시지 자동 갱신 연동
         await update_monthly_stats_message(interaction.client)
 
+        try:
+            await user.send(f"📩 DDS 개발자 지원 티켓 바로가기: {channel.jump_url}")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.followup.send(f"✅ 지원 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -604,7 +613,8 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-파트너-미지정-{clean_username}",
+            name=ticket_name("파트너 문의", user),
+            category=await get_or_create_ticket_category(guild, "파트너 문의"),
             reason=f"{user.display_name} 님의 파트너 문의 티켓",
             overwrites=overwrites,
             topic=f"손님 ID: {user.id} | 카테고리: 파트너 문의 | 담당 디자이너: 미지정"
@@ -639,6 +649,10 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         # 월간 통계 메시지 자동 갱신 연동
         await update_monthly_stats_message(interaction.client)
 
+        try:
+            await user.send(f"📩 DDS 파트너 문의 티켓 바로가기: {channel.jump_url}")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.followup.send(f"✅ 파트너 문의 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -852,6 +866,9 @@ class DialianBot(commands.Bot):
 
         if not auto_update_monthly_stats.is_running():
             auto_update_monthly_stats.start()
+
+        if not repair_review_awards.is_running():
+            repair_review_awards.start()
 
 
 intents = discord.Intents.default()
@@ -1145,6 +1162,24 @@ async def on_member_join(member: discord.Member):
 async def on_member_update(before: discord.Member, after: discord.Member):
     if before.roles != after.roles:
         await update_designer_tier_panel_message(bot)
+        if designer_tier(before, "GFX") != designer_tier(after, "GFX"):
+            # Keep the grade in existing GFX ticket names accurate after role changes.
+            async with aiosqlite.connect(DATABASE) as db:
+                async with db.execute("""
+                    SELECT ticket_channel, customer_id, category FROM commissions
+                    WHERE designer_id=? AND LOWER(category) LIKE '%gfx%'
+                      AND status NOT IN ('closed', 'completed', 'cancelled')
+                    ORDER BY created_at DESC LIMIT 100
+                """, (after.id,)) as cursor:
+                    tickets = await cursor.fetchall()
+            for channel_id, customer_id, category in tickets:
+                channel = after.guild.get_channel(channel_id)
+                if channel:
+                    try:
+                        customer = after.guild.get_member(customer_id)
+                        await organize_existing_ticket(channel, category, customer, after)
+                    except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+                        print(f"[GFX 등급 변경에 따른 티켓명 갱신 실패] {exc}")
 
 
 @bot.event
@@ -1241,6 +1276,10 @@ async def on_guild_channel_create(channel: discord.abc.GuildChannel):
         await asyncio.sleep(1.0)
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
             if entry.target.id == channel.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
+                # Legitimate DDS auto-created categories/tickets must not trigger
+                # anti-raid sanctions against the bot itself.
+                if bot.user and entry.user.id == bot.user.id:
+                    break
                 await check_and_punish_mass_action(guild, entry.user.id, "채널 생성", MASS_CHANNEL_LIMIT)
                 break
     except discord.Forbidden:
@@ -1276,38 +1315,7 @@ async def on_guild_role_create(role: discord.Role):
 # ==================== [포인트 랭킹 패널 헬퍼] ====================
 
 async def build_point_ranking_embed(guild: discord.Guild):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("""
-            SELECT user_id, points 
-            FROM user_points 
-            ORDER BY points DESC 
-            LIMIT 10
-        """) as cursor:
-            rows = await cursor.fetchall()
-
-    embed = discord.Embed(
-        title="🏆 Dialian 포인트 랭킹 (TOP 10)",
-        description="실시간으로 동기화되는 포인트 순위입니다! ✨",
-        color=discord.Color.gold(),
-        timestamp=discord.utils.utcnow()
-    )
-
-    if not rows:
-        embed.add_field(name="📊 순위 정보", value="아직 적립된 포인트 데이터가 없습니다.", inline=False)
-    else:
-        medals = ["🥇 1위", "🥈 2위", "🥉 3위"]
-        ranking_list = []
-        for idx, (user_id, points) in enumerate(rows, start=1):
-            member = await fetch_member_or_none(guild, user_id) if guild else None
-            user_display = member.mention if member else f"알 수 없는 유저(`{user_id}`)"
-            rank_tag = medals[idx - 1] if idx <= 3 else f"**{idx}위**"
-            ranking_list.append(f"{rank_tag} | {user_display} — **`{points:,} P`**")
-
-        embed.add_field(name="📊 실시간 TOP 10", value="\n".join(ranking_list), inline=False)
-
-    embed.set_footer(text="자동 동기화 주기 작동 중")
-    return embed
-
+    return await build_point_embed(guild)
 
 async def update_point_ranking_message(bot_instance):
     try:
@@ -1331,6 +1339,82 @@ async def update_point_ranking_message(bot_instance):
         await message.edit(embed=embed)
     except Exception as e:
         print(f"[랭킹 패널 갱신 오류] {e}")
+
+
+# ==================== [후기 포인트 보류 자동 복구 및 랭킹 재동기화] ====================
+
+@tasks.loop(minutes=3)
+async def repair_review_awards():
+    guild = None
+    ranking_channel = bot.get_channel(POINT_RANKING_CHANNEL_ID)
+    if ranking_channel:
+        guild = ranking_channel.guild
+    if not guild and len(bot.guilds) == 1:
+        guild = bot.guilds[0]
+    if not guild:
+        return
+
+    # Resolve publication-unknown reviews without accidentally rewarding a
+    # review that never appeared in the public channel.
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT ticket_channel FROM review_point_awards
+            WHERE status='unpublished' ORDER BY created_at LIMIT 30
+        """) as cursor:
+            unknown_ids = {record[0] for record in await cursor.fetchall()}
+    if unknown_ids:
+        review_channel = guild.get_channel(REVIEWS_CHANNEL_ID)
+        if review_channel is None:
+            review_channel = discord.utils.get(guild.text_channels, name=REVIEW_CHANNEL_NAME)
+        published = {}
+        if review_channel:
+            try:
+                async for message in review_channel.history(limit=1000):
+                    if message.author.id != bot.user.id:
+                        continue
+                    for embed in message.embeds:
+                        if embed.title != "✨ 소중한 커미션 후기가 도착했습니다!":
+                            continue
+                        footer = embed.footer.text if embed.footer else ""
+                        match = re.search(r"Ticket ID:\s*(\d+)", footer or "")
+                        if match and int(match.group(1)) in unknown_ids:
+                            published[int(match.group(1))] = message.id
+                    if len(published) == len(unknown_ids):
+                        break
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[후기 게시 확인 실패] {exc}")
+        if published:
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute("BEGIN IMMEDIATE")
+                for ticket_id, message_id in published.items():
+                    await db.execute(
+                        """UPDATE review_point_awards
+                           SET status='pending', review_message_id=?
+                           WHERE ticket_channel=? AND status='unpublished'""",
+                        (message_id, ticket_id),
+                    )
+                await db.commit()
+
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT ticket_channel, customer_id FROM review_point_awards
+            WHERE status='pending' ORDER BY created_at LIMIT 30
+        """) as cursor:
+            pending = await cursor.fetchall()
+
+    for ticket_id, customer_id in pending:
+        try:
+            member = guild.get_member(customer_id) or discord.Object(id=customer_id)
+            await credit_review_award(guild, member, ticket_id)
+        except Exception as exc:
+            print(f"[후기 포인트 자동 복구 실패] ticket={ticket_id} {exc}")
+
+    await refresh_point_ranking(guild)
+
+
+@repair_review_awards.before_loop
+async def before_repair_review_awards():
+    await bot.wait_until_ready()
 
 
 # ==================== [채널 유효성 및 일일 제한 헬퍼] ====================
@@ -1942,6 +2026,208 @@ async def reset_points(ctx, member: discord.Member):
     await log_security_event(ctx.guild, "포인트 리셋", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n리셋 전 포인트: `{current_points:,}P`", discord.Color.red())
 
 
+@bot.command(name="랭킹갱신")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def force_refresh_ranking(ctx):
+    refreshed = await refresh_point_ranking(ctx.guild)
+    await ctx.send("✅ 포인트 랭킹을 갱신했습니다." if refreshed else
+                   "⚠️ 랭킹 패널을 찾지 못했습니다. 랭킹 채널에서 !포인트랭킹을 먼저 실행해주세요.")
+
+
+@bot.command(name="후기포인트점검")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def audit_september_reviews(ctx):
+    """Report September 2026 legacy records without guessing prior rewards."""
+    if ctx.channel.id != SECURITY_LOG_CHANNEL_ID:
+        return await ctx.send(
+            f"🔒 보안실 <#{SECURITY_LOG_CHANNEL_ID}>에서만 점검할 수 있습니다.",
+            delete_after=10,
+        )
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT r.ticket_channel, r.customer_id, r.stars,
+                   COALESCE(a.status, 'unknown'), COALESCE(a.amount, 0)
+            FROM reviews r LEFT JOIN review_point_awards a
+              ON a.ticket_channel=r.ticket_channel
+            WHERE substr(r.created_at, 1, 7)='2026-09'
+            ORDER BY r.created_at DESC
+        """) as cursor:
+            records = await cursor.fetchall()
+    unverified = [row for row in records if row[3] in ("legacy_unverified", "unknown")]
+    pending = [row for row in records if row[3] == "pending"]
+    credited = [row for row in records if row[3] == "awarded"]
+    # Historical embeds did not include the ticket ID. Compare aggregate counts
+    # to flag potential DB/public-channel discrepancies, never guess a payout.
+    published_count = None
+    review_channel = ctx.guild.get_channel(REVIEWS_CHANNEL_ID)
+    if review_channel is not None:
+        try:
+            september_start = datetime(2026, 8, 31, 15, tzinfo=timezone.utc)
+            october_start = datetime(2026, 9, 30, 15, tzinfo=timezone.utc)
+            published_count = 0
+            async for message in review_channel.history(
+                limit=1500, after=september_start, before=october_start
+            ):
+                if message.author.id == bot.user.id and any(
+                    embed.title == "✨ 소중한 커미션 후기가 도착했습니다!"
+                    for embed in message.embeds
+                ):
+                    published_count += 1
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            print(f"[9월 후기 채널 조회 실패] {exc}")
+    channel_summary = (
+        f" / 후기 채널 게시물: **{published_count}건**"
+        if published_count is not None else " / 후기 채널은 조회할 수 없음"
+    )
+    embed = discord.Embed(
+        title="🪙 2026년 9월 후기 포인트 점검",
+        description=(
+            f"DB 등록: **{len(records)}건**{channel_summary} / 신규 지급 기록: **{len(credited)}건**\n"
+            f"자동 재시도 대기: **{len(pending)}건** / "
+            f"과거 지급 여부 미확인: **{len(unverified)}건**\n\n"
+            "**주의:** 기존 시스템에는 후기별 포인트 지급 내역이 없어서 "
+            "과거 후기를 일괄 재지급하면 중복 적립될 수 있습니다. "
+            "실제 지급 누락을 확인한 건만 관리자가 복구해주세요."
+        ),
+        color=discord.Color.gold(),
+    )
+    if unverified:
+        embed.add_field(
+            name="확인 필요 (최근 최대 15건)",
+            value="\n".join(
+                f"티켓 `{ticket_id}` · <@{user_id}> · {stars}점"
+                for ticket_id, user_id, stars, _, _ in unverified[:15]
+            )[:1024],
+            inline=False,
+        )
+    # Earlier builds mistakenly used database/database.db for points. Detect
+    # that file read-only; differences are diagnostic, NOT unpaid rewards.
+    old_path = Path("database/database.db")
+    if old_path.is_file():
+        try:
+            async with aiosqlite.connect(old_path.resolve().as_uri() + "?mode=ro",
+                                         uri=True) as legacy:
+                async with legacy.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='user_points'"
+                ) as cursor:
+                    exists = await cursor.fetchone()
+                if exists:
+                    async with legacy.execute(
+                        "SELECT COUNT(*) FROM user_points"
+                    ) as cursor:
+                        old_users = (await cursor.fetchone())[0]
+                    embed.add_field(
+                        name="⚠️ 구버전 포인트 DB 감지",
+                        value=(
+                            f"과거 `database/database.db` 파일에 **{old_users}명**의 "
+                            "포인트 기록이 남아 있습니다. 현재 DB로 이미 이전되었는지는 "
+                            "확인되지 않았습니다. 이 값을 자동 합산하지 마세요."
+                        ),
+                        inline=False,
+                    )
+        except (OSError, aiosqlite.Error) as exc:
+            print(f"[구버전 포인트 DB 읽기 실패] {exc}")
+
+    embed.add_field(
+        name="복구 방법",
+        value="후기 채널 게시물 및 과거 포인트 내역을 먼저 확인한 뒤 "
+              "`!후기포인트복구 티켓ID 단품` 또는 "
+              "`!후기포인트복구 티켓ID 2+1` / "
+              "`!후기포인트복구 티켓ID 3+1`",
+        inline=False,
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="후기포인트복구")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def restore_september_review(ctx, ticket_id: int, bundle: str):
+    if ctx.channel.id != SECURITY_LOG_CHANNEL_ID:
+        return await ctx.send(
+            f"🔒 보안실 <#{SECURITY_LOG_CHANNEL_ID}>에서만 복구할 수 있습니다.",
+            delete_after=10,
+        )
+    amounts = {
+        "단품": REVIEW_POINTS_SINGLE,
+        "2+1": REVIEW_POINTS_2_PLUS_1,
+        "3+1": REVIEW_POINTS_3_PLUS_1,
+    }
+    if bundle not in amounts:
+        return await ctx.send("묶음 종류는 `단품`, `2+1`, `3+1` 중 하나여야 합니다.")
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT r.customer_id, a.status
+            FROM reviews r JOIN review_point_awards a
+              ON r.ticket_channel=a.ticket_channel
+            WHERE r.ticket_channel=? AND substr(r.created_at,1,7)='2026-09'
+        """, (ticket_id,)) as cursor:
+            row = await cursor.fetchone()
+    if not row or row[1] != "legacy_unverified":
+        return await ctx.send(
+            "복구 가능한 9월 과거 후기 기록이 없거나 이미 처리된 티켓입니다."
+        )
+    member = ctx.guild.get_member(row[0]) or discord.Object(id=row[0])
+    try:
+        amount, total, changed = await credit_review_award(
+            ctx.guild, member, ticket_id,
+            administrator_id=ctx.author.id, legacy_amount=amounts[bundle],
+        )
+    except ValueError as exc:
+        return await ctx.send(f"⚠️ {exc}")
+    if not changed:
+        return await ctx.send("이미 지급된 후기입니다. 중복 적립하지 않았습니다.")
+    await ctx.send(
+        f"✅ 티켓 `{ticket_id}`의 후기 지급을 수동 승인했습니다. "
+        f"<@{row[0]}> +{amount}P · 현재 {total}P"
+    )
+    await log_security_event(
+        ctx.guild, "9월 후기 포인트 개별 복구",
+        f"관리자: {ctx.author.mention}\n티켓: {ticket_id}\n"
+        f"대상: <@{row[0]}>\n확인한 구성: {bundle}\n적립: {amount}P",
+        discord.Color.gold(),
+    )
+
+
+@bot.command(name="티켓정리")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def organize_active_tickets(ctx):
+    """Move only live, DB-backed tickets; never expose or move archived tickets."""
+    progress = await ctx.send("🔄 기존 진행 티켓을 분야와 담당자별로 정리하고 있습니다.")
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT ticket_channel, customer_id, designer_id, category
+            FROM commissions
+            WHERE status NOT IN ('completed', 'cancelled', 'closed')
+              AND ticket_channel IS NOT NULL
+            ORDER BY created_at DESC LIMIT 200
+        """) as cursor:
+            records = await cursor.fetchall()
+    moved, unchanged, failed = 0, 0, 0
+    for channel_id, customer_id, designer_id, category in records:
+        channel = ctx.guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        customer = ctx.guild.get_member(customer_id)
+        designer = ctx.guild.get_member(designer_id) if designer_id else None
+        try:
+            old_name, old_category = channel.name, channel.category_id
+            await organize_existing_ticket(channel, category, customer, designer)
+            if channel.name != old_name or channel.category_id != old_category:
+                moved += 1
+            else:
+                unchanged += 1
+        except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+            failed += 1
+            print(f"[기존 티켓 정리 실패] channel={channel_id}: {exc}")
+    await progress.edit(
+        content=f"✅ 진행 티켓 정리 완료: 정리 {moved}건 · 유지 {unchanged}건 · 오류 {failed}건."
+    )
+
+
 @bot.command(name="포인트랭킹", aliases=["랭킹패널", "주간베스트", "명예의전당"])
 @commands.has_permissions(administrator=True)
 async def setup_point_ranking(ctx):
@@ -2223,18 +2509,62 @@ async def change_designer(ctx, designer: discord.Member):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     async with aiosqlite.connect(DATABASE) as db:
-        await db.execute(
-            "UPDATE commissions SET designer_id = ?, updated_at = ? WHERE ticket_channel = ?",
-            (designer.id, discord.utils.utcnow().isoformat(), ctx.channel.id)
+        async with db.execute(
+            "SELECT customer_id, designer_id, category FROM commissions WHERE ticket_channel=?",
+            (ctx.channel.id,),
+        ) as cursor:
+            previous = await cursor.fetchone()
+    if not previous:
+        return await ctx.send("이 티켓의 DB 정보를 찾을 수 없습니다.")
+
+    customer_id, previous_designer_id, category = previous
+    # Permissions first; the DB must not claim a designer is assigned if
+    # Discord refused to grant that designer access to the private channel.
+    try:
+        await ctx.channel.set_permissions(
+            designer, view_channel=True, read_messages=True,
+            read_message_history=True, send_messages=True, attach_files=True,
         )
-        await db.commit()
+    except (discord.Forbidden, discord.HTTPException):
+        return await ctx.send("❌ 디자이너에게 티켓 접근 권한을 부여하지 못했습니다.")
 
     try:
-        await ctx.channel.set_permissions(designer, read_messages=True, send_messages=True, attach_files=True)
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute(
+                """UPDATE commissions SET designer_id=?, designer_name=?,
+                   updated_at=? WHERE ticket_channel=?""",
+                (designer.id, designer.display_name,
+                 discord.utils.utcnow().isoformat(), ctx.channel.id),
+            )
+            await db.commit()
     except Exception:
-        pass
+        if previous_designer_id != designer.id:
+            try:
+                await ctx.channel.set_permissions(designer, overwrite=None)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+        raise
 
-    await ctx.send(f"✅ 티켓 담당 디자이너가 {designer.mention} 님으로 변경되었습니다.")
+    # Do not leave a former designer with explicit access to the new owner's
+    # private ticket, unless they also have administrator permissions.
+    if previous_designer_id and previous_designer_id != designer.id:
+        former = ctx.guild.get_member(previous_designer_id)
+        if former and not former.guild_permissions.administrator:
+            try:
+                await ctx.channel.set_permissions(former, overwrite=None)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[이전 담당자 권한 제거 실패] {exc}")
+
+    warning = ""
+    try:
+        customer = ctx.guild.get_member(customer_id)
+        await organize_existing_ticket(ctx.channel, category, customer, designer)
+    except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+        warning = " (채널 정리는 실패했으므로 !티켓정리로 다시 시도해주세요.)"
+        print(f"[수동 배정 티켓명 갱신 실패] {exc}")
+    await ctx.send(
+        f"✅ 티켓 담당 디자이너가 {designer.mention} 님으로 변경되었습니다.{warning}"
+    )
 
 
 @bot.command(name="티켓닫기", aliases=["티켓종료", "닫기"])

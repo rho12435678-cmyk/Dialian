@@ -10,6 +10,7 @@ from database.views.payment_view import PaymentView
 from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
+from database.services.ticket_layout import get_or_create_ticket_category, ticket_name
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
     release_ticket_creation_lock,
@@ -127,17 +128,13 @@ class PurchaseModal(discord.ui.Modal):
         # --------------------------------------------------
         # 채널명 및 Topic 구분 설정 (중복 생성 시 충돌 방지 및 구별)
         # --------------------------------------------------
-        safe_category = re.sub(r'[^a-zA-Z0-9가-힣]', '', self.COMMISSION_NAME).lower()
-        safe_designer = re.sub(r'[^a-zA-Z0-9가-힣]', '', designer_name).lower()
-        safe_user = re.sub(r'[^a-zA-Z0-9가-힣]', '', user.display_name).lower()
-        time_suffix = str(int(time.time()))[-4:]  # 중복 채널 생성 시 고유 식별 번호
-
-        # 채널명 예시: 티켓-gfx-홍길동-손님닉-1234
-        channel_name = f"티켓-{safe_category}-{safe_designer}-{safe_user}-{time_suffix}"
+        channel_name = ticket_name(self.COMMISSION_NAME, user, developer)
+        ticket_category = await get_or_create_ticket_category(guild, self.COMMISSION_NAME)
         channel_topic = f"손님 ID: {user.id} | 카테고리: {self.COMMISSION_NAME} ({self.bundle_type}) | 담당: {designer_name}"
 
         ticket_channel = await guild.create_text_channel(
             name=channel_name,
+            category=ticket_category,
             overwrites=overwrites,
             topic=channel_topic
         )
@@ -242,6 +239,16 @@ class PurchaseModal(discord.ui.Modal):
                     view=TicketCloseView(ticket_channel)
                 )
 
+        # A direct link is useful when a member has hidden optional channels in
+        # Discord Browse Channels. The bot cannot change client preferences.
+        try:
+            await user.send(
+                f"📩 DDS 티켓이 생성되었습니다.\n"
+                f"분야: {self.COMMISSION_NAME} · 담당: {designer_mention}\n"
+                f"바로가기: {ticket_channel.jump_url}"
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
 
 
@@ -302,5 +309,11 @@ class UniformModal(PurchaseModal):
             self.add_item(self.gfx_style)
             self.fourth_style = None
 
-        self.roblox_nickname = None
+        self.roblox_nickname = discord.ui.TextInput(
+            label="🎮 Roblox 닉네임 (작품별 입력 가능)",
+            placeholder="사용할 닉네임을 입력하세요. 묶음은 작품 순서별 닉네임을 쉼표로 구분",
+            required=True,
+            max_length=160,
+        )
+        self.add_item(self.roblox_nickname)
         self.gfx_genre = None
