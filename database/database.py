@@ -170,9 +170,16 @@ async def create_tables():
             status TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             awarded_at TEXT,
-            approved_by INTEGER
+            approved_by INTEGER,
+            review_message_id INTEGER
         )
         """)
+        try:
+            await db.execute(
+                "ALTER TABLE review_point_awards ADD COLUMN review_message_id INTEGER"
+            )
+        except aiosqlite.OperationalError:
+            pass
         await db.execute("""
             INSERT OR IGNORE INTO review_point_awards
                 (ticket_channel, customer_id, amount, status, created_at)
