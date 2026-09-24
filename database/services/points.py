@@ -175,6 +175,61 @@ async def add_review_points_by_bundle(
     return points_to_add, new_total
 
 
+async def credit_review_award(guild, member, ticket_channel: int, *,
+                              administrator_id=None, legacy_amount=None):
+    """Grant exactly once: balance + ledger status commit in ONE transaction.
+
+    Old reviews have no payout history, so only an explicit admin approval
+    may release a legacy_unverified review.
+    """
+    user_id = member.id
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT customer_id, amount, status FROM review_point_awards WHERE ticket_channel=?",
+            (ticket_channel,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            raise ValueError("후기 지급 기록을 찾을 수 없습니다.")
+        owner_id, amount, status = row
+        if owner_id != user_id:
+            raise ValueError("후기 작성자와 포인트 대상자가 일치하지 않습니다.")
+        if status == "awarded":
+            return 0, await get_user_points(user_id), False
+        if status == "legacy_unverified":
+            if administrator_id is None or legacy_amount not in (
+                REVIEW_POINTS_SINGLE, REVIEW_POINTS_2_PLUS_1, REVIEW_POINTS_3_PLUS_1
+            ):
+                raise ValueError("과거 후기는 관리자 확인 후 개별 복구해야 합니다.")
+            amount = legacy_amount
+        elif status != "pending":
+            raise ValueError("후기 지급 상태가 올바르지 않습니다.")
+        await db.execute(
+            """INSERT INTO user_points (user_id, points) VALUES (?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET points = points + excluded.points""",
+            (user_id, amount),
+        )
+        await db.execute(
+            """UPDATE review_point_awards SET status='awarded', amount=?,
+                  approved_by=?, awarded_at=CURRENT_TIMESTAMP
+               WHERE ticket_channel=?""",
+            (amount, administrator_id, ticket_channel),
+        )
+        async with db.execute(
+            "SELECT points FROM user_points WHERE user_id=?", (user_id,)
+        ) as cursor:
+            total = (await cursor.fetchone())[0]
+        await db.commit()
+    # No extra points: this reuses regular-role reconciliation and immediate
+    # ranking refresh even if the review was written before a restart.
+    if guild and isinstance(member, discord.Member):
+        await add_user_points(guild, member, 0)
+    elif guild:
+        await refresh_point_ranking(guild)
+    return amount, total, True
+
+
 # ==========================================
 # 2. 디스코드 명령어 인터페이스 (Cog)
 # ==========================================
