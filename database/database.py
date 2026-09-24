@@ -160,6 +160,28 @@ async def create_tables():
         ON reviews(ticket_channel)
         """)
 
+        # Existing reviews have no reliable historical payout ledger. Mark them
+        # as unverified for administrator reconciliation, never grant again blindly.
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS review_point_awards (
+            ticket_channel INTEGER PRIMARY KEY,
+            customer_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            awarded_at TEXT,
+            approved_by INTEGER
+        )
+        """)
+        await db.execute("""
+            INSERT OR IGNORE INTO review_point_awards
+                (ticket_channel, customer_id, amount, status, created_at)
+            SELECT ticket_channel, customer_id, 0, 'legacy_unverified',
+                   COALESCE(created_at, CURRENT_TIMESTAMP)
+            FROM reviews
+            WHERE ticket_channel IS NOT NULL AND customer_id IS NOT NULL
+        """)
+
         # 6. 유저 포인트 시스템
         await db.execute("""
         CREATE TABLE IF NOT EXISTS user_points (
