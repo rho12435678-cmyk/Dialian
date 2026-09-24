@@ -4,6 +4,7 @@ import os
 import random
 import re
 import subprocess
+import sys
 import traceback
 
 import aiosqlite
@@ -811,6 +812,8 @@ async def before_auto_update_stats():
 # ==================== [봇 클래스 정의 및 Persistent View / DB 초기화] ====================
 
 class DialianBot(commands.Bot):
+    restart_requested = False
+
     async def setup_hook(self):
         await create_tables()
         await init_extended_db()
@@ -1500,10 +1503,12 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, (commands.CommandNotFound, commands.CheckFailure)):
-        return
-    elif isinstance(error, commands.MissingPermissions):
+    if isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ 해당 명령어를 실행할 권한이 없습니다.", delete_after=5)
+    elif isinstance(error, commands.NoPrivateMessage):
+        await ctx.send("서버 안에서만 사용할 수 있는 명령어입니다.", delete_after=5)
+    elif isinstance(error, (commands.CommandNotFound, commands.CheckFailure)):
+        return
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(f"❌ 필수 인자가 누락되었습니다: `{error.param.name}`", delete_after=5)
     elif isinstance(error, commands.CommandOnCooldown):
@@ -1572,6 +1577,7 @@ async def command_list(ctx):
             "`!디자이너등급패널` (디자이너 등급 실시간 패널 생성)\n"
             "`!포인트랭킹` (포인트 실시간 TOP 10 패널 생성)\n\n"
             "**[시스템 & 관리]**\n"
+            "`!재시작` (관리자 전용 봇 재시작)\n"
             "`!업데이트확인` `!업데이트` (최신 Git Pull 반영)\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
             "`!출석체크` (매일 1회 출석 체크 시 **+10P** 지급!)\n"
@@ -1970,6 +1976,25 @@ async def update_check(ctx):
     await ctx.send(embed=embed)
 
 
+@bot.command(name="재시작", aliases=["봇재시작", "restart"])
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def restart_bot(ctx):
+    if bot.restart_requested:
+        return await ctx.send("이미 재시작을 처리하고 있습니다.", delete_after=5)
+
+    bot.restart_requested = True
+    try:
+        await ctx.send(
+            "봇을 재시작합니다. 잠시 연결이 끊어집니다.\n"
+            "다시 접속하면 `!봇상태`로 시작 시간을 확인할 수 있습니다."
+        )
+    except Exception:
+        bot.restart_requested = False
+        raise
+    await bot.close()
+
+
 @bot.command(name="업데이트", aliases=["패치", "update"])
 @commands.has_permissions(administrator=True)
 async def update_bot(ctx):
@@ -2002,7 +2027,7 @@ async def update_bot(ctx):
                 output_log = output_log[:1000] + "\n... (생략됨)"
 
             embed.add_field(name="Git 실행 로그", value=f"```\n{output_log}\n```", inline=False)
-            embed.set_footer(text="⚠️ Python 코드 변경사항을 완벽히 적용하려면 프로세스 재시작이 필요할 수 있습니다.")
+            embed.set_footer(text="코드 변경사항을 적용하려면 관리자가 !재시작을 입력해주세요.")
 
             await status_msg.edit(content=None, embed=embed)
         else:
@@ -2385,8 +2410,17 @@ async def clear_messages(ctx, amount: int):
 
 # ==================== [봇 메인 실행부] ====================
 
-if __name__ == "__main__":
+def run_bot():
     if TOKEN:
         bot.run(TOKEN)
+        # Restart only after asyncio.run has closed connections and cancelled background tasks.
+        if bot.restart_requested:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
     else:
         print("❌ 오류: 환경변수에 Discord TOKEN이 설정되지 않았습니다.")
+
+
+if __name__ == "__main__":
+    run_bot()
