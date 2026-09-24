@@ -1981,10 +1981,33 @@ async def audit_september_reviews(ctx):
     unverified = [row for row in records if row[3] in ("legacy_unverified", "unknown")]
     pending = [row for row in records if row[3] == "pending"]
     credited = [row for row in records if row[3] == "awarded"]
+    # Historical embeds did not include the ticket ID. Compare aggregate counts
+    # to flag potential DB/public-channel discrepancies, never guess a payout.
+    published_count = None
+    review_channel = ctx.guild.get_channel(REVIEWS_CHANNEL_ID)
+    if review_channel is not None:
+        try:
+            september_start = datetime(2026, 8, 31, 15, tzinfo=timezone.utc)
+            october_start = datetime(2026, 9, 30, 15, tzinfo=timezone.utc)
+            published_count = 0
+            async for message in review_channel.history(
+                limit=1500, after=september_start, before=october_start
+            ):
+                if message.author.id == bot.user.id and any(
+                    embed.title == "✨ 소중한 커미션 후기가 도착했습니다!"
+                    for embed in message.embeds
+                ):
+                    published_count += 1
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            print(f"[9월 후기 채널 조회 실패] {exc}")
+    channel_summary = (
+        f" / 후기 채널 게시물: **{published_count}건**"
+        if published_count is not None else " / 후기 채널은 조회할 수 없음"
+    )
     embed = discord.Embed(
         title="🪙 2026년 9월 후기 포인트 점검",
         description=(
-            f"DB 등록: **{len(records)}건** / 적립 기록 확인: **{len(credited)}건**\n"
+            f"DB 등록: **{len(records)}건**{channel_summary} / 신규 지급 기록: **{len(credited)}건**\n"
             f"자동 재시도 대기: **{len(pending)}건** / "
             f"과거 지급 여부 미확인: **{len(unverified)}건**\n\n"
             "**주의:** 기존 시스템에는 후기별 포인트 지급 내역이 없어서 "
