@@ -571,6 +571,10 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         # 월간 통계 메시지 자동 갱신 연동
         await update_monthly_stats_message(interaction.client)
 
+        try:
+            await user.send(f"📩 DDS 개발자 지원 티켓 바로가기: {channel.jump_url}")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.followup.send(f"✅ 지원 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
@@ -644,6 +648,10 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         # 월간 통계 메시지 자동 갱신 연동
         await update_monthly_stats_message(interaction.client)
 
+        try:
+            await user.send(f"📩 DDS 파트너 문의 티켓 바로가기: {channel.jump_url}")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.followup.send(f"✅ 파트너 문의 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
