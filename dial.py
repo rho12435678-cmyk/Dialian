@@ -2452,18 +2452,62 @@ async def change_designer(ctx, designer: discord.Member):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     async with aiosqlite.connect(DATABASE) as db:
-        await db.execute(
-            "UPDATE commissions SET designer_id = ?, updated_at = ? WHERE ticket_channel = ?",
-            (designer.id, discord.utils.utcnow().isoformat(), ctx.channel.id)
+        async with db.execute(
+            "SELECT customer_id, designer_id, category FROM commissions WHERE ticket_channel=?",
+            (ctx.channel.id,),
+        ) as cursor:
+            previous = await cursor.fetchone()
+    if not previous:
+        return await ctx.send("이 티켓의 DB 정보를 찾을 수 없습니다.")
+
+    customer_id, previous_designer_id, category = previous
+    # Permissions first; the DB must not claim a designer is assigned if
+    # Discord refused to grant that designer access to the private channel.
+    try:
+        await ctx.channel.set_permissions(
+            designer, view_channel=True, read_messages=True,
+            read_message_history=True, send_messages=True, attach_files=True,
         )
-        await db.commit()
+    except (discord.Forbidden, discord.HTTPException):
+        return await ctx.send("❌ 디자이너에게 티켓 접근 권한을 부여하지 못했습니다.")
 
     try:
-        await ctx.channel.set_permissions(designer, read_messages=True, send_messages=True, attach_files=True)
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute(
+                """UPDATE commissions SET designer_id=?, designer_name=?,
+                   updated_at=? WHERE ticket_channel=?""",
+                (designer.id, designer.display_name,
+                 discord.utils.utcnow().isoformat(), ctx.channel.id),
+            )
+            await db.commit()
     except Exception:
-        pass
+        if previous_designer_id != designer.id:
+            try:
+                await ctx.channel.set_permissions(designer, overwrite=None)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+        raise
 
-    await ctx.send(f"✅ 티켓 담당 디자이너가 {designer.mention} 님으로 변경되었습니다.")
+    # Do not leave a former designer with explicit access to the new owner's
+    # private ticket, unless they also have administrator permissions.
+    if previous_designer_id and previous_designer_id != designer.id:
+        former = ctx.guild.get_member(previous_designer_id)
+        if former and not former.guild_permissions.administrator:
+            try:
+                await ctx.channel.set_permissions(former, overwrite=None)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[이전 담당자 권한 제거 실패] {exc}")
+
+    warning = ""
+    try:
+        customer = ctx.guild.get_member(customer_id)
+        await organize_existing_ticket(ctx.channel, category, customer, designer)
+    except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+        warning = " (채널 정리는 실패했으므로 !티켓정리로 다시 시도해주세요.)"
+        print(f"[수동 배정 티켓명 갱신 실패] {exc}")
+    await ctx.send(
+        f"✅ 티켓 담당 디자이너가 {designer.mention} 님으로 변경되었습니다.{warning}"
+    )
 
 
 @bot.command(name="티켓닫기", aliases=["티켓종료", "닫기"])
