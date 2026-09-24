@@ -1983,6 +1983,147 @@ async def reset_points(ctx, member: discord.Member):
     await log_security_event(ctx.guild, "포인트 리셋", f"수행자: {ctx.author.mention}\n대상: {member.mention}\n리셋 전 포인트: `{current_points:,}P`", discord.Color.red())
 
 
+@bot.command(name="랭킹갱신")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def force_refresh_ranking(ctx):
+    refreshed = await refresh_point_ranking(ctx.guild)
+    await ctx.send("✅ 포인트 랭킹을 갱신했습니다." if refreshed else
+                   "⚠️ 랭킹 패널을 찾지 못했습니다. 랭킹 채널에서 !포인트랭킹을 먼저 실행해주세요.")
+
+
+@bot.command(name="후기포인트점검")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def audit_september_reviews(ctx):
+    """Report September 2026 legacy records without guessing prior rewards."""
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT r.ticket_channel, r.customer_id, r.stars,
+                   COALESCE(a.status, 'unknown'), COALESCE(a.amount, 0)
+            FROM reviews r LEFT JOIN review_point_awards a
+              ON a.ticket_channel=r.ticket_channel
+            WHERE substr(r.created_at, 1, 7)='2026-09'
+            ORDER BY r.created_at DESC
+        """) as cursor:
+            records = await cursor.fetchall()
+    unverified = [row for row in records if row[3] in ("legacy_unverified", "unknown")]
+    pending = [row for row in records if row[3] == "pending"]
+    credited = [row for row in records if row[3] == "awarded"]
+    embed = discord.Embed(
+        title="🪙 2026년 9월 후기 포인트 점검",
+        description=(
+            f"DB 등록: **{len(records)}건** / 적립 기록 확인: **{len(credited)}건**\n"
+            f"자동 재시도 대기: **{len(pending)}건** / "
+            f"과거 지급 여부 미확인: **{len(unverified)}건**\n\n"
+            "**주의:** 기존 시스템에는 후기별 포인트 지급 내역이 없어서 "
+            "과거 후기를 일괄 재지급하면 중복 적립될 수 있습니다. "
+            "실제 지급 누락을 확인한 건만 관리자가 복구해주세요."
+        ),
+        color=discord.Color.gold(),
+    )
+    if unverified:
+        embed.add_field(
+            name="확인 필요 (최근 최대 15건)",
+            value="\n".join(
+                f"티켓 \`{ticket_id}\` · <@{user_id}> · {stars}점"
+                for ticket_id, user_id, stars, _, _ in unverified[:15]
+            )[:1024],
+            inline=False,
+        )
+    embed.add_field(
+        name="복구 방법",
+        value="후기 채널 게시물 및 과거 포인트 내역을 먼저 확인한 뒤 "
+              "\`!후기포인트복구 티켓ID 단품\` 또는 "
+              "\`!후기포인트복구 티켓ID 2+1\` / "
+              "\`!후기포인트복구 티켓ID 3+1\`",
+        inline=False,
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="후기포인트복구")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def restore_september_review(ctx, ticket_id: int, bundle: str):
+    amounts = {
+        "단품": REVIEW_POINTS_SINGLE,
+        "2+1": REVIEW_POINTS_2_PLUS_1,
+        "3+1": REVIEW_POINTS_3_PLUS_1,
+    }
+    if bundle not in amounts:
+        return await ctx.send("묶음 종류는 \`단품\`, \`2+1\`, \`3+1\` 중 하나여야 합니다.")
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT r.customer_id, a.status
+            FROM reviews r JOIN review_point_awards a
+              ON r.ticket_channel=a.ticket_channel
+            WHERE r.ticket_channel=? AND substr(r.created_at,1,7)='2026-09'
+        """, (ticket_id,)) as cursor:
+            row = await cursor.fetchone()
+    if not row or row[1] != "legacy_unverified":
+        return await ctx.send(
+            "복구 가능한 9월 과거 후기 기록이 없거나 이미 처리된 티켓입니다."
+        )
+    member = ctx.guild.get_member(row[0]) or discord.Object(id=row[0])
+    try:
+        amount, total, changed = await credit_review_award(
+            ctx.guild, member, ticket_id,
+            administrator_id=ctx.author.id, legacy_amount=amounts[bundle],
+        )
+    except ValueError as exc:
+        return await ctx.send(f"⚠️ {exc}")
+    if not changed:
+        return await ctx.send("이미 지급된 후기입니다. 중복 적립하지 않았습니다.")
+    await ctx.send(
+        f"✅ 티켓 \`{ticket_id}\`의 후기 지급을 수동 승인했습니다. "
+        f"<@{row[0]}> +{amount}P · 현재 {total}P"
+    )
+    await log_security_event(
+        ctx.guild, "9월 후기 포인트 개별 복구",
+        f"관리자: {ctx.author.mention}\n티켓: {ticket_id}\n"
+        f"대상: <@{row[0]}>\n확인한 구성: {bundle}\n적립: {amount}P",
+        discord.Color.gold(),
+    )
+
+
+@bot.command(name="티켓정리")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def organize_active_tickets(ctx):
+    """Move only live, DB-backed tickets; never expose or move archived tickets."""
+    progress = await ctx.send("🔄 기존 진행 티켓을 분야와 담당자별로 정리하고 있습니다.")
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT ticket_channel, customer_id, designer_id, category
+            FROM commissions
+            WHERE status NOT IN ('completed', 'cancelled', 'closed')
+              AND ticket_channel IS NOT NULL
+            ORDER BY created_at DESC LIMIT 200
+        """) as cursor:
+            records = await cursor.fetchall()
+    moved, unchanged, failed = 0, 0, 0
+    for channel_id, customer_id, designer_id, category in records:
+        channel = ctx.guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        customer = ctx.guild.get_member(customer_id)
+        designer = ctx.guild.get_member(designer_id) if designer_id else None
+        try:
+            old_name, old_category = channel.name, channel.category_id
+            await organize_existing_ticket(channel, category, customer, designer)
+            if channel.name != old_name or channel.category_id != old_category:
+                moved += 1
+            else:
+                unchanged += 1
+        except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+            failed += 1
+            print(f"[기존 티켓 정리 실패] channel={channel_id}: {exc}")
+    await progress.edit(
+        content=f"✅ 진행 티켓 정리 완료: 정리 {moved}건 · 유지 {unchanged}건 · 오류 {failed}건."
+    )
+
+
 @bot.command(name="포인트랭킹", aliases=["랭킹패널", "주간베스트", "명예의전당"])
 @commands.has_permissions(administrator=True)
 async def setup_point_ranking(ctx):
