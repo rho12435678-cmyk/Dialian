@@ -76,13 +76,10 @@ async def get_or_create_ticket_category(guild, category):
             overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False)},
             reason="DDS 티켓 분야별 자동 정리",
         )
-        # Place new categories beside the purchase/inquiry area where possible.
+        # Keep ticket categories at the top of the sidebar, after Welcome.
+        # Category visibility is still subject to each user's Discord settings.
         try:
-            from config import PURCHASE_CHANNEL_ID
-            anchor = guild.get_channel(PURCHASE_CHANNEL_ID)
-            if anchor and anchor.category:
-                await created.edit(position=anchor.category.position + 1,
-                                   reason="DDS 티켓 목록을 구매 채널 근처에 배치")
+            await created.edit(position=1, reason="DDS 진행 티켓을 상단에 배치")
         except (discord.Forbidden, discord.HTTPException):
             pass
         return created
