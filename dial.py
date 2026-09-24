@@ -31,6 +31,7 @@ from database.services.points import (
 from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
 from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket, designer_tier
 from database.services.point_ranking import build_point_embed, refresh_point_ranking
+from database.services.update_announcement import announce_once, GUILD_ID as DDS_RELEASE_GUILD_ID
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -823,6 +824,21 @@ async def before_auto_update_stats():
     await bot.wait_until_ready()
 
 
+# One-time, bot-authored release notice. Persistent DB and Discord message footer
+# also prevent repeat posts on service restarts or a second manual invocation.
+@tasks.loop(count=1)
+async def publish_combined_dds_update():
+    try:
+        await announce_once(bot)
+    except Exception as exc:
+        print(f"[DDS 일회성 업데이트 공지 실패] {type(exc).__name__}: {exc}")
+
+
+@publish_combined_dds_update.before_loop
+async def before_publish_combined_dds_update():
+    await bot.wait_until_ready()
+
+
 # ==================== [봇 클래스 정의 및 Persistent View / DB 초기화] ====================
 
 class DialianBot(commands.Bot):
@@ -869,6 +885,9 @@ class DialianBot(commands.Bot):
 
         if not repair_review_awards.is_running():
             repair_review_awards.start()
+
+        if not publish_combined_dds_update.is_running():
+            publish_combined_dds_update.start()
 
 
 intents = discord.Intents.default()
@@ -2333,6 +2352,28 @@ async def update_bot(ctx):
         await status_msg.edit(content="❌ **Git이 설치되어 있지 않거나 경로 환경변수가 설정되지 않았습니다.**")
     except Exception as e:
         await status_msg.edit(content=f"❌ **업데이트 중 오류 발생:** `{e}`")
+
+
+# Failed first attempts may be retried without permitting a second post.
+@bot.command(name="업데이트공지1회", aliases=["업뎃공지1회"])
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def manually_publish_combined_update(ctx):
+    if ctx.guild.id != DDS_RELEASE_GUILD_ID:
+        return await ctx.send("❌ DDS 공식 서버에서만 사용할 수 있습니다.")
+    try:
+        posted = await announce_once(bot)
+    except Exception as exc:
+        print(f"[DDS 업데이트 공지 수동 재시도 실패] {type(exc).__name__}: {exc}")
+        return await ctx.send(
+            "⚠️ 공지를 게시하지 못했습니다. Dialian의 대상 채널 접근, "
+            "메시지 전송 및 이전 메시지 읽기 권한을 확인해주세요."
+        )
+    await ctx.send(
+        "✅ 공식 업데이트 채널에 Dialian 명의로 공지를 게시했습니다."
+        if posted else
+        "ℹ️ 이번 업데이트 공지는 이미 게시되었습니다. 중복 게시하지 않았습니다."
+    )
 
 
 # ==================== [티켓 패널 생성 및 업무 명령어] ====================
