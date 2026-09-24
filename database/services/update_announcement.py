@@ -11,6 +11,7 @@ import aiosqlite
 import discord
 
 from database.database import DATABASE
+from config import CUSTOMER_ROLE_ID
 
 log = logging.getLogger(__name__)
 _lock = asyncio.Lock()
@@ -143,8 +144,15 @@ async def announce_once(bot) -> bool:
                 return False
 
         sent = await channel.send(
+            content=f"<@&{CUSTOMER_ROLE_ID}>",
             embed=build_update_embed(),
-            allowed_mentions=discord.AllowedMentions.none(),
+            # Only the DDS customer role can be pinged; no @everyone or user mentions.
+            allowed_mentions=discord.AllowedMentions(
+                roles=[discord.Object(id=CUSTOMER_ROLE_ID)],
+                everyone=False,
+                users=False,
+                replied_user=False,
+            ),
         )
         await _save_posted(sent.id)
         log.info("Posted one DDS release announcement to %s: %s", CHANNEL_ID, sent.id)
