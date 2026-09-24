@@ -1331,6 +1331,47 @@ async def repair_review_awards():
     if not guild:
         return
 
+    # Resolve publication-unknown reviews without accidentally rewarding a
+    # review that never appeared in the public channel.
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT ticket_channel FROM review_point_awards
+            WHERE status='unpublished' ORDER BY created_at LIMIT 30
+        """) as cursor:
+            unknown_ids = {record[0] for record in await cursor.fetchall()}
+    if unknown_ids:
+        review_channel = guild.get_channel(REVIEWS_CHANNEL_ID)
+        if review_channel is None:
+            review_channel = discord.utils.get(guild.text_channels, name=REVIEW_CHANNEL_NAME)
+        published = {}
+        if review_channel:
+            try:
+                async for message in review_channel.history(limit=1000):
+                    if message.author.id != bot.user.id:
+                        continue
+                    for embed in message.embeds:
+                        if embed.title != "✨ 소중한 커미션 후기가 도착했습니다!":
+                            continue
+                        footer = embed.footer.text if embed.footer else ""
+                        match = re.search(r"Ticket ID:\\s*(\\d+)", footer or "")
+                        if match and int(match.group(1)) in unknown_ids:
+                            published[int(match.group(1))] = message.id
+                    if len(published) == len(unknown_ids):
+                        break
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[후기 게시 확인 실패] {exc}")
+        if published:
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute("BEGIN IMMEDIATE")
+                for ticket_id, message_id in published.items():
+                    await db.execute(
+                        """UPDATE review_point_awards
+                           SET status='pending', review_message_id=?
+                           WHERE ticket_channel=? AND status='unpublished'""",
+                        (message_id, ticket_id),
+                    )
+                await db.commit()
+
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("""
             SELECT ticket_channel, customer_id FROM review_point_awards
