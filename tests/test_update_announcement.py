@@ -25,8 +25,9 @@ class FakeChannel:
         for message in self.messages[:limit]:
             yield message
 
-    async def send(self, *, embed, allowed_mentions):
+    async def send(self, *, content, embed, allowed_mentions):
         self.send_calls += 1
+        self.content = content
         self.allowed_mentions = allowed_mentions
         message = SimpleNamespace(
             id=1000 + self.send_calls,
@@ -66,6 +67,13 @@ class OneTimeDDSAnnouncementTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first)
         self.assertFalse(second)
         self.assertEqual(self.channel.send_calls, 1)
+        self.assertEqual(self.channel.content, f"<@&{notice.CUSTOMER_ROLE_ID}>")
+        self.assertEqual(
+            [role.id for role in self.channel.allowed_mentions.roles],
+            [notice.CUSTOMER_ROLE_ID],
+        )
+        self.assertIs(self.channel.allowed_mentions.everyone, False)
+        self.assertIs(self.channel.allowed_mentions.users, False)
         async with aiosqlite.connect(notice.DATABASE) as db:
             async with db.execute(
                 "SELECT value FROM bot_settings WHERE key=?", (notice.RELEASE_KEY,)
