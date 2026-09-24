@@ -182,13 +182,13 @@ class DeveloperApplyModal(discord.ui.Modal, title="개발자 지원"):
                 )
 
         # 개발자 지원 전용 카테고리가 있다면 지정, 없으면 기본 생성
-        category = discord.utils.get(guild.categories, name="💻 개발자 지원")
+        category = await get_or_create_ticket_category(guild, "개발자 지원")
 
         ticket_channel = await guild.create_text_channel(
-            name=f"개발자지원-{user.name}",
+            name=ticket_name("개발자 지원", user),
             category=category,
             overwrites=overwrites,
-            topic=str(user.id),
+            topic=f"손님 ID: {user.id} | 카테고리: 개발자 지원 | 담당: 미지정",
             reason=f"{user}의 개발자 지원 티켓"
         )
 
