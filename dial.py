@@ -29,7 +29,7 @@ from database.services.points import (
 )
 from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
 from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket
-from database.services.point_ranking import refresh_point_ranking
+from database.services.point_ranking import build_point_embed, refresh_point_ranking
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -1284,38 +1284,7 @@ async def on_guild_role_create(role: discord.Role):
 # ==================== [포인트 랭킹 패널 헬퍼] ====================
 
 async def build_point_ranking_embed(guild: discord.Guild):
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("""
-            SELECT user_id, points 
-            FROM user_points 
-            ORDER BY points DESC 
-            LIMIT 10
-        """) as cursor:
-            rows = await cursor.fetchall()
-
-    embed = discord.Embed(
-        title="🏆 Dialian 포인트 랭킹 (TOP 10)",
-        description="실시간으로 동기화되는 포인트 순위입니다! ✨",
-        color=discord.Color.gold(),
-        timestamp=discord.utils.utcnow()
-    )
-
-    if not rows:
-        embed.add_field(name="📊 순위 정보", value="아직 적립된 포인트 데이터가 없습니다.", inline=False)
-    else:
-        medals = ["🥇 1위", "🥈 2위", "🥉 3위"]
-        ranking_list = []
-        for idx, (user_id, points) in enumerate(rows, start=1):
-            member = await fetch_member_or_none(guild, user_id) if guild else None
-            user_display = member.mention if member else f"알 수 없는 유저(`{user_id}`)"
-            rank_tag = medals[idx - 1] if idx <= 3 else f"**{idx}위**"
-            ranking_list.append(f"{rank_tag} | {user_display} — **`{points:,} P`**")
-
-        embed.add_field(name="📊 실시간 TOP 10", value="\n".join(ranking_list), inline=False)
-
-    embed.set_footer(text="자동 동기화 주기 작동 중")
-    return embed
-
+    return await build_point_embed(guild)
 
 async def update_point_ranking_message(bot_instance):
     try:
@@ -1349,6 +1318,8 @@ async def repair_review_awards():
     ranking_channel = bot.get_channel(POINT_RANKING_CHANNEL_ID)
     if ranking_channel:
         guild = ranking_channel.guild
+    if not guild and len(bot.guilds) == 1:
+        guild = bot.guilds[0]
     if not guild:
         return
 
@@ -2026,7 +1997,7 @@ async def audit_september_reviews(ctx):
         embed.add_field(
             name="확인 필요 (최근 최대 15건)",
             value="\n".join(
-                f"티켓 \`{ticket_id}\` · <@{user_id}> · {stars}점"
+                f"티켓 `{ticket_id}` · <@{user_id}> · {stars}점"
                 for ticket_id, user_id, stars, _, _ in unverified[:15]
             )[:1024],
             inline=False,
@@ -2034,9 +2005,9 @@ async def audit_september_reviews(ctx):
     embed.add_field(
         name="복구 방법",
         value="후기 채널 게시물 및 과거 포인트 내역을 먼저 확인한 뒤 "
-              "\`!후기포인트복구 티켓ID 단품\` 또는 "
-              "\`!후기포인트복구 티켓ID 2+1\` / "
-              "\`!후기포인트복구 티켓ID 3+1\`",
+              "`!후기포인트복구 티켓ID 단품` 또는 "
+              "`!후기포인트복구 티켓ID 2+1` / "
+              "`!후기포인트복구 티켓ID 3+1`",
         inline=False,
     )
     await ctx.send(embed=embed)
@@ -2052,7 +2023,7 @@ async def restore_september_review(ctx, ticket_id: int, bundle: str):
         "3+1": REVIEW_POINTS_3_PLUS_1,
     }
     if bundle not in amounts:
-        return await ctx.send("묶음 종류는 \`단품\`, \`2+1\`, \`3+1\` 중 하나여야 합니다.")
+        return await ctx.send("묶음 종류는 `단품`, `2+1`, `3+1` 중 하나여야 합니다.")
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("""
             SELECT r.customer_id, a.status
@@ -2076,7 +2047,7 @@ async def restore_september_review(ctx, ticket_id: int, bundle: str):
     if not changed:
         return await ctx.send("이미 지급된 후기입니다. 중복 적립하지 않았습니다.")
     await ctx.send(
-        f"✅ 티켓 \`{ticket_id}\`의 후기 지급을 수동 승인했습니다. "
+        f"✅ 티켓 `{ticket_id}`의 후기 지급을 수동 승인했습니다. "
         f"<@{row[0]}> +{amount}P · 현재 {total}P"
     )
     await log_security_event(
