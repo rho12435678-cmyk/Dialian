@@ -216,4 +216,14 @@ class SimpleTicketModal(discord.ui.Modal):
                 await ticket_channel.send("💳 결제 및 티켓 관리", view=PaymentView(ticket_channel, self.selected_designer))
                 await ticket_channel.send("🔒 티켓 종료 / 🗑️ 티켓 삭제", view=TicketCloseView(ticket_channel))
 
+        # A direct link is useful when a member has hidden optional channels in
+        # Discord Browse Channels. The bot cannot change client preferences.
+        try:
+            await user.send(
+                f"📩 DDS 티켓이 생성되었습니다.\\n"
+                f"분야: {self.COMMISSION_NAME} · 담당: {designer_mention}\\n"
+                f"바로가기: {ticket_channel.jump_url}"
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
