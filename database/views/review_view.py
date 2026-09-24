@@ -218,7 +218,7 @@ class StarRatingView(discord.ui.View):
                     await db.execute(
                         """INSERT INTO review_point_awards
                            (ticket_channel, customer_id, amount, status)
-                           VALUES (?, ?, ?, 'pending')""",
+                           VALUES (?, ?, ?, 'unpublished')""",
                         (channel.id, interaction.user.id, award),
                     )
                 await db.commit()
@@ -271,11 +271,23 @@ class StarRatingView(discord.ui.View):
                         "DELETE FROM reviews WHERE ticket_channel = ?", (channel.id,)
                     )
                     await db.execute(
-                        "DELETE FROM review_point_awards WHERE ticket_channel=? AND status='pending'",
+                        "DELETE FROM review_point_awards WHERE ticket_channel=? AND status='unpublished'",
                         (channel.id,),
                     )
                     await db.commit()
                 raise
+
+            # Only confirmed public postings can become payout-eligible.
+            # If the process crashes between posting and recording this update,
+            # the reconciler checks the post's ticket-ID footer before retrying.
+            async with aiosqlite.connect(DATABASE) as db:
+                await db.execute(
+                    """UPDATE review_point_awards
+                       SET status='pending', review_message_id=?
+                       WHERE ticket_channel=? AND status='unpublished'""",
+                    (sent_review.id, channel.id),
+                )
+                await db.commit()
 
             role_notice = ""
             try:
