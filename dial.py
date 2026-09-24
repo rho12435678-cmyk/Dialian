@@ -25,8 +25,11 @@ from database.services.points import (
     add_user_points,
     get_user_points,
     process_daily_attendance,
+    credit_review_award,
 )
 from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
+from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket
+from database.services.point_ranking import refresh_point_ranking
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -532,7 +535,8 @@ class DevApplyModal(ui.Modal, title="💻 개발자 지원 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-지원-미지정-{clean_username}",
+            name=ticket_name("개발자 지원", user),
+            category=await get_or_create_ticket_category(guild, "개발자 지원"),
             reason=f"{user.display_name} 님의 개발자 지원 티켓",
             overwrites=overwrites,
             topic=f"손님 ID: {user.id} | 카테고리: 개발자 지원 | 담당 디자이너: 미지정"
@@ -604,7 +608,8 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         }
 
         channel = await guild.create_text_channel(
-            name=f"티켓-파트너-미지정-{clean_username}",
+            name=ticket_name("파트너 문의", user),
+            category=await get_or_create_ticket_category(guild, "파트너 문의"),
             reason=f"{user.display_name} 님의 파트너 문의 티켓",
             overwrites=overwrites,
             topic=f"손님 ID: {user.id} | 카테고리: 파트너 문의 | 담당 디자이너: 미지정"
@@ -852,6 +857,9 @@ class DialianBot(commands.Bot):
 
         if not auto_update_monthly_stats.is_running():
             auto_update_monthly_stats.start()
+
+        if not repair_review_awards.is_running():
+            repair_review_awards.start()
 
 
 intents = discord.Intents.default()
@@ -1331,6 +1339,39 @@ async def update_point_ranking_message(bot_instance):
         await message.edit(embed=embed)
     except Exception as e:
         print(f"[랭킹 패널 갱신 오류] {e}")
+
+
+# ==================== [후기 포인트 보류 자동 복구 및 랭킹 재동기화] ====================
+
+@tasks.loop(minutes=3)
+async def repair_review_awards():
+    guild = None
+    ranking_channel = bot.get_channel(POINT_RANKING_CHANNEL_ID)
+    if ranking_channel:
+        guild = ranking_channel.guild
+    if not guild:
+        return
+
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("""
+            SELECT ticket_channel, customer_id FROM review_point_awards
+            WHERE status='pending' ORDER BY created_at LIMIT 30
+        """) as cursor:
+            pending = await cursor.fetchall()
+
+    for ticket_id, customer_id in pending:
+        try:
+            member = guild.get_member(customer_id) or discord.Object(id=customer_id)
+            await credit_review_award(guild, member, ticket_id)
+        except Exception as exc:
+            print(f"[후기 포인트 자동 복구 실패] ticket={ticket_id} {exc}")
+
+    await refresh_point_ranking(guild)
+
+
+@repair_review_awards.before_loop
+async def before_repair_review_awards():
+    await bot.wait_until_ready()
 
 
 # ==================== [채널 유효성 및 일일 제한 헬퍼] ====================
