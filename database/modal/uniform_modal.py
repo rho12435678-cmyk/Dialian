@@ -248,8 +248,8 @@ class PurchaseModal(discord.ui.Modal):
         # Discord Browse Channels. The bot cannot change client preferences.
         try:
             await user.send(
-                f"📩 DDS 티켓이 생성되었습니다.\\n"
-                f"분야: {self.COMMISSION_NAME} · 담당: {designer_mention}\\n"
+                f"📩 DDS 티켓이 생성되었습니다.\n"
+                f"분야: {self.COMMISSION_NAME} · 담당: {designer_mention}\n"
                 f"바로가기: {ticket_channel.jump_url}"
             )
         except (discord.Forbidden, discord.HTTPException):
