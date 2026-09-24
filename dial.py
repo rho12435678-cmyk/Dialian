@@ -2039,6 +2039,11 @@ async def force_refresh_ranking(ctx):
 @commands.has_permissions(administrator=True)
 async def audit_september_reviews(ctx):
     """Report September 2026 legacy records without guessing prior rewards."""
+    if ctx.channel.id != SECURITY_LOG_CHANNEL_ID:
+        return await ctx.send(
+            f"🔒 보안실 <#{SECURITY_LOG_CHANNEL_ID}>에서만 점검할 수 있습니다.",
+            delete_after=10,
+        )
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("""
             SELECT r.ticket_channel, r.customer_id, r.stars,
@@ -2111,6 +2116,11 @@ async def audit_september_reviews(ctx):
 @commands.guild_only()
 @commands.has_permissions(administrator=True)
 async def restore_september_review(ctx, ticket_id: int, bundle: str):
+    if ctx.channel.id != SECURITY_LOG_CHANNEL_ID:
+        return await ctx.send(
+            f"🔒 보안실 <#{SECURITY_LOG_CHANNEL_ID}>에서만 복구할 수 있습니다.",
+            delete_after=10,
+        )
     amounts = {
         "단품": REVIEW_POINTS_SINGLE,
         "2+1": REVIEW_POINTS_2_PLUS_1,
