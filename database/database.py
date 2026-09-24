@@ -24,7 +24,10 @@ async def connect():
 
 async def create_tables():
     """모든 시스템 테이블 생성 및 스키마 마이그레이션을 수행합니다."""
+    from database.services.roblox_verification import create_verification_tables
+
     async with aiosqlite.connect(DATABASE) as db:
+        await create_verification_tables(db)
 
         # 1. 커미션 및 지원 티켓
         await db.execute("""

@@ -6,4 +6,5 @@ bot.pid
 bot.log
 deploy-backups/
 __pycache__/
+.venv/
 *.py[cod]

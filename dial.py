@@ -25,6 +25,7 @@ from database.services.points import (
     get_user_points,
     process_daily_attendance,
 )
+from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -36,7 +37,7 @@ from database.views.close_ticket import (
 from database.views.designer_select import DesignerView
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
-from database.views.verify_view import VerifyView
+from database.views.verify_view import RobloxConfirmView, VerifyView
 
 TOKEN = os.getenv("TOKEN")
 
@@ -816,6 +817,7 @@ class DialianBot(commands.Bot):
 
         self.add_view(CategorySelectView())
         self.add_view(VerifyView())
+        self.add_view(RobloxConfirmView())
         self.add_view(TicketCloseView())
         self.add_view(ClaimTicketView())
         self.add_view(TicketCallView())
@@ -1513,13 +1515,51 @@ async def on_command_error(ctx, error):
 
 # ==================== [명령어 모음] ====================
 
+@bot.command(name="인증패널")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+@commands.bot_has_permissions(send_messages=True, embed_links=True)
+async def verification_panel(ctx):
+    embed = discord.Embed(
+        title="로블록스 인증",
+        description=(
+            "로블록스 계정을 인증하면 서버 닉네임이 로블록스 사용자이름으로 바뀌고 손님 역할이 지급됩니다.\n\n"
+            f"인증 조건: 계정 생성 후 **{MIN_ACCOUNT_AGE_DAYS}일 이상**, "
+            f"착용 아이템의 현재 판매가 합계 **{MIN_AVATAR_ROBUX}로벅 이상**\n\n"
+            "기존 회원은 **인증 정보 업데이트**를 눌러주세요.\n"
+            "아래 버튼에서 시작해주세요. 비밀번호나 쿠키는 필요하지 않습니다."
+        ),
+        color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed, view=VerifyView())
+
+
+@bot.command(name="인증업데이트")
+@commands.guild_only()
+@commands.cooldown(1, 30, commands.BucketType.member)
+@commands.bot_has_permissions(send_messages=True, embed_links=True)
+async def verification_update(ctx):
+    embed = discord.Embed(
+        title="로블록스 인증 정보 업데이트",
+        description=(
+            "아래 **인증 정보 업데이트**를 누르면 연결된 로블록스 계정의 인증 조건을 다시 검사하고 "
+            "닉네임과 손님 역할을 갱신합니다.\n"
+            "아직 계정을 연결하지 않았다면 **로블록스 인증하기**를 눌러주세요.\n\n"
+            f"조건: 계정 생성 후 {MIN_ACCOUNT_AGE_DAYS}일 이상 · "
+            f"현재 착용 아이템 판매가 합계 {MIN_AVATAR_ROBUX}로벅 이상"
+        ),
+        color=discord.Color.blurple(),
+    )
+    await ctx.send(embed=embed, view=VerifyView(), delete_after=180)
+
+
 @bot.command(name="명령어", aliases=["help", "도움말"])
 async def command_list(ctx):
     embed = discord.Embed(
         title="Dialian 명령어 목록",
         description=(
             "**[티켓 및 일반 서비스]**\n"
-            "`!티켓생성` `!계좌전송 [@유저]` `!티켓닫기` `!티켓삭제` `!인증패널` `!담당 @유저` `!호출`\n"
+            "`!티켓생성` `!계좌전송 [@유저]` `!티켓닫기` `!티켓삭제` `!인증패널` `!인증업데이트` `!담당 @유저` `!호출`\n"
             "`!진행 0|25|50|75|100` `!예상 [시간]` `!완료` `!티켓정보` `!고객` `!소유자변경 @유저` `!청소 1~100`\n"
             "`!계좌등록 @유저 은행 계좌번호 예금주` `!계좌목록` `!계좌삭제 @유저`\n"
             "`!통계` `!진행티켓` `!강제종료`\n\n"
