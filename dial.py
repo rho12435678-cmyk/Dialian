@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, time, timedelta, timezone
 import os
+from pathlib import Path
 import random
 import re
 import subprocess
@@ -2101,6 +2102,34 @@ async def audit_september_reviews(ctx):
             )[:1024],
             inline=False,
         )
+    # Earlier builds mistakenly used database/database.db for points. Detect
+    # that file read-only; differences are diagnostic, NOT unpaid rewards.
+    old_path = Path("database/database.db")
+    if old_path.is_file():
+        try:
+            async with aiosqlite.connect(old_path.resolve().as_uri() + "?mode=ro",
+                                         uri=True) as legacy:
+                async with legacy.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='user_points'"
+                ) as cursor:
+                    exists = await cursor.fetchone()
+                if exists:
+                    async with legacy.execute(
+                        "SELECT COUNT(*) FROM user_points"
+                    ) as cursor:
+                        old_users = (await cursor.fetchone())[0]
+                    embed.add_field(
+                        name="⚠️ 구버전 포인트 DB 감지",
+                        value=(
+                            f"과거 `database/database.db` 파일에 **{old_users}명**의 "
+                            "포인트 기록이 남아 있습니다. 현재 DB로 이미 이전되었는지는 "
+                            "확인되지 않았습니다. 이 값을 자동 합산하지 마세요."
+                        ),
+                        inline=False,
+                    )
+        except (OSError, aiosqlite.Error) as exc:
+            print(f"[구버전 포인트 DB 읽기 실패] {exc}")
+
     embed.add_field(
         name="복구 방법",
         value="후기 채널 게시물 및 과거 포인트 내역을 먼저 확인한 뒤 "
