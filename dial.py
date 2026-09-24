@@ -1353,7 +1353,7 @@ async def repair_review_awards():
                         if embed.title != "✨ 소중한 커미션 후기가 도착했습니다!":
                             continue
                         footer = embed.footer.text if embed.footer else ""
-                        match = re.search(r"Ticket ID:\\s*(\\d+)", footer or "")
+                        match = re.search(r"Ticket ID:\s*(\d+)", footer or "")
                         if match and int(match.group(1)) in unknown_ids:
                             published[int(match.group(1))] = message.id
                     if len(published) == len(unknown_ids):
