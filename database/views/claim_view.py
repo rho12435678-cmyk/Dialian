@@ -3,7 +3,8 @@ import aiosqlite
 from database.database import DATABASE
 from database.views.close_ticket import has_designer_role, TicketCloseView
 from database.views.payment_view import PaymentView
-from database.services.ticket_layout import organize_existing_ticket
+from database.services.ticket_layout import organize_existing_ticket, ticket_kind
+from config import DESIGNER_ROLE_IDS
 
 
 class ClaimTicketView(discord.ui.View):
@@ -30,6 +31,26 @@ class ClaimTicketView(discord.ui.View):
             )
 
         channel = interaction.channel
+        # A uniform designer must not accidentally take an unassigned GFX job
+        # (and vice versa). Administrators can explicitly assign either type.
+        async with aiosqlite.connect(DATABASE) as db:
+            async with db.execute(
+                "SELECT category FROM commissions WHERE ticket_channel=?",
+                (channel.id,),
+            ) as cursor:
+                category_row = await cursor.fetchone()
+        if category_row is None:
+            return await interaction.response.send_message(
+                "❌ 해당 티켓의 정보를 찾지 못했습니다.", ephemeral=True
+            )
+        kind = ticket_kind(category_row[0])
+        role_id = DESIGNER_ROLE_IDS.get(kind)
+        if (role_id and not member.guild_permissions.administrator
+                and not any(role.id == role_id for role in member.roles)):
+            return await interaction.response.send_message(
+                "❌ 해당 커미션 분야의 담당 디자이너만 이 티켓을 맡을 수 있습니다.",
+                ephemeral=True,
+            )
 
         # DB에서 조건부 UPDATE로 담당권을 원자적으로 획득합니다.
         async with aiosqlite.connect(DATABASE) as db:
