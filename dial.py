@@ -28,7 +28,7 @@ from database.services.points import (
     credit_review_award,
 )
 from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
-from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket
+from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket, designer_tier
 from database.services.point_ranking import build_point_embed, refresh_point_ranking
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
@@ -1161,6 +1161,24 @@ async def on_member_join(member: discord.Member):
 async def on_member_update(before: discord.Member, after: discord.Member):
     if before.roles != after.roles:
         await update_designer_tier_panel_message(bot)
+        if designer_tier(before, "GFX") != designer_tier(after, "GFX"):
+            # Keep the grade in existing GFX ticket names accurate after role changes.
+            async with aiosqlite.connect(DATABASE) as db:
+                async with db.execute("""
+                    SELECT ticket_channel, customer_id, category FROM commissions
+                    WHERE designer_id=? AND LOWER(category) LIKE '%gfx%'
+                      AND status NOT IN ('closed', 'completed', 'cancelled')
+                    ORDER BY created_at DESC LIMIT 100
+                """, (after.id,)) as cursor:
+                    tickets = await cursor.fetchall()
+            for channel_id, customer_id, category in tickets:
+                channel = after.guild.get_channel(channel_id)
+                if channel:
+                    try:
+                        customer = after.guild.get_member(customer_id)
+                        await organize_existing_ticket(channel, category, customer, after)
+                    except (discord.Forbidden, discord.HTTPException, RuntimeError) as exc:
+                        print(f"[GFX 등급 변경에 따른 티켓명 갱신 실패] {exc}")
 
 
 @bot.event
