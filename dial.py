@@ -1257,6 +1257,10 @@ async def on_guild_channel_create(channel: discord.abc.GuildChannel):
         await asyncio.sleep(1.0)
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
             if entry.target.id == channel.id and (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
+                # Legitimate DDS auto-created categories/tickets must not trigger
+                # anti-raid sanctions against the bot itself.
+                if bot.user and entry.user.id == bot.user.id:
+                    break
                 await check_and_punish_mass_action(guild, entry.user.id, "채널 생성", MASS_CHANNEL_LIMIT)
                 break
     except discord.Forbidden:
