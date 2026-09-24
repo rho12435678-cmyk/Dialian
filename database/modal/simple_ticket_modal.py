@@ -11,6 +11,7 @@ from database.views.close_ticket import TicketCloseView
 from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
+from database.services.ticket_layout import get_or_create_ticket_category, ticket_name
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
     release_ticket_creation_lock,
@@ -116,19 +117,15 @@ class SimpleTicketModal(discord.ui.Modal):
         # 채널명 및 토픽 가독성 개선 (카테고리/디자이너 구별)
         # --------------------------------------------------
         # 영문/숫자 외 디스코드 채널명 호환을 위한 단순 정리
-        safe_category = re.sub(r'[^a-zA-Z0-9가-힣]', '', self.COMMISSION_NAME).lower()
-        safe_designer = re.sub(r'[^a-zA-Z0-9가-힣]', '', designer_name).lower()
-        safe_user = re.sub(r'[^a-zA-Z0-9가-힣]', '', user.display_name).lower()
-        time_suffix = str(int(time.time()))[-4:] # 중복 생성 시 채널명 충돌 방지용 고유 번호
-
-        # 채널명 예시: 티켓-gfx-홍길동-손님닉네임-1234 또는 티켓-복장-미지정-손님닉네임-5678
-        channel_name = f"티켓-{safe_category}-{safe_designer}-{safe_user}-{time_suffix}"
+        channel_name = ticket_name(self.COMMISSION_NAME, user, developer)
+        ticket_category = await get_or_create_ticket_category(guild, self.COMMISSION_NAME)
 
         # 채널 토픽에 카테고리, 디자이너, 손님 ID 명시
         channel_topic = f"손님 ID: {user.id} | 카테고리: {self.COMMISSION_NAME} | 담당 디자이너: {designer_name}"
 
         ticket_channel = await guild.create_text_channel(
             name=channel_name,
+            category=ticket_category,
             overwrites=overwrites,
             topic=channel_topic
         )
