@@ -30,6 +30,9 @@ jobs:
             git pull --ff-only origin main
 
             source venv/bin/activate
+            # Install before stopping the running bot: the venv may lack aiohttp.
+            python -m pip install -r requirements.txt
+            python -c "import aiohttp, aiosqlite, discord"
 
             export TOKEN="${{ secrets.TOKEN }}"
             export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
