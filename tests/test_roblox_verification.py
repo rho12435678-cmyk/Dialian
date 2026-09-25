@@ -251,71 +251,19 @@ class EligibilityTests(unittest.IsolatedAsyncioTestCase):
         p = service.parse_profile({"id": 123, "name": "TestUser", "created": "2020-01-01T09:00:00+09:00"})
         self.assertEqual(p.created_at, datetime(2020, 1, 1, tzinfo=timezone.utc))
 
-    async def test_young_account_skips_avatar_request(self):
-        with patch.object(service, "avatar_sale_total", new_callable=AsyncMock) as total:
-            with self.assertRaises(service.VerificationError):
-                await service.check_eligibility(self.profile(datetime.now(timezone.utc)))
-            total.assert_not_awaited()
+    async def test_eligibility_checks_only_account_age(self):
+        old = self.profile(datetime(2020, 1, 1, tzinfo=timezone.utc))
+        self.assertIsNone(await service.check_eligibility(old))
 
-    async def test_price_threshold_and_api_failure(self):
-        with patch.object(service, "avatar_sale_total", new_callable=AsyncMock) as total:
-            p = self.profile(datetime(2020, 1, 1, tzinfo=timezone.utc))
-            for value in (0, 4):
-                total.return_value = value
-                with self.assertRaises(service.VerificationError):
-                    await service.check_eligibility(p)
-            for value in (5, 100):
-                total.return_value = value
-                self.assertEqual(await service.check_eligibility(p), value)
-            total.side_effect = service.VerificationError("API down")
-            with self.assertRaises(service.VerificationError):
-                await service.check_eligibility(p)
+        young = self.profile(datetime.now(timezone.utc))
+        with self.assertRaises(service.VerificationError):
+            await service.check_eligibility(young)
 
-    async def test_current_prices_exclude_unavailable_or_invalid_prices(self):
-        cases = [
-            ({"price": 5}, 5), ({"price": 0}, 0), ({"price": -5}, 0),
-            ({"price": "5"}, 0), ({"price": True}, 0), ({}, 0),
-            ({"price": 50, "isOffSale": True}, 0),
-            ({"price": 50, "priceStatus": "Off Sale"}, 0),
-            ({"price": 50, "priceStatus": "Free"}, 0),
-            ({"priceStatus": "Free", "hasResellers": True, "lowestResalePrice": 5}, 0),
-            ({"price": 20, "hasResellers": True, "lowestResalePrice": 5}, 5),
-            ({"isOffSale": True, "hasResellers": True, "lowestResalePrice": 5}, 5),
-            ({"hasResellers": False, "lowestResalePrice": 5000}, 0),
-        ]
-        for item, expected in cases:
-            self.assertEqual(service.current_item_price(item), expected, item)
+    async def test_avatar_price_helpers_are_not_part_of_verification(self):
+        self.assertFalse(hasattr(service, "MIN_AVATAR_ROBUX"))
+        self.assertFalse(hasattr(service, "avatar_sale_total"))
+        self.assertFalse(hasattr(service, "current_item_price"))
 
-    async def test_worn_item_sum_deduplicates_assets_and_catalog_results(self):
-        with patch.object(service, "api_request", new_callable=AsyncMock) as api:
-            first = {"id": 10, "itemType": "Asset", "price": 2}
-            api.side_effect = [
-                {"assets": [{"id": 10}, {"id": 20}, {"id": 10}]},
-                {"data": [first, first, {"id": 20, "itemType": "Asset", "price": 3}]},
-            ]
-            self.assertEqual(await service.avatar_sale_total(123), 5)
-            self.assertEqual(len(api.call_args.kwargs["json"]["items"]), 2)
-
-    async def test_empty_avatar_value_is_zero(self):
-        with patch.object(service, "api_request", new_callable=AsyncMock) as api:
-            api.return_value = {"assets": []}
-            self.assertEqual(await service.avatar_sale_total(123), 0)
-            self.assertEqual(api.await_count, 1)
-
-    async def test_missing_or_unrelated_catalog_items_cannot_pass(self):
-        for response in ({"data": []}, {"data": [{"id": 99, "itemType": "Asset", "price": 1000}]},
-                         {"data": [{"id": 10, "itemType": "Bundle", "price": 1000}]}, {}):
-            with patch.object(service, "api_request", new_callable=AsyncMock) as api:
-                api.side_effect = [{"assets": [{"id": 10}]}, response]
-                with self.assertRaises(service.VerificationError):
-                    await service.avatar_sale_total(123)
-
-    async def test_invalid_avatar_is_rejected(self):
-        for response in ({}, {"assets": None}, {"assets": [{"id": "10"}]}):
-            with patch.object(service, "api_request", new_callable=AsyncMock) as api:
-                api.return_value = response
-                with self.assertRaises(service.VerificationError):
-                    await service.avatar_sale_total(123)
 
 
 class VerificationViewTests(unittest.IsolatedAsyncioTestCase):
