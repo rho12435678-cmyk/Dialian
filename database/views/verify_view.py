@@ -64,10 +64,10 @@ async def apply_verified_profile(interaction, profile, *, updated=False):
         # Do not attempt forbidden nickname/role edits on the guild owner.
         return await interaction.followup.send(
             f"✅ Roblox {'인증 정보 업데이트' if updated else '인증'} 완료! "
-            f"연결된 계정: **{discord.utils.escape_markdown(profile.name)}**\\n"
+            f"연결된 계정: **{discord.utils.escape_markdown(profile.name)}**\n"
             "서버 소유자는 Discord 제한으로 봇이 닉네임과 역할을 변경하지 않습니다. "
             "원하면 닉네임을 직접 변경해 주세요."
-            + ("\\nRoblox 소개란의 인증 코드는 이제 지워도 됩니다." if not updated else ""),
+            + ("\nRoblox 소개란의 인증 코드는 이제 지워도 됩니다." if not updated else ""),
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -86,7 +86,7 @@ async def apply_verified_profile(interaction, profile, *, updated=False):
         ) from exc
     await interaction.followup.send(
         f"{'업데이트' if updated else '인증'} 완료! "
-        f"서버 닉네임을 **{discord.utils.escape_markdown(profile.name)}**으로 설정했습니다.\\n"
+        f"서버 닉네임을 **{discord.utils.escape_markdown(profile.name)}**으로 설정했습니다.\n"
         + ("계정 생성일을 다시 확인했습니다." if updated
            else "로블록스 소개란의 인증 코드는 이제 지워도 됩니다."),
         ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
