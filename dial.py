@@ -28,7 +28,7 @@ from database.services.points import (
     process_daily_attendance,
     credit_review_award,
 )
-from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS, MIN_AVATAR_ROBUX
+from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS
 from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket, designer_tier
 from database.services.point_ranking import build_point_embed, refresh_point_ranking
 from database.services.update_announcement import announce_once, GUILD_ID as DDS_RELEASE_GUILD_ID
@@ -1632,8 +1632,7 @@ async def verification_panel(ctx):
         title="로블록스 인증",
         description=(
             "로블록스 계정을 인증하면 서버 닉네임이 로블록스 사용자이름으로 바뀌고 손님 역할이 지급됩니다.\n\n"
-            f"인증 조건: 계정 생성 후 **{MIN_ACCOUNT_AGE_DAYS}일 이상**, "
-            f"착용 아이템의 현재 판매가 합계 **{MIN_AVATAR_ROBUX}로벅 이상**\n\n"
+            f"인증 조건: 계정 생성 후 **{MIN_ACCOUNT_AGE_DAYS}일 이상**\n\n"
             "기존 회원은 **인증 정보 업데이트**를 눌러주세요.\n"
             "아래 버튼에서 시작해주세요. 비밀번호나 쿠키는 필요하지 않습니다."
         ),
@@ -1653,8 +1652,7 @@ async def verification_update(ctx):
             "아래 **인증 정보 업데이트**를 누르면 연결된 로블록스 계정의 인증 조건을 다시 검사하고 "
             "닉네임과 손님 역할을 갱신합니다.\n"
             "아직 계정을 연결하지 않았다면 **로블록스 인증하기**를 눌러주세요.\n\n"
-            f"조건: 계정 생성 후 {MIN_ACCOUNT_AGE_DAYS}일 이상 · "
-            f"현재 착용 아이템 판매가 합계 {MIN_AVATAR_ROBUX}로벅 이상"
+            f"조건: 계정 생성 후 {MIN_ACCOUNT_AGE_DAYS}일 이상"
         ),
         color=discord.Color.blurple(),
     )
