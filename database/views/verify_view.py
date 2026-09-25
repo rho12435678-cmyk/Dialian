@@ -73,7 +73,7 @@ async def apply_verified_profile(interaction, profile, *, updated=False):
     await interaction.followup.send(
         f"{'업데이트' if updated else '인증'} 완료! "
         f"서버 닉네임을 **{discord.utils.escape_markdown(profile.name)}**으로 설정했습니다.\n"
-        + ("계정 생성일과 착용 아이템 조건을 다시 확인했습니다." if updated
+        + ("계정 생성일을 다시 확인했습니다." if updated
            else "로블록스 소개란의 인증 코드는 이제 지워도 됩니다."),
         ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
     )
@@ -84,7 +84,7 @@ async def report_error(interaction, error):
         message = str(error)
     else:
         logger.error("Roblox verification failed", exc_info=(type(error), error, error.__traceback__))
-        message = "인증 처리 중 오류가 발생했습니다. 잠시 뒤 다시 시도해주세요."
+        message = "⚠️ 인증 중 오류가 발생했어요. 잠시 후 다시 시도하고, 반복되면 운영진에게 알려주세요."
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
     else:
@@ -93,7 +93,7 @@ async def report_error(interaction, error):
 
 class RobloxUsernameModal(discord.ui.Modal, title="로블록스 계정 인증"):
     username = discord.ui.TextInput(
-        label="로블록스 @사용자이름", placeholder="표시 이름이 아닌 @ 뒤의 사용자이름",
+        label="Roblox 사용자이름 (표시 이름 X)", placeholder="@사용자이름 (예: Roblox)",
         min_length=1, max_length=21,
     )
 
@@ -113,9 +113,9 @@ class RobloxUsernameModal(discord.ui.Modal, title="로블록스 계정 인증"):
                 title="로블록스 계정 소유 확인", color=discord.Color.blurple(),
                 description=(
                     f"대상 계정: **{discord.utils.escape_markdown(profile.name)}**\n\n"
-                    "로블록스 프로필의 **소개(About)**에 아래 코드를 추가하고 저장한 뒤, "
-                    "**인증 확인**을 눌러주세요. 기존 소개는 지우지 않아도 됩니다.\n\n"
-                    f"```\n{code}\n```\n코드는 10분 동안 유효합니다. 본인 계정에만 입력해주세요."
+                    "① 코드를 복사해 Roblox 프로필의 **소개(About)**에 붙여넣고 저장하세요.\n"
+                    "② 아래 **인증 확인** 버튼을 눌러주세요.\n\n"
+                    f"```\n{code}\n```\n⏳ 코드 유효 시간: 10분 · 비밀번호는 필요 없어요."
                 ),
             )
             view = RobloxConfirmView()
