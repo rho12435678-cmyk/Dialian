@@ -40,11 +40,13 @@ def check_permissions(interaction):
     guild = interaction.guild
     if guild is None or not isinstance(interaction.user, discord.Member):
         raise VerificationError("서버 안에서 인증해주세요.")
+    # The guild owner can prove Roblox account ownership even though Discord
+    # prevents bots from editing the server owner's nickname/roles.
+    if interaction.user.id == guild.owner_id:
+        return None
     me = guild.me
     if me is None or not me.guild_permissions.manage_nicknames:
         raise VerificationError("봇에 '별명 관리' 권한이 필요합니다. 서버 관리자에게 알려주세요.")
-    if interaction.user.id == guild.owner_id:
-        raise VerificationError("서버 소유자의 닉네임은 봇이 바꿀 수 없습니다. 다른 계정으로 인증해주세요.")
     if interaction.user.top_role >= me.top_role:
         raise VerificationError("봇 역할을 본인의 가장 높은 역할보다 위로 옮겨야 닉네임을 바꿀 수 있습니다.")
     role = guild.get_role(CUSTOMER_ROLE_ID)
@@ -57,6 +59,18 @@ def check_permissions(interaction):
 
 async def apply_verified_profile(interaction, profile, *, updated=False):
     role = check_permissions(interaction)
+    if interaction.user.id == interaction.guild.owner_id:
+        # Roblox proof and account-age rules are checked by VerificationStore.
+        # Do not attempt forbidden nickname/role edits on the guild owner.
+        return await interaction.followup.send(
+            f"✅ Roblox {'인증 정보 업데이트' if updated else '인증'} 완료! "
+            f"연결된 계정: **{discord.utils.escape_markdown(profile.name)}**\\n"
+            "서버 소유자는 Discord 제한으로 봇이 닉네임과 역할을 변경하지 않습니다. "
+            "원하면 닉네임을 직접 변경해 주세요."
+            + ("\\nRoblox 소개란의 인증 코드는 이제 지워도 됩니다." if not updated else ""),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
     try:
         await interaction.user.edit(nick=profile.name, reason="Roblox account verified")
         if role not in interaction.user.roles:
@@ -72,12 +86,11 @@ async def apply_verified_profile(interaction, profile, *, updated=False):
         ) from exc
     await interaction.followup.send(
         f"{'업데이트' if updated else '인증'} 완료! "
-        f"서버 닉네임을 **{discord.utils.escape_markdown(profile.name)}**으로 설정했습니다.\n"
+        f"서버 닉네임을 **{discord.utils.escape_markdown(profile.name)}**으로 설정했습니다.\\n"
         + ("계정 생성일을 다시 확인했습니다." if updated
            else "로블록스 소개란의 인증 코드는 이제 지워도 됩니다."),
         ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
     )
-
 
 async def report_error(interaction, error):
     if isinstance(error, VerificationError):
