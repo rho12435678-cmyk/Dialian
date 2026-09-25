@@ -92,9 +92,12 @@ def _urllib_request(method, url, payload):
 async def api_request(method, path, *, base=API_BASE, **kwargs):
     # Only the two required public Roblox endpoints are used. No cookies or
     # credentials are sent, and an arbitrary caller-supplied URL is not accepted.
-    if base != API_BASE or (method, path.split("?")[0]) not in (
-        ("POST", "/usernames/users"),
-    ) and not (base == API_BASE and method == "GET" and re.fullmatch(r"/users/\\d+", path)):
+    supported = (
+        (method == "POST" and path == "/usernames/users")
+        or (method == "GET" and path.startswith("/users/")
+            and path[len("/users/"):].isdigit())
+    )
+    if base != API_BASE or not supported:
         raise ValueError("Unsupported Roblox API endpoint")
     payload = kwargs.pop("json", None)
     if kwargs:
