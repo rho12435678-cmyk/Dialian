@@ -193,40 +193,69 @@ class RobloxApiTests(unittest.IsolatedAsyncioTestCase):
                     await service.lookup_username("TestUser")
 
     async def test_http_errors_become_user_facing_errors(self):
-        with patch.object(service.aiohttp, "ClientSession") as client:
-            session = client.return_value.__aenter__.return_value
-            session.request = MagicMock()
-            response = session.request.return_value.__aenter__.return_value
-            for status in (429, 404, 500):
-                response.status = status
+        import io
+        import urllib.error
+        for status in (429, 404, 500):
+            error = urllib.error.HTTPError(
+                "https://users.roblox.com/v1/users/123",
+                status, "Test error", {}, io.BytesIO(),
+            )
+            with patch.object(service.urllib.request, "urlopen", side_effect=error):
                 with self.assertRaises(service.VerificationError):
                     await service.api_request("GET", "/users/123")
 
     async def test_timeout_is_retryable(self):
-        with patch.object(service.aiohttp, "ClientSession") as client:
-            client.return_value.__aenter__.side_effect = asyncio.TimeoutError()
-            with self.assertRaises(service.VerificationError):
+        with patch.object(service.urllib.request, "urlopen", side_effect=TimeoutError()):
+            with self.assertRaisesRegex(service.VerificationError, "연결이 불안정"):
                 await service.api_request("GET", "/users/123")
 
-    async def test_roblox_profile_request_never_references_removed_catalog_api(self):
-        with patch.object(service.aiohttp, "ClientSession") as client:
-            session = client.return_value.__aenter__.return_value
-            response = session.request.return_value.__aenter__.return_value
-            response.status = 200
-            response.json = AsyncMock(return_value={"id": 123, "name": "TestUser"})
+    async def test_profile_request_uses_working_stdlib_transport(self):
+        reply = MagicMock()
+        reply.status = 200
+        reply.read.return_value = b'{"id":123,"name":"TestUser"}'
+        with patch.object(service.urllib.request, "urlopen") as opener:
+            opener.return_value.__enter__.return_value = reply
             data = await service.api_request("GET", "/users/123")
             self.assertEqual(data["id"], 123)
-            session.request.assert_called_once_with(
-                "GET", "https://users.roblox.com/v1/users/123",
+            args, kwargs = opener.call_args
+            self.assertEqual(args[0].full_url, "https://users.roblox.com/v1/users/123")
+            self.assertEqual(args[0].get_method(), "GET")
+            self.assertEqual(kwargs["timeout"], 15)
+
+    async def test_username_post_preserves_json_payload(self):
+        reply = MagicMock()
+        reply.status = 200
+        reply.read.return_value = b'{"data":[{"id":123,"name":"TestUser"}]}'
+        with patch.object(service.urllib.request, "urlopen") as opener:
+            opener.return_value.__enter__.return_value = reply
+            data = await service.api_request(
+                "POST", "/usernames/users",
+                json={"usernames": ["TestUser"], "excludeBannedUsers": True},
             )
+            self.assertEqual(data["data"][0]["name"], "TestUser")
+            request = opener.call_args.args[0]
+            self.assertEqual(request.get_method(), "POST")
+            self.assertEqual(request.get_header("Content-type"), "application/json")
+            self.assertEqual(service.json.loads(request.data)["usernames"], ["TestUser"])
 
     async def test_roblox_profile_rate_limit_has_user_facing_message(self):
-        with patch.object(service.aiohttp, "ClientSession") as client:
-            response = client.return_value.__aenter__.return_value.request.return_value.__aenter__.return_value
-            response.status = 429
+        import io
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://users.roblox.com/v1/users/123",
+            429, "Rate limit", {}, io.BytesIO(),
+        )
+        with patch.object(service.urllib.request, "urlopen", side_effect=error):
             with self.assertRaisesRegex(service.VerificationError, "요청이 많아요"):
                 await service.api_request("GET", "/users/123")
 
+    async def test_unexpected_endpoints_are_rejected(self):
+        with patch.object(service.urllib.request, "urlopen") as opener:
+            for method, path in (("GET", "/"), ("GET", "/users/../admins"),
+                                 ("POST", "/users/123"), ("GET", "/usernames/users")):
+                with self.assertRaises(ValueError):
+                    await service.api_request(method, path)
+            opener.assert_not_called()
 
 
 class EligibilityTests(unittest.IsolatedAsyncioTestCase):
