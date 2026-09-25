@@ -14,10 +14,7 @@ from database.database import DATABASE
 CHALLENGE_TTL = 600
 REQUEST_COOLDOWN = 10
 API_BASE = "https://users.roblox.com/v1"
-AVATAR_API_BASE = "https://avatar.roblox.com/v1"
-CATALOG_API_BASE = "https://catalog.roblox.com/v1"
 MIN_ACCOUNT_AGE_DAYS = 30
-MIN_AVATAR_ROBUX = 5
 
 
 class VerificationError(Exception):
@@ -133,63 +130,13 @@ def check_account_age(profile):
         )
 
 
-def current_item_price(item):
-    if item.get("priceStatus") == "Free" and item.get("isOffSale") is not True:
-        return 0
-    prices = []
-    # Unavailable prices and historical prices must never count as current value.
-    if (item.get("isOffSale") is not True
-            and item.get("priceStatus") in (None, "")
-            and type(item.get("price")) is int and item["price"] >= 0):
-        prices.append(item["price"])
-    if item.get("hasResellers") is True:
-        for key in ("lowestResalePrice", "lowestPrice"):
-            if type(item.get(key)) is int and item[key] > 0:
-                prices.append(item[key])
-    return min(prices) if prices else 0
-
-
-async def avatar_sale_total(roblox_id):
-    avatar = await api_request("GET", f"/users/{roblox_id}/avatar", base=AVATAR_API_BASE)
-    if not isinstance(avatar, dict) or not isinstance(avatar.get("assets"), list):
-        raise VerificationError("착용 아이템을 확인할 수 없습니다. 잠시 뒤 다시 시도해주세요.")
-    ids = set()
-    for asset in avatar["assets"]:
-        if not isinstance(asset, dict) or type(asset.get("id")) is not int or asset["id"] <= 0:
-            raise VerificationError("착용 아이템 정보가 올바르지 않습니다. 잠시 뒤 다시 시도해주세요.")
-        ids.add(asset["id"])
-    ordered_ids = sorted(ids)
-    total = 0
-    for offset in range(0, len(ordered_ids), 30):
-        batch = ordered_ids[offset:offset + 30]
-        details = await api_request("POST", "/catalog/items/details", base=CATALOG_API_BASE,
-                                    json={"items": [{"itemType": "Asset", "id": i} for i in batch]})
-        if not isinstance(details, dict) or not isinstance(details.get("data"), list):
-            raise VerificationError("아이템 가격을 확인할 수 없습니다. 잠시 뒤 다시 시도해주세요.")
-        seen = set()
-        for item in details["data"]:
-            if (not isinstance(item, dict) or type(item.get("id")) is not int
-                    or item["id"] not in batch or item.get("itemType") not in ("Asset", 1)):
-                raise VerificationError("아이템 가격 정보가 올바르지 않습니다. 잠시 뒤 다시 시도해주세요.")
-            if item["id"] not in seen:
-                total += current_item_price(item)
-                seen.add(item["id"])
-        if seen != set(batch):
-            raise VerificationError("일부 착용 아이템을 조회하지 못했습니다. 잠시 뒤 다시 시도해주세요.")
-    return total
-
 
 async def check_eligibility(profile):
+    """DDS verification policy: account must be at least 30 days old.
+
+    Avatar/catalog Robux value is intentionally not part of verification.
+    """
     check_account_age(profile)
-    total = await avatar_sale_total(profile.id)
-    if total < MIN_AVATAR_ROBUX:
-        raise VerificationError(
-            f"현재 착용 아이템의 판매가 합계가 {MIN_AVATAR_ROBUX}로벅 이상이어야 합니다. "
-            f"확인된 합계: {total}로벅.\n"
-            "무료·판매 중단·가격 미확인·번들 전용 아이템은 합산하지 않습니다. "
-            "개별 판매 중인 아이템을 착용한 뒤 다시 시도해주세요."
-        )
-    return total
 
 
 async def fetch_eligible_profile(roblox_id):
