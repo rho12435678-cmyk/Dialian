@@ -31,7 +31,7 @@ from database.services.points import (
 from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS
 from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket, designer_tier
 from database.services.point_ranking import build_point_embed, refresh_point_ranking
-from database.services.update_announcement import announce_once, GUILD_ID as DDS_RELEASE_GUILD_ID
+from database.services.update_announcement import announce_once, announce_family_preview_once, GUILD_ID as DDS_RELEASE_GUILD_ID
 from database.services.ui_poll_announcement import publish_ui_poll_once
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
@@ -841,6 +841,19 @@ async def before_publish_combined_dds_update():
 
 
 @tasks.loop(count=1)
+async def publish_dds_family_preview():
+    try:
+        await announce_family_preview_once(bot)
+    except Exception as exc:
+        print(f"[DDS FAMILY 사전 공지 실패] {type(exc).__name__}: {exc}")
+
+
+@publish_dds_family_preview.before_loop
+async def before_publish_dds_family_preview():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(count=1)
 async def publish_dds_ui_poll():
     try:
         await publish_ui_poll_once(bot)
@@ -905,6 +918,9 @@ class DialianBot(commands.Bot):
 
         if not publish_dds_ui_poll.is_running():
             publish_dds_ui_poll.start()
+
+        if not publish_dds_family_preview.is_running():
+            publish_dds_family_preview.start()
 
 
 intents = discord.Intents.default()
@@ -2370,6 +2386,27 @@ async def update_bot(ctx):
 
 
 # Failed first attempts may be retried without permitting a second post.
+@bot.command(name="패밀리사전공지1회")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def manually_publish_family_preview(ctx):
+    if ctx.guild.id != DDS_RELEASE_GUILD_ID:
+        return await ctx.send("❌ DDS 공식 서버에서만 사용할 수 있습니다.")
+    try:
+        posted = await announce_family_preview_once(bot)
+    except Exception as exc:
+        print(f"[DDS FAMILY 사전 공지 재시도 실패] {type(exc).__name__}: {exc}")
+        return await ctx.send(
+            "⚠️ 패밀리 사전 공지를 게시하지 못했습니다. "
+            "대상 채널 읽기·전송·기록 확인 권한과 봇 로그를 확인해주세요."
+        )
+    await ctx.send(
+        "✅ DDS FAMILY 사전 공지를 게시했습니다."
+        if posted else
+        "ℹ️ DDS FAMILY 사전 공지는 이미 게시되어 중복 전송하지 않았습니다."
+    )
+
+
 @bot.command(name="업데이트공지1회", aliases=["업뎃공지1회"])
 @commands.guild_only()
 @commands.has_permissions(administrator=True)

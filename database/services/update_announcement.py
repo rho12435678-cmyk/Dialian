@@ -157,3 +157,127 @@ async def announce_once(bot) -> bool:
         await _save_posted(sent.id)
         log.info("Posted one DDS release announcement to %s: %s", CHANNEL_ID, sent.id)
         return True
+
+
+# DDS FAMILY trial: a separate one-time preview; never reuses the old release key.
+FAMILY_KEY = "dds_family_preview_2026_09_25_v1"
+FAMILY_FOOTER = f"DDS Family Preview · 2026.09.25 · {FAMILY_KEY}"
+_family_lock = asyncio.Lock()
+
+
+def build_family_preview_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="💎 DDS FAMILY | 7일 무료 체험 사전 안내",
+        description=(
+            "안녕하세요. **DDS (Dial Design Studio)** 운영팀입니다.\n\n"
+            "기존 구매자분들을 위한 새로운 회원 서비스 **DDS FAMILY**를 "
+            "**9월 26일부터 7일간 시범 운영할 예정**입니다. "
+            "현재는 정식 유료 멤버십이 아닌 **무료 체험 프로그램**으로 진행합니다."
+        ),
+        color=discord.Color.gold(),
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.add_field(
+        name="📅 01. 무료 체험 및 신청",
+        value=(
+            "• **시작 예정일:** 2026년 9월 26일\n"
+            "• **대상:** DDS 기존 구매자\n"
+            "• **체험 기간:** 가입 승인 후 7일\n"
+            "• 신청 방법과 이용 가능 시각은 시범 운영 시작 시 별도로 안내합니다."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="✨ 02. 체험 예정 혜택",
+        value=(
+            "• **패밀리 전용 티켓**으로 전용 문의 및 체험 신청\n"
+            "• 아직 출시되지 않은 **UI 등 신규 서비스의 사전 체험 신청 기회**\n"
+            "• 신규 기능 체험 후 의견 및 개선 제안 참여\n"
+            "※ 사전 체험은 디자이너의 작업 가능 범위와 신청 현황에 따라 "
+            "제공됩니다. 무료 제작이나 우선 제작을 보장하지 않습니다."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🛍️ 03. 기존 구매 및 단골 혜택",
+        value=(
+            "기존 **단품 / 2+1 / 3+1** 상품은 그대로 유지됩니다.\n"
+            "기존 단골 혜택도 변경되지 않으며, 패밀리 가입은 **선택 사항**입니다."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🔔 04. 체험 종료 및 정식 출시",
+        value=(
+            "• 무료 체험 종료 후 **자동 결제되지 않습니다.**\n"
+            "• 정식 패밀리권의 가격 및 세부 혜택은 시범 운영 결과와 "
+            "디자이너 협의 후 별도 안내합니다.\n"
+            "• 프리미엄권은 현재 **도입 보류** 상태입니다."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="📌 유의 사항",
+        value=(
+            "현재 공지는 **사전 안내**입니다. 전용 티켓과 UI 체험의 "
+            "실제 이용 가능 여부 및 세부 조건은 시작 공지에서 확인해 주세요.\n"
+            "**항상 DDS를 이용해 주셔서 감사합니다!**"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text=FAMILY_FOOTER)
+    return embed
+
+
+async def announce_family_preview_once(bot) -> bool:
+    """Post FAMILY preview once, recovering Discord send-before-commit crashes."""
+    async with _family_lock:
+        async with aiosqlite.connect(DATABASE) as db:
+            async with db.execute(
+                "SELECT value FROM bot_settings WHERE key=?", (FAMILY_KEY,)
+            ) as cursor:
+                existing = await cursor.fetchone()
+        if existing:
+            log.info("DDS FAMILY preview already recorded: %s", existing[0])
+            return False
+
+        channel = bot.get_channel(CHANNEL_ID)
+        if channel is None:
+            channel = await bot.fetch_channel(CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel) or channel.guild.id != GUILD_ID:
+            raise RuntimeError("DDS FAMILY 공지 대상 채널 또는 서버가 일치하지 않습니다.")
+        if bot.user is None:
+            raise RuntimeError("Dialian 계정 정보가 준비되지 않았습니다.")
+
+        # History check is mandatory; fail closed to avoid duplicate pings.
+        async for message in channel.history(limit=500):
+            if message.author.id != bot.user.id:
+                continue
+            if any(
+                embed.footer and embed.footer.text == FAMILY_FOOTER
+                for embed in message.embeds
+            ):
+                await _save_family_posted(message.id)
+                return False
+
+        sent = await channel.send(
+            content=f"<@&{CUSTOMER_ROLE_ID}>",
+            embed=build_family_preview_embed(),
+            allowed_mentions=discord.AllowedMentions(
+                roles=[discord.Object(id=CUSTOMER_ROLE_ID)],
+                users=False, everyone=False, replied_user=False,
+            ),
+        )
+        await _save_family_posted(sent.id)
+        log.info("DDS FAMILY one-time preview posted: %s", sent.id)
+        return True
+
+
+async def _save_family_posted(message_id: int) -> None:
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            """INSERT INTO bot_settings(key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+            (FAMILY_KEY, str(message_id)),
+        )
+        await db.commit()
