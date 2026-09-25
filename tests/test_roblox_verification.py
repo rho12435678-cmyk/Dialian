@@ -224,7 +224,7 @@ class RobloxApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service.aiohttp, "ClientSession") as client:
             response = client.return_value.__aenter__.return_value.request.return_value.__aenter__.return_value
             response.status = 429
-            with self.assertRaisesRegex(service.VerificationError, "요청이 많습니다"):
+            with self.assertRaisesRegex(service.VerificationError, "요청이 많아요"):
                 await service.api_request("GET", "/users/123")
 
 
@@ -380,6 +380,10 @@ class VerificationViewTests(unittest.IsolatedAsyncioTestCase):
             await modal.on_submit(interaction)
             store.issue.assert_awaited_once_with(1, 2, lookup.return_value)
             self.assertTrue(interaction.followup.send.call_args.kwargs["ephemeral"])
+            embed = interaction.followup.send.call_args.kwargs["embed"]
+            self.assertIn("①", embed.description)
+            self.assertIn("②", embed.description)
+            self.assertIn("10분", embed.description)
             interaction.user.edit.assert_not_awaited()
             interaction.user.add_roles.assert_not_awaited()
 
