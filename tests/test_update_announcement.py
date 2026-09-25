@@ -128,5 +128,37 @@ class OneTimeDDSAnnouncementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.channel.send_calls, 1)
 
 
+    async def test_family_notice_mentions_only_customers_and_posts_once(self):
+        self.assertTrue(await notice.announce_family_preview_once(self.bot))
+        self.assertFalse(await notice.announce_family_preview_once(self.bot))
+        self.assertEqual(self.channel.send_calls, 1)
+        self.assertEqual(self.channel.content, f"<@&{notice.CUSTOMER_ROLE_ID}>")
+        self.assertEqual([role.id for role in self.channel.allowed_mentions.roles],
+                         [notice.CUSTOMER_ROLE_ID])
+        self.assertIs(self.channel.allowed_mentions.everyone, False)
+        self.assertIs(self.channel.allowed_mentions.users, False)
+        embed = self.channel.messages[0].embeds[0]
+        self.assertEqual(embed.footer.text, notice.FAMILY_FOOTER)
+        text = embed.description + "\\n" + "\\n".join(field.value for field in embed.fields)
+        for expected in ("2026년 9월 26일", "기존 구매자", "7일", "UI",
+                         "단품 / 2+1 / 3+1", "자동 결제되지 않습니다",
+                         "도입 보류", "사전 안내"):
+            self.assertIn(expected, text)
+
+    async def test_family_notice_crash_recovers_without_reping(self):
+        with patch.object(notice, "_save_family_posted", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                await notice.announce_family_preview_once(self.bot)
+        self.assertFalse(await notice.announce_family_preview_once(self.bot))
+        self.assertEqual(self.channel.send_calls, 1)
+
+    async def test_family_notice_no_history_means_no_send(self):
+        self.channel.error_on_history = discord.Forbidden(
+            SimpleNamespace(status=403, reason="Forbidden"), "No history")
+        with self.assertRaises(discord.Forbidden):
+            await notice.announce_family_preview_once(self.bot)
+        self.assertEqual(self.channel.send_calls, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
