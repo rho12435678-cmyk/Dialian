@@ -1,11 +1,13 @@
 import asyncio
+import json
 import re
 import secrets
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import aiohttp
 import aiosqlite
 
 from database.database import DATABASE
@@ -54,20 +56,57 @@ async def create_verification_tables(db):
     """)
 
 
-async def api_request(method, path, *, base=API_BASE, **kwargs):
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.request(method, base + path, **kwargs) as response:
-                if response.status == 429:
-                    raise VerificationError("⏳ Roblox 요청이 많아요. 잠시 후 다시 눌러주세요.")
-                if response.status == 404:
-                    raise VerificationError("로블록스 계정을 찾을 수 없습니다.")
-                if response.status != 200:
-                    raise VerificationError("⚠️ Roblox 서버에서 계정 정보를 받지 못했어요. 잠시 후 다시 시도해 주세요.")
-                return await response.json()
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-        raise VerificationError("⚠️ Roblox 연결이 불안정해요. 잠시 후 다시 시도하고, 반복되면 운영진에게 알려주세요.") from exc
+def _urllib_request(method, url, payload):
+    """Use standard-library HTTP transport, which worked on the DDS VPS.
 
+    Executed with asyncio.to_thread() to avoid blocking the Discord event loop.
+    """
+    headers = {"Accept": "application/json"}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status = response.status
+            body = response.read(1024 * 1024)
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        body = b""
+    if status == 429:
+        raise VerificationError("⏳ Roblox 요청이 많아요. 잠시 후 다시 눌러주세요.")
+    if status == 404:
+        raise VerificationError("로블록스 계정을 찾을 수 없습니다.")
+    if status != 200:
+        raise VerificationError("⚠️ Roblox 서버에서 계정 정보를 받지 못했어요. 잠시 후 다시 시도해 주세요.")
+    try:
+        return json.loads(body)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise VerificationError("Roblox 응답을 읽지 못했어요. 잠시 후 다시 시도해 주세요.") from exc
+
+
+async def api_request(method, path, *, base=API_BASE, **kwargs):
+    # Only the two required public Roblox endpoints are used. No cookies or
+    # credentials are sent, and an arbitrary caller-supplied URL is not accepted.
+    if base != API_BASE or (method, path.split("?")[0]) not in (
+        ("POST", "/usernames/users"),
+    ) and not (base == API_BASE and method == "GET" and re.fullmatch(r"/users/\\d+", path)):
+        raise ValueError("Unsupported Roblox API endpoint")
+    payload = kwargs.pop("json", None)
+    if kwargs:
+        raise ValueError("Unsupported Roblox request options")
+    try:
+        return await asyncio.to_thread(_urllib_request, method, base + path, payload)
+    except VerificationError:
+        raise
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise VerificationError(
+            "⚠️ Roblox 연결이 불안정해요. 잠시 후 다시 시도하고, 반복되면 운영진에게 알려주세요."
+        ) from exc
 
 def parse_profile(data):
     if not isinstance(data, dict):
