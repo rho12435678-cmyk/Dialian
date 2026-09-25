@@ -57,21 +57,14 @@ async def create_verification_tables(db):
 async def api_request(method, path, *, base=API_BASE, **kwargs):
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            headers = {}
-            for attempt in range(2):
-                async with session.request(method, base + path, headers=headers, **kwargs) as response:
-                    # Public catalog reads require an anonymous CSRF handshake, not a user cookie.
-                    if (base == CATALOG_API_BASE and method == "POST" and attempt == 0
-                            and response.status == 403 and response.headers.get("x-csrf-token")):
-                        headers["x-csrf-token"] = response.headers["x-csrf-token"]
-                        continue
-                    if response.status == 429:
-                        raise VerificationError("로블록스 요청이 많습니다. 잠시 뒤 다시 시도해주세요.")
-                    if response.status == 404:
-                        raise VerificationError("로블록스 계정 또는 아이템을 찾을 수 없습니다.")
-                    if response.status != 200:
-                        raise VerificationError("로블록스 정보를 확인할 수 없습니다. 잠시 뒤 다시 시도해주세요.")
-                    return await response.json()
+            async with session.request(method, base + path, **kwargs) as response:
+                if response.status == 429:
+                    raise VerificationError("로블록스 요청이 많습니다. 잠시 뒤 다시 시도해주세요.")
+                if response.status == 404:
+                    raise VerificationError("로블록스 계정을 찾을 수 없습니다.")
+                if response.status != 200:
+                    raise VerificationError("로블록스 정보를 확인할 수 없습니다. 잠시 뒤 다시 시도해주세요.")
+                return await response.json()
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
         raise VerificationError("로블록스 연결에 실패했습니다. 잠시 뒤 다시 시도해주세요.") from exc
 
