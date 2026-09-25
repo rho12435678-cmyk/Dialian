@@ -32,6 +32,7 @@ from database.services.roblox_verification import MIN_ACCOUNT_AGE_DAYS
 from database.services.ticket_layout import ticket_name, get_or_create_ticket_category, organize_existing_ticket, designer_tier
 from database.services.point_ranking import build_point_embed, refresh_point_ranking
 from database.services.update_announcement import announce_once, GUILD_ID as DDS_RELEASE_GUILD_ID
+from database.services.ui_poll_announcement import publish_ui_poll_once
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -839,6 +840,19 @@ async def before_publish_combined_dds_update():
     await bot.wait_until_ready()
 
 
+@tasks.loop(count=1)
+async def publish_dds_ui_poll():
+    try:
+        await publish_ui_poll_once(bot)
+    except Exception as exc:
+        print(f"[DDS UI 투표 발송 실패] {type(exc).__name__}: {exc}")
+
+
+@publish_dds_ui_poll.before_loop
+async def before_publish_dds_ui_poll():
+    await bot.wait_until_ready()
+
+
 # ==================== [봇 클래스 정의 및 Persistent View / DB 초기화] ====================
 
 class DialianBot(commands.Bot):
@@ -888,6 +902,9 @@ class DialianBot(commands.Bot):
 
         if not publish_combined_dds_update.is_running():
             publish_combined_dds_update.start()
+
+        if not publish_dds_ui_poll.is_running():
+            publish_dds_ui_poll.start()
 
 
 intents = discord.Intents.default()
