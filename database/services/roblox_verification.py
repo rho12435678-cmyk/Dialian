@@ -59,14 +59,14 @@ async def api_request(method, path, *, base=API_BASE, **kwargs):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             async with session.request(method, base + path, **kwargs) as response:
                 if response.status == 429:
-                    raise VerificationError("로블록스 요청이 많습니다. 잠시 뒤 다시 시도해주세요.")
+                    raise VerificationError("⏳ Roblox 요청이 많아요. 잠시 후 다시 눌러주세요.")
                 if response.status == 404:
                     raise VerificationError("로블록스 계정을 찾을 수 없습니다.")
                 if response.status != 200:
-                    raise VerificationError("로블록스 정보를 확인할 수 없습니다. 잠시 뒤 다시 시도해주세요.")
+                    raise VerificationError("⚠️ Roblox 서버에서 계정 정보를 받지 못했어요. 잠시 후 다시 시도해 주세요.")
                 return await response.json()
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-        raise VerificationError("로블록스 연결에 실패했습니다. 잠시 뒤 다시 시도해주세요.") from exc
+        raise VerificationError("⚠️ Roblox 연결이 불안정해요. 잠시 후 다시 시도하고, 반복되면 운영진에게 알려주세요.") from exc
 
 
 def parse_profile(data):
@@ -94,14 +94,14 @@ def parse_profile(data):
 async def lookup_username(username):
     username = username.strip().lstrip("@")
     if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", username):
-        raise VerificationError("표시 이름이 아닌 로블록스 @사용자이름을 입력해주세요.")
+        raise VerificationError("❌ 표시 이름이 아닌 Roblox @사용자이름을 입력해 주세요. 예: @Roblox")
     data = await api_request("POST", "/usernames/users", json={
         "usernames": [username], "excludeBannedUsers": True,
     })
     if not isinstance(data, dict) or not isinstance(data.get("data"), list):
         raise VerificationError("로블록스 계정 정보가 올바르지 않습니다.")
     if not data["data"]:
-        raise VerificationError("계정을 찾을 수 없습니다. 로블록스 @사용자이름을 확인해주세요.")
+        raise VerificationError("❌ 계정을 찾지 못했어요. Roblox 프로필의 @사용자이름을 확인해 주세요.")
     return parse_profile(data["data"][0])
 
 
@@ -215,7 +215,7 @@ class VerificationStore:
 
         profile = await fetch_profile(roblox_id)
         if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(code) + r"(?![A-Za-z0-9-])", profile.description):
-            raise VerificationError("소개란에서 인증 코드를 찾지 못했습니다. 저장 후 잠시 기다렸다가 다시 확인해주세요.")
+            raise VerificationError("❌ 프로필 소개(About)에 코드가 없어요. 코드를 붙여넣고 저장한 뒤 다시 눌러주세요.")
         await check_eligibility(profile)
 
         # Recheck after the network request, so replaced or consumed codes cannot be reused.
