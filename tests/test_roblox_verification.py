@@ -208,22 +208,25 @@ class RobloxApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(service.VerificationError):
                 await service.api_request("GET", "/users/123")
 
-    async def test_catalog_csrf_retry_is_bounded_and_anonymous(self):
+    async def test_roblox_profile_request_never_references_removed_catalog_api(self):
         with patch.object(service.aiohttp, "ClientSession") as client:
             session = client.return_value.__aenter__.return_value
-            session.request = MagicMock()
-            denied = MagicMock(status=403, headers={"x-csrf-token": "test-csrf"})
-            success = MagicMock(status=200)
-            success.json = AsyncMock(return_value={"data": []})
-            session.request.return_value.__aenter__.side_effect = [denied, success]
-            await service.api_request("POST", "/catalog/items/details", base=service.CATALOG_API_BASE)
-            self.assertEqual(session.request.call_count, 2)
-            self.assertEqual(session.request.call_args.kwargs["headers"], {"x-csrf-token": "test-csrf"})
-            session.request.reset_mock()
-            session.request.return_value.__aenter__.side_effect = [denied, denied]
-            with self.assertRaises(service.VerificationError):
-                await service.api_request("POST", "/catalog/items/details", base=service.CATALOG_API_BASE)
-            self.assertEqual(session.request.call_count, 2)
+            response = session.request.return_value.__aenter__.return_value
+            response.status = 200
+            response.json = AsyncMock(return_value={"id": 123, "name": "TestUser"})
+            data = await service.api_request("GET", "/users/123")
+            self.assertEqual(data["id"], 123)
+            session.request.assert_called_once_with(
+                "GET", "https://users.roblox.com/v1/users/123",
+            )
+
+    async def test_roblox_profile_rate_limit_has_user_facing_message(self):
+        with patch.object(service.aiohttp, "ClientSession") as client:
+            response = client.return_value.__aenter__.return_value.request.return_value.__aenter__.return_value
+            response.status = 429
+            with self.assertRaisesRegex(service.VerificationError, "요청이 많습니다"):
+                await service.api_request("GET", "/users/123")
+
 
 
 class EligibilityTests(unittest.IsolatedAsyncioTestCase):
