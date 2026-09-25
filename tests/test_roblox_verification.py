@@ -301,11 +301,9 @@ class VerificationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(interaction.followup.send.call_args.kwargs["ephemeral"])
 
     async def test_permission_failures_do_not_mutate_member(self):
-        for failure in ("owner", "hierarchy", "nickname_permission", "role_permission", "missing_role", "dm"):
+        for failure in ("hierarchy", "nickname_permission", "role_permission", "missing_role", "dm"):
             interaction = self.interaction()
-            if failure == "owner":
-                interaction.guild.owner_id = 2
-            elif failure == "hierarchy":
+            if failure == "hierarchy":
                 interaction.user.top_role = 10
             elif failure == "nickname_permission":
                 interaction.guild.me.guild_permissions.manage_nicknames = False
@@ -319,6 +317,47 @@ class VerificationViewTests(unittest.IsolatedAsyncioTestCase):
                 await views.apply_verified_profile(interaction, service.RobloxProfile(123, "TestUser"))
             interaction.user.edit.assert_not_awaited()
             interaction.user.add_roles.assert_not_awaited()
+
+    async def test_server_owner_verifies_without_nickname_or_role_changes(self):
+        interaction = self.interaction()
+        interaction.guild.owner_id = interaction.user.id
+        interaction.guild.me.guild_permissions.manage_nicknames = False
+        interaction.guild.me.guild_permissions.manage_roles = False
+        await views.apply_verified_profile(
+            interaction, service.RobloxProfile(123, "OwnerRoblox")
+        )
+        interaction.user.edit.assert_not_awaited()
+        interaction.user.add_roles.assert_not_awaited()
+        self.assertIn("서버 소유자", interaction.followup.send.call_args.args[0])
+        self.assertTrue(interaction.followup.send.call_args.kwargs["ephemeral"])
+
+    async def test_owner_can_start_and_finish_valid_proof(self):
+        interaction = self.interaction()
+        interaction.guild.owner_id = interaction.user.id
+        interaction.guild.me.guild_permissions.manage_nicknames = False
+        interaction.guild.me.guild_permissions.manage_roles = False
+        await views.VerifyView().verify.callback(interaction)
+        interaction.response.send_modal.assert_awaited_once()
+        with patch.object(views, "check_cooldown"), patch.object(views, "store") as store:
+            store.verify = AsyncMock(
+                return_value=service.RobloxProfile(123, "OwnerRoblox")
+            )
+            await views.RobloxConfirmView().confirm.callback(interaction)
+            store.verify.assert_awaited_once_with(1, 2)
+        interaction.user.edit.assert_not_awaited()
+        interaction.user.add_roles.assert_not_awaited()
+
+    async def test_owner_still_requires_valid_roblox_proof(self):
+        interaction = self.interaction()
+        interaction.guild.owner_id = interaction.user.id
+        with patch.object(views, "check_cooldown"), patch.object(views, "store") as store:
+            store.verify = AsyncMock(
+                side_effect=service.VerificationError("missing profile proof")
+            )
+            with self.assertRaises(service.VerificationError):
+                await views.RobloxConfirmView().confirm.callback(interaction)
+        interaction.user.edit.assert_not_awaited()
+        interaction.user.add_roles.assert_not_awaited()
 
     async def test_discord_failure_reports_retry_without_granting_role(self):
         interaction = self.interaction()
