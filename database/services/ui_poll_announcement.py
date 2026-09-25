@@ -50,9 +50,11 @@ async def _save(key, message_id):
 def _is_ui_poll(message):
     poll = getattr(message, "poll", None)
     question = getattr(poll, "question", "") if poll else ""
+    # Only reuse our own poll or the known earlier DDS poll question.
+    # Generic UI-related polls must not receive this announcement.
     return isinstance(question, str) and (
         question == QUESTION
-        or ("UI" in question.upper() and "의향" in question)
+        or ("UI" in question.upper() and "주문제작 맡길 의향" in question)
     )
 
 
