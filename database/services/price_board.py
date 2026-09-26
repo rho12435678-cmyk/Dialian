@@ -81,7 +81,7 @@ def build_price_embed(profile):
         embed.add_field(
             name=f"🎨 {tier} GFX",
             value=format_package_prices(base_prices, family=family, regular=regular),
-            inline=True,
+            inline=False,
         )
     embed.add_field(
         name="👕 Roblox 복장 (상의/하의 개별)",
