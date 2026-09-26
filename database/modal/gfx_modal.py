@@ -10,7 +10,8 @@ from database.views.payment_view import PaymentView
 from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
-from database.services.commission_pricing import quote_for
+from database.services.commission_pricing import quote_for, UNIFORM_VARIATION_BASE
+from database.services.family import discounted_price
 from database.services.ticket_layout import get_or_create_ticket_category, ticket_name
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
@@ -177,10 +178,20 @@ class PurchaseModal(discord.ui.Modal):
                 "FAMILY·단골 역할에 따른 할인액을 안내합니다."
             )
         elif quote is not None:
+            variation_info = ""
+            if self.COMMISSION_NAME == "Roblox 복장":
+                unit = discounted_price(
+                    UNIFORM_VARIATION_BASE, quote["family"], quote["regular"]
+                )
+                variation_info = (
+                    f"\n🎨 복장 바리에이션 추가 시 **개당 {unit:,}원** "
+                    "(실제 요청 수량만큼 별도 추가)"
+                )
             await ticket_channel.send(
                 f"💰 **커미션 예상 결제액**\n"
                 f"기준가 {quote['base']:,}원 · 할인 {quote['rate']}% "
-                f"· **할인가 {quote['total']:,}원**\n"
+                f"· **할인가 {quote['total']:,}원**"
+                f"{variation_info}\n"
                 "※ 티켓 생성 시점의 혜택을 기준으로 안내합니다. "
                 "입금은 담당 디자이너의 최종 확인 후 진행하세요."
             )
