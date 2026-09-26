@@ -115,7 +115,7 @@ def build_price_embed(profile):
 
     embed.set_footer(
         text=(
-            f"적용 할인율 {rate}% · 주문 시점 자격에 따라 최종 혜택이 결정됩니다. "
+            f"회원 자격에 따른 표시 할인율 {rate}% · 주문 시점에 최종 혜택이 결정됩니다. "
             "최종 금액은 담당자와 확인해 주세요."
         )
     )
