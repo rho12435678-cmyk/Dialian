@@ -143,30 +143,34 @@ class PanelViewTests(unittest.IsolatedAsyncioTestCase):
         await self.click(sub, "📋 일반 가격표").callback(interaction)
         self.assertIn("일반", interaction.followup.send.await_args.kwargs["embed"].title)
 
-    async def test_family_30_requires_both_eligible_memberships(self):
+    async def test_all_four_price_boards_are_viewable_as_reference(self):
         root = self.MainView()
         interaction = self.interaction()
         await self.click(root, "📋 가격표").callback(interaction)
         sub = interaction.response.send_message.await_args.kwargs["view"]
 
-        with patch.object(
-            commission_panel, "is_family_active", new=AsyncMock(return_value=False)
-        ):
-            blocked = self.interaction(roles=[REGULAR_CUSTOMER_ROLE_ID])
-            await self.click(sub, "✨ FAMILY + 단골 · 30%").callback(blocked)
-            self.assertIn("FAMILY", blocked.followup.send.await_args.args[0])
-            self.assertNotIn("embed", blocked.followup.send.await_args.kwargs)
+        # A newcomer with no FAMILY/regular roles can compare every board.
+        for label, title_fragment in [
+            ("📋 일반 가격표", "일반"),
+            ("⭐ 단골 · 20%", "단골"),
+            ("💎 FAMILY · 20%", "FAMILY"),
+            ("✨ FAMILY + 단골 · 30%", "30%"),
+        ]:
+            with self.subTest(label=label):
+                viewer = self.interaction()
+                await self.click(sub, label).callback(viewer)
+                kwargs = viewer.followup.send.await_args.kwargs
+                self.assertTrue(kwargs["ephemeral"])
+                self.assertIn(title_fragment, kwargs["embed"].title)
 
+        # Viewing a board must not call or mutate FAMILY entitlement.
         with patch.object(
-            commission_panel, "is_family_active", new=AsyncMock(return_value=True)
+            commission_panel, "is_family_active",
+            new=AsyncMock(side_effect=AssertionError("price view checked entitlement")),
         ):
-            no_regular = self.interaction()
-            await self.click(sub, "✨ FAMILY + 단골 · 30%").callback(no_regular)
-            self.assertIn("단골", no_regular.followup.send.await_args.args[0])
-
-            allowed = self.interaction(roles=[REGULAR_CUSTOMER_ROLE_ID])
-            await self.click(sub, "✨ FAMILY + 단골 · 30%").callback(allowed)
-            self.assertIn("30%", allowed.followup.send.await_args.kwargs["embed"].title)
+            viewer = self.interaction()
+            await self.click(sub, "✨ FAMILY + 단골 · 30%").callback(viewer)
+            self.assertIn("30%", viewer.followup.send.await_args.kwargs["embed"].title)
 
     async def test_ui_menu_still_checks_family(self):
         root = self.MainView()
