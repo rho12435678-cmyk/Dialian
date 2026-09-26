@@ -178,9 +178,9 @@ class PurchaseModal(discord.ui.Modal):
             )
         elif quote is not None:
             await ticket_channel.send(
-                f"💰 **커미션 예상 결제액**\\n"
+                f"💰 **커미션 예상 결제액**\n"
                 f"기준가 {quote['base']:,}원 · 할인 {quote['rate']}% "
-                f"· **할인가 {quote['total']:,}원**\\n"
+                f"· **할인가 {quote['total']:,}원**\n"
                 "※ 티켓 생성 시점의 혜택을 기준으로 안내합니다. "
                 "입금은 담당 디자이너의 최종 확인 후 진행하세요."
             )
