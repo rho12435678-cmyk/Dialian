@@ -63,7 +63,7 @@ class ShortPanelAnnouncementTests(unittest.IsolatedAsyncioTestCase):
     async def test_short_categories_without_old_launch_information(self):
         embed = notice.build_short_panel_update_embed()
         self.assertEqual(len(embed.fields), 4)
-        self.assertEqual([f.name[:2] for f in embed.fields[:3]],
+        self.assertEqual([f.name[:2].strip() for f in embed.fields[:3]],
                          ["🎨", "🤝", "📋"])
         body = " ".join(f.value for f in embed.fields)
         for item in ("GFX", "Roblox 복장", "UI 사전 체험", "개발자 지원",
