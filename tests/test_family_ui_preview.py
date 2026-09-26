@@ -1,3 +1,4 @@
+import asyncio
 """DDS FAMILY price, entitlement and preview regression tests."""
 import tempfile
 import unittest
@@ -37,12 +38,15 @@ class FamilyPricingTests(unittest.TestCase):
         )
 
     def test_ui_modal_uses_existing_ticket_workflow(self):
-        for package in UI_BASE:
-            with self.subTest(package=package):
-                modal = UIPreviewModal(package)
-                self.assertEqual(modal.COMMISSION_NAME, "Roblox UI 사전 체험")
-                self.assertLessEqual(len(modal.children), 5)
-                self.assertTrue(all(item.required for item in modal.children))
+        # discord.ui.Modal needs a running asyncio loop to create its futures.
+        async def check():
+            for package in UI_BASE:
+                with self.subTest(package=package):
+                    modal = UIPreviewModal(package)
+                    self.assertEqual(modal.COMMISSION_NAME, "Roblox UI 사전 체험")
+                    self.assertLessEqual(len(modal.children), 5)
+                    self.assertTrue(all(item.required for item in modal.children))
+        asyncio.run(check())
 
     def test_ui_ticket_is_separate_private_category(self):
         self.assertEqual(ticket_kind("Roblox UI 사전 체험"), "ui")
