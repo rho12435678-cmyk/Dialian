@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import aiosqlite
 import discord
-from config import BUYER_ROLE_ID, FAMILY_ROLE_ID
+from config import BUYER_ROLE_ID, FAMILY_ROLE_ID, FAMILY_PROMOTION_CHANNEL_ID
 from database.database import DATABASE
 
 def utcnow():
@@ -121,3 +121,26 @@ async def activate_paid_after_confirmation(guild,member,days):
         raise ValueError("FAMILY 역할이 존재하지 않습니다.")
     await member.add_roles(role,reason="DDS FAMILY payment verified by administrator")
     return end
+
+
+async def ensure_family_promo_permissions(guild):
+    """Restrict the existing promotion channel without altering staff overwrites."""
+    channel = guild.get_channel(FAMILY_PROMOTION_CHANNEL_ID)
+    role = guild.get_role(FAMILY_ROLE_ID)
+    if not isinstance(channel, discord.TextChannel) or role is None:
+        print("[FAMILY] Promotion channel/role missing; access setup postponed.")
+        return
+    try:
+        everyone = channel.overwrites_for(guild.default_role)
+        if everyone.view_channel is not False:
+            everyone.view_channel = False
+            await channel.set_permissions(guild.default_role, overwrite=everyone,
+                                          reason="DDS FAMILY promotion private channel")
+        family = channel.overwrites_for(role)
+        if family.view_channel is not True or family.send_messages is not True:
+            family.view_channel = True
+            family.send_messages = True
+            await channel.set_permissions(role, overwrite=family,
+                                          reason="DDS FAMILY promotion benefit")
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        print(f"[FAMILY] Unable to set promotion access: {exc}")
