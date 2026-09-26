@@ -6,7 +6,6 @@ until admins repost the panel with !티켓생성 and remove old messages.
 import discord
 from discord import ui
 
-from config import REGULAR_CUSTOMER_ROLE_ID
 from database.services.family import is_family_active
 from database.services.price_board import build_price_embed
 from database.services.ui_designer_role import ensure_ui_designer_role
@@ -49,24 +48,13 @@ def build_panel_views(dev_modal_class, partner_modal_class):
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     async def show_price(interaction, profile):
+        """Price boards are public reference material; eligibility is enforced at checkout.
+
+        This lets new members compare all four tiers without granting any role,
+        membership, or discount. The real commission quote still derives the
+        applicable rate from the member's current FAMILY/regular eligibility.
+        """
         await interaction.response.defer(ephemeral=True)
-        if profile in ("family", "combined"):
-            if not await is_family_active(interaction.user):
-                return await interaction.followup.send(
-                    "🔒 유효한 FAMILY 회원만 이 가격표를 확인할 수 있습니다.",
-                    ephemeral=True,
-                )
-        if profile == "combined":
-            regular = any(
-                role.id == REGULAR_CUSTOMER_ROLE_ID
-                for role in interaction.user.roles
-            )
-            if not regular:
-                return await interaction.followup.send(
-                    "🔒 FAMILY와 단골 역할을 모두 보유한 회원만 "
-                    "총 30% 할인 가격표를 확인할 수 있습니다.",
-                    ephemeral=True,
-                )
         await interaction.followup.send(
             embed=build_price_embed(profile),
             ephemeral=True,
