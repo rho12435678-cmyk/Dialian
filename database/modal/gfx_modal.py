@@ -184,14 +184,14 @@ class PurchaseModal(discord.ui.Modal):
                     UNIFORM_VARIATION_BASE, quote["family"], quote["regular"]
                 )
                 variation_info = (
-                    f"\\n🎨 복장 바리에이션 추가 시 **개당 {unit:,}원** "
+                    f"\n🎨 복장 바리에이션 추가 시 **개당 {unit:,}원** "
                     "(실제 요청 수량만큼 별도 추가)"
                 )
             await ticket_channel.send(
-                f"💰 **커미션 예상 결제액**\\n"
+                f"💰 **커미션 예상 결제액**\n"
                 f"기준가 {quote['base']:,}원 · 할인 {quote['rate']}% "
                 f"· **할인가 {quote['total']:,}원**"
-                f"{variation_info}\\n"
+                f"{variation_info}\n"
                 "※ 티켓 생성 시점의 혜택을 기준으로 안내합니다. "
                 "입금은 담당 디자이너의 최종 확인 후 진행하세요."
             )
