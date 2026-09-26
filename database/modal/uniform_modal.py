@@ -10,6 +10,7 @@ from database.views.payment_view import PaymentView
 from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
+from database.services.commission_pricing import quote_for
 from database.services.ticket_layout import get_or_create_ticket_category, ticket_name
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
@@ -169,6 +170,23 @@ class PurchaseModal(discord.ui.Modal):
 
         # 1. 신청서 전송 (하단에 [내가 담당하기] 버튼 View 부착)
         await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다. (**{self.COMMISSION_NAME}** / 담당: {designer_mention})", embed=embed, view=claim_view)
+
+        # Show the FAMILY + regular additive discount in the actual order ticket.
+        # No payment is collected here; the assigned designer verifies final pricing.
+        quote = await quote_for(self.COMMISSION_NAME, self.bundle_type, user, developer)
+        if quote is None and self.COMMISSION_NAME == "GFX":
+            await ticket_channel.send(
+                "💰 **가격 안내:** 담당 디자이너 등급이 확정되면 "
+                "FAMILY·단골 역할에 따른 할인액을 안내합니다."
+            )
+        elif quote is not None:
+            await ticket_channel.send(
+                f"💰 **커미션 예상 결제액**\n"
+                f"기준가 {quote['base']:,}원 · 할인 {quote['rate']}% "
+                f"· **할인가 {quote['total']:,}원**\n"
+                "※ 티켓 생성 시점의 혜택을 기준으로 안내합니다. "
+                "입금은 담당 디자이너의 최종 확인 후 진행하세요."
+            )
 
         # 2. 안내, 참고자료 전송
         try:

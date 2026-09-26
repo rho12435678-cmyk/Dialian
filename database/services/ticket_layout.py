@@ -12,12 +12,15 @@ import discord
 CATEGORY_NAMES = {
     "gfx": "🎨 DDS｜GFX 진행 티켓",
     "uniform": "👕 DDS｜복장 진행 티켓",
+    "ui": "🖥️ DDS｜UI 사전 체험 티켓",
     "support": "📩 DDS｜지원·제휴 티켓",
 }
 
 
 def ticket_kind(category):
     name = str(category or "").lower()
+    if "ui" in name:
+        return "ui"
     if "gfx" in name:
         return "gfx"
     if "복장" in name or "uniform" in name:
@@ -31,7 +34,7 @@ def ticket_label(category):
         return "파트너"
     if "지원" in name or "apply" in name:
         return "지원"
-    return {"gfx": "gfx", "uniform": "복장"}.get(ticket_kind(category), "문의")
+    return {"gfx": "gfx", "uniform": "복장", "ui": "ui"}.get(ticket_kind(category), "문의")
 
 
 def designer_tier(designer, category):
