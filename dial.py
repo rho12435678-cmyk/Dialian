@@ -48,6 +48,7 @@ from database.views.close_ticket import (
     has_designer_role,
 )
 from database.views.designer_select import DesignerView
+from database.views.commission_panel import build_panel_views
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
 from database.views.verify_view import RobloxConfirmView, VerifyView
@@ -664,161 +665,11 @@ class PartnerApplyModal(ui.Modal, title="🤝 파트너 문의 신청서"):
         await interaction.followup.send(f"✅ 파트너 문의 티켓이 생성되었습니다! {channel.mention}", ephemeral=True)
 
 
-class CategorySelectView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @ui.button(label="🎨 GFX 커미션", style=discord.ButtonStyle.primary, custom_id="ticket_gfx", row=0)
-    async def btn_gfx(self, interaction: discord.Interaction, button: ui.Button):
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        view = await DesignerView.create(interaction.guild, "gfx")
-        embed = discord.Embed(title="🎨 GFX 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
-    @ui.button(label="👔 Roblox 복장 커미션", style=discord.ButtonStyle.success, custom_id="ticket_uniform", row=0)
-    async def btn_uniform(self, interaction: discord.Interaction, button: ui.Button):
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        view = await DesignerView.create(interaction.guild, "uniform")
-        embed = discord.Embed(title="👔 Roblox 복장 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
-    @ui.button(label="🖥️ UI 커미션 (FAMILY 사전 체험)", style=discord.ButtonStyle.primary, custom_id="ticket_ui_preview", row=0)
-    async def btn_ui_preview(self, interaction: discord.Interaction, button: ui.Button):
-        if not await is_family_active(interaction.user):
-            return await interaction.response.send_message("🔒 FAMILY 활성 회원만 UI 사전 체험을 신청할 수 있습니다.", ephemeral=True)
-        role = await ensure_ui_designer_role(interaction.guild)
-        if role is None:
-            return await interaction.response.send_message(
-                "⚠️ UI 디자이너 역할이 아직 설정되지 않았습니다. 관리자에게 문의해 주세요.",
-                ephemeral=True,
-            )
-        view = await DesignerView.create(interaction.guild, "ui")
-        embed = discord.Embed(
-            title="🖥️ UI 디자이너 선택 (FAMILY 전용)",
-            description="담당 UI 디자이너를 선택하거나 추후 배정을 요청하세요.",
-            color=discord.Color.blurple(),
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply", row=1)
-    async def btn_dev_apply(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(DevApplyModal())
-
-    @ui.button(label="🤝 파트너 문의", style=discord.ButtonStyle.danger, custom_id="ticket_partner_apply", row=1)
-    async def btn_partner_apply(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(PartnerApplyModal())
-
-    @ui.button(label="📋 일반 / 묶음 가격표", style=discord.ButtonStyle.secondary, custom_id="price_standard", row=2)
-    async def btn_price_standard(self, interaction: discord.Interaction, button: ui.Button):
-        embed = discord.Embed(
-            title="📋 DDS 일반 / 묶음 커미션 가격표",
-            description="가독성을 높인 공식 가격표입니다. 아래에서 개별 및 묶음 가격을 확인해보세요!",
-            color=discord.Color.blue()
-        )
-        
-        gfx_table = (
-            "```\n"
-            "┌──────────┬──────────┬───────────┬───────────┐\n"
-            "│  등  급  │  단  품  │ 2+1 묶음  │ 3+1 묶음  │\n"
-            "├──────────┼──────────┼───────────┼───────────┤\n"
-            "│ 초급 GFX │ 5,000 원 │ 10,000 원 │ 15,000 원 │\n"
-            "│ 중급 GFX │ 6,500 원 │ 13,000 원 │ 19,500 원 │\n"
-            "│ 상급 GFX │ 8,500 원 │ 17,000 원 │ 25,500 원 │\n"
-            "└──────────┴──────────┴───────────┴───────────┘\n"
-            "```"
-        )
-        embed.add_field(name="🎨 GFX 단품 & 묶음 공식 가격표", value=gfx_table, inline=False)
-
-        uniform_table = (
-            "```\n"
-            "┌──────────────┬──────────┬───────────┬───────────┐\n"
-            "│    구  분    │  단  품  │ 2+1 묶음  │ 3+1 묶음  │\n"
-            "├──────────────┼──────────┼───────────┼───────────┤\n"
-            "│  상•하 개별  │ 5,000 원 │ 10,000 원 │ 15,000 원 │\n"
-            "│  바리에이션  │   500 원 │     -     │     -     │\n"
-            "└──────────────┴──────────┴───────────┴───────────┘\n"
-            "```"
-        )
-        embed.add_field(name="👔 Roblox 복장 단품 & 묶음 공식 가격표", value=uniform_table, inline=False)
-
-        bundle_info = (
-            "```\n"
-            "• GFX / 복장 2+1 묶음 : 2개 가격으로 총 3개 제작! (1개 무료 혜택)\n"
-            "• GFX / 복장 3+1 묶음 : 3개 가격으로 총 4개 제작! (1개 무료 혜택)\n"
-            "• 복장 바리에이션     : 색상/디자인 변형 추가 시 개당 500원\n"
-            "```"
-        )
-        embed.add_field(name="🎁 묶음 할인 혜택 (Bundle Sale)", value=bundle_info, inline=False)
-        embed.set_footer(text="💡 가격 문의 및 특수 주문은 커미션 티켓 생성을 이용해 주세요.")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @ui.button(label="⭐ 단골 전용 (20% 할인) 가격표", style=discord.ButtonStyle.success, custom_id="price_vip", row=2)
-    async def btn_price_vip(self, interaction: discord.Interaction, button: ui.Button):
-        embed = discord.Embed(
-            title="⭐ DDS 단골 전용 (20% 할인) 가격표",
-            description="단골 회원님(1,000P 이상 달성)을 위한 Special 20% 할인 가격표입니다!",
-            color=discord.Color.gold()
-        )
-
-        vip_gfx_table = (
-            "```\n"
-            "┌──────────┬──────────┬───────────┬───────────┐\n"
-            "│  등  급  │ 20% 단품 │ 2+1 묶음  │ 3+1 묶음  │\n"
-            "├──────────┼──────────┼───────────┼───────────┤\n"
-            "│ 초급 GFX │ 4,000 원 │  8,000 원 │ 12,000 원 │\n"
-            "│ 중급 GFX │ 5,200 원 │ 10,400 원 │ 15,600 원 │\n"
-            "│ 상급 GFX │ 6,800 원 │ 13,600 원 │ 20,400 원 │\n"
-            "└──────────┴──────────┴───────────┴───────────┘\n"
-            "```"
-        )
-        embed.add_field(name="🎨 GFX 단골 20% 할인 단품 & 묶음가", value=vip_gfx_table, inline=False)
-
-        vip_uniform_table = (
-            "```\n"
-            "┌──────────────┬──────────┬───────────┬───────────┐\n"
-            "│    구  분    │ 20% 단품 │ 2+1 묶음  │ 3+1 묶음  │\n"
-            "├──────────────┼──────────┼───────────┼───────────┤\n"
-            "│  상•하 개별  │ 4,000 원 │  8,000 원 │ 12,000 원 │\n"
-            "│  바리에이션  │   400 원 │     -     │     -     │\n"
-            "└──────────────┴──────────┴───────────┴───────────┘\n"
-            "```"
-        )
-        embed.add_field(name="👔 Roblox 복장 단골 20% 할인 단품 & 묶음가", value=vip_uniform_table, inline=False)
-
-        vip_info = (
-            "```\n"
-            "• 혜택 대상 : 1,000 P 이상 달성 유저 (단골 역할 자동 부여)\n"
-            "• 적용 범위 : 단품 및 2+1, 3+1 묶음 결제 시 20% 자동 할인가 적용\n"
-            "```"
-        )
-        embed.add_field(name="👑 단골 혜택 안내", value=vip_info, inline=False)
-        embed.set_footer(text="✨ 늘 이용해 주셔서 감사합니다!")
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-    @ui.button(label="💎 FAMILY 전용 (20% 할인) 가격표", style=discord.ButtonStyle.primary, custom_id="price_family", row=3)
-    async def btn_price_family(self, interaction: discord.Interaction, button: ui.Button):
-        if not await is_family_active(interaction.user):
-            return await interaction.response.send_message("🔒 활성 FAMILY 회원만 가격표를 볼 수 있습니다.", ephemeral=True)
-        regular = any(r.id == REGULAR_CUSTOMER_ROLE_ID for r in interaction.user.roles)
-        rate = 30 if regular else 20
-        rows = (
-            ("GFX 초급", (5000, 10000, 15000)),
-            ("GFX 중급", (6500, 13000, 19500)),
-            ("GFX 상급", (8500, 17000, 25500)),
-            ("복장 개별", (5000, 10000, 15000)),
-            ("UI 사전 체험", (5000, 10000, 15000)),
-        )
-        embed = discord.Embed(title=f"💎 DDS FAMILY 전용 가격표 ({rate}% 할인)", color=discord.Color.teal())
-        for name, prices in rows:
-            amounts = [discounted_price(p, family=True, regular=regular) for p in prices]
-            embed.add_field(name=name, value="단품 **{:,}원** / 2+1 **{:,}원** / 3+1 **{:,}원**".format(*amounts), inline=False)
-        embed.set_footer(text="FAMILY 20% + 단골 동시 보유 시 10% 추가 = 총 30%. 40% 중복 할인 없음.")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+# The active public panel has only three top-level buttons. Existing eight-button
+# messages retain their original callbacks through LegacyCategorySelectView.
+CategorySelectView, LegacyCategorySelectView = build_panel_views(
+    DevApplyModal, PartnerApplyModal
+)
 
 
 # ==================== [자동 DB 정기 Clean-up 태스크] ====================
@@ -936,6 +787,7 @@ class DialianBot(commands.Bot):
         await init_extended_db()
 
         self.add_view(CategorySelectView())
+        self.add_view(LegacyCategorySelectView())
         self.add_view(VerifyView())
         self.add_view(RobloxConfirmView())
         self.add_view(TicketCloseView())
@@ -1591,7 +1443,7 @@ async def family_admin_status(ctx, member: discord.Member):
         f"구매자 역할: {buyer_role} / FAMILY 역할: {family_role}\n"
         f"실제 혜택 접근: {active}\n"
         f"개인 기록: {record_text}\n전체 무료 체험: {start_text}\n"
-        "※ FAMILY 역할만 수동 지급한 계정은 DB에 유효한 기록이 없으면 이용할 수 없습니다.",
+        "※ 무료 체험 기간 내 역할만 지급된 회원의 누락 기록은 이용 시 원래 만료일로 자동 복구됩니다.",
         allowed_mentions=discord.AllowedMentions.none(),
     )
 
@@ -2613,13 +2465,18 @@ async def manually_publish_combined_update(ctx):
 @commands.has_permissions(administrator=True)
 async def t_create_panel(ctx):
     embed = discord.Embed(
-        title="💼 커미션 및 문의 상담 공간",
+        title="💼 DDS | 커미션 및 문의 상담",
         description=(
-            "상담, 구매 진행, 문의사항이 있으시다면\n"
-            "아래 원하시는 항목의 버튼을 클릭해주세요!\n\n"
-            "📌 **구매 전 아래 가격표 버튼을 눌러 상세 가격을 확인하실 수 있습니다.**"
+            "원하시는 카테고리를 선택해 주세요.\\n\\n"
+            "🎨 **커미션 문의**\\n"
+            "GFX · Roblox 복장 · FAMILY UI 사전 체험\\n\\n"
+            "🤝 **지원 & 제휴 문의**\\n"
+            "개발자 지원 · 파트너 문의\\n\\n"
+            "📋 **가격표 확인**\\n"
+            "일반 · 단골 20% · FAMILY 20% · FAMILY+단골 30%\\n\\n"
+            "※ 전용 서비스는 해당 회원에게만 제공됩니다."
         ),
-        color=0x5865F2
+        color=0x5865F2,
     )
     embed.set_footer(text="DDS 커미션 시스템")
 
