@@ -31,7 +31,7 @@ def build_short_panel_update_embed():
     )
     embed.add_field(
         name="🎨 01 | 커미션 문의",
-        value="**GFX · Roblox 복장 · FAMILY 전용 UI 사전 체험**\\n"
+        value="**GFX · Roblox 복장 · FAMILY 전용 UI 사전 체험**\n"
               "3개 분야를 한곳에서 선택할 수 있습니다.",
         inline=False,
     )
@@ -43,7 +43,7 @@ def build_short_panel_update_embed():
     embed.add_field(
         name="📋 03 | 가격표 개선",
         value=(
-            "**일반 · 단골 20% · FAMILY 20% · FAMILY+단골 30%**\\n"
+            "**일반 · 단골 20% · FAMILY 20% · FAMILY+단골 30%**\n"
             "4종 가격표를 간결하게 통일하고, "
             "**복장 바리에이션 할인 가격**도 함께 표시합니다."
         ),
@@ -52,7 +52,7 @@ def build_short_panel_update_embed():
     embed.add_field(
         name="🔗 이용 방법",
         value=(
-            f"<#{PURCHASE_CHANNEL_ID}>에서 확인하세요.\\n"
+            f"<#{PURCHASE_CHANNEL_ID}>에서 확인하세요.\n"
             "※ 새 3버튼 화면은 운영진이 문의 패널을 다시 게시한 후 표시됩니다."
         ),
         inline=False,
