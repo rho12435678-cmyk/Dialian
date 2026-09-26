@@ -154,8 +154,10 @@ class PurchaseModal(discord.ui.Modal):
         if self.roblox_nickname and self.roblox_nickname.value:
             embed.add_field(name="🎮 Roblox 닉네임", value=self.roblox_nickname.value, inline=False)
         if self.gfx_genre and self.gfx_genre.value:
-            embed.add_field(name="🎬 GFX 장르", value=self.gfx_genre.value, inline=False)
-        embed.add_field(name="🎨 요구사항", value=self.gfx_style.value, inline=False)
+            genre_label = "🖥️ UI 종류" if self.COMMISSION_NAME.startswith("Roblox UI") else "🎬 GFX 장르"
+            embed.add_field(name=genre_label, value=self.gfx_genre.value, inline=False)
+        requirements_label = "🖥️ UI 요구사항" if self.COMMISSION_NAME.startswith("Roblox UI") else "🎨 요구사항"
+        embed.add_field(name=requirements_label, value=self.gfx_style.value, inline=False)
         
         # 보너스 요구사항이 있는 경우 (2+1 또는 3+1)
         if self.fourth_style:

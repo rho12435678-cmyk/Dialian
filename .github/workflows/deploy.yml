@@ -45,7 +45,13 @@ jobs:
               fi
             fi
 
-            pkill -f "[p]ython3 dial.py" || true
+            # Match only actual dial.py processes, including older "-u" launches.
+            # Anchor at the end so the SSH deployment shell is not matched.
+            pkill -f '(^|/)(python|python3)( -u)? dial\.py
+
+            nohup /root/Dialian/venv/bin/python3 dial.py > bot.log 2>&1 < /dev/null &
+            echo $! > bot.pid
+ || true
 
             nohup /root/Dialian/venv/bin/python3 dial.py > bot.log 2>&1 < /dev/null &
             echo $! > bot.pid
