@@ -20,15 +20,58 @@ async def init_family_tables():
         await db.commit()
 
 async def is_family_active(member):
-    """A copied Discord role alone is not enough for financial benefits."""
-    if not isinstance(member, discord.Member) or not any(r.id == FAMILY_ROLE_ID for r in member.roles):
+    """Treat a staff-assigned FAMILY role as a trial entitlement during rollout.
+
+    A lost DB record is automatically restored with the ORIGINAL global
+    rollout expiry. Existing paid, cancelled and expired rows are authoritative:
+    none is silently overwritten or extended. Role alone never bypasses
+    the end of the published 7-day trial.
+    """
+    if not isinstance(member, discord.Member):
         return False
+    if not any(r.id == FAMILY_ROLE_ID for r in member.roles):
+        return False
+    await init_family_tables()
+    now = utcnow()
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute(
-            "SELECT 1 FROM family_memberships WHERE guild_id=? AND user_id=? AND state='active' AND expires_at>?",
-            (member.guild.id, member.id, utcnow().isoformat()),
+            """SELECT state, expires_at FROM family_memberships
+               WHERE guild_id=? AND user_id=?""",
+            (member.guild.id, member.id),
         ) as cur:
-            return await cur.fetchone() is not None
+            record = await cur.fetchone()
+        if record is not None:
+            return record[0] == "active" and datetime.fromisoformat(record[1]) > now
+
+        async with db.execute(
+            "SELECT started_at, expires_at FROM family_trial_rollout WHERE guild_id=?",
+            (member.guild.id,),
+        ) as cur:
+            rollout = await cur.fetchone()
+        if not rollout:
+            return False
+        started, expires = rollout
+        if not (datetime.fromisoformat(started) <= now < datetime.fromisoformat(expires)):
+            return False
+        # The role is already deliberately granted by staff. Repair its lost
+        # personal record in-place, without restarting anybody's trial.
+        await db.execute(
+            """INSERT OR IGNORE INTO family_memberships
+               (guild_id,user_id,kind,starts_at,expires_at,state)
+               VALUES (?,?,'trial',?,?,'active')""",
+            (member.guild.id, member.id, started, expires),
+        )
+        await db.commit()
+        async with db.execute(
+            """SELECT state, expires_at FROM family_memberships
+               WHERE guild_id=? AND user_id=?""",
+            (member.guild.id, member.id),
+        ) as cur:
+            repaired = await cur.fetchone()
+        return bool(
+            repaired and repaired[0] == "active"
+            and datetime.fromisoformat(repaired[1]) > now
+        )
 
 def discount_rate(family, regular):
     return (30 if regular else 20) if family else (20 if regular else 0)
@@ -69,31 +112,78 @@ async def start_trial_once(guild):
     await reconcile_roles(guild)
 
 async def reconcile_roles(guild):
-    """DB expiry precedes role edits. Failed role edits retry on next run."""
+    """Synchronize FAMILY role holders, including roles granted manually.
+
+    During the original 7-day rollout, reconcile any staff-granted role that
+    missed the snapshot. Once it expires, revoke both recorded and orphaned
+    trial roles while preserving every active paid membership.
+    """
     await init_family_tables()
-    role=guild.get_role(FAMILY_ROLE_ID)
-    if not role:
+    role = guild.get_role(FAMILY_ROLE_ID)
+    if role is None:
         return
+    now = utcnow()
+    role_members = [m for m in role.members if not m.bot]
     async with aiosqlite.connect(DATABASE) as db:
-        await db.execute("UPDATE family_memberships SET state='expired' WHERE guild_id=? AND state='active' AND expires_at<=?",
-                         (guild.id,utcnow().isoformat()))
-        async with db.execute("SELECT user_id,state FROM family_memberships WHERE guild_id=?", (guild.id,)) as cur:
-            rows=await cur.fetchall()
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT started_at, expires_at FROM family_trial_rollout WHERE guild_id=?",
+            (guild.id,),
+        ) as cur:
+            rollout = await cur.fetchone()
+        if rollout:
+            started, expires = rollout
+            if datetime.fromisoformat(started) <= now < datetime.fromisoformat(expires):
+                for member in role_members:
+                    await db.execute(
+                        """INSERT OR IGNORE INTO family_memberships
+                           (guild_id,user_id,kind,starts_at,expires_at,state)
+                           VALUES (?,?,'trial',?,?,'active')""",
+                        (guild.id, member.id, started, expires),
+                    )
+        await db.execute(
+            """UPDATE family_memberships SET state='expired'
+               WHERE guild_id=? AND state='active' AND expires_at<=?""",
+            (guild.id, now.isoformat()),
+        )
+        async with db.execute(
+            "SELECT user_id, state, expires_at FROM family_memberships WHERE guild_id=?",
+            (guild.id,),
+        ) as cur:
+            records = await cur.fetchall()
         await db.commit()
-    for uid,state in rows:
-        member=guild.get_member(uid)
+
+    active_ids = {
+        uid for uid, state, expires_at in records
+        if state == "active" and datetime.fromisoformat(expires_at) > now
+    }
+    for uid, state, _ in records:
+        member = guild.get_member(uid)
         if member is None:
             try:
-                member=await guild.fetch_member(uid)
-            except (discord.HTTPException,discord.Forbidden):
+                member = await guild.fetch_member(uid)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 continue
         try:
-            if state=="active" and role not in member.roles:
-                await member.add_roles(role,reason="DDS FAMILY active membership")
-            elif state!="active" and role in member.roles:
-                await member.remove_roles(role,reason="DDS FAMILY expired membership")
-        except (discord.HTTPException,discord.Forbidden) as exc:
+            if uid in active_ids and role not in member.roles:
+                await member.add_roles(role, reason="DDS FAMILY active membership")
+            elif uid not in active_ids and role in member.roles:
+                await member.remove_roles(role, reason="DDS FAMILY expired membership")
+        except (discord.Forbidden, discord.HTTPException) as exc:
             print(f"[FAMILY] Role sync failed for {uid}: {exc}")
+
+    # A manually added role may still have no DB entry when the trial is over.
+    # Revoke these orphan roles too; otherwise they could keep access to the
+    # role-permission promotion channel after the expiry deadline.
+    if rollout and datetime.fromisoformat(rollout[1]) <= now:
+        for member in role_members:
+            if member.id not in active_ids and role in member.roles:
+                try:
+                    await member.remove_roles(
+                        role, reason="DDS FAMILY free trial expired (orphan role)"
+                    )
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    print(f"[FAMILY] Orphan role removal failed user={member.id}: {exc}")
 
 
 async def reconcile_admin_confirmed_trial(guild, member):
