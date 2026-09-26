@@ -2467,13 +2467,13 @@ async def t_create_panel(ctx):
     embed = discord.Embed(
         title="💼 DDS | 커미션 및 문의 상담",
         description=(
-            "원하시는 카테고리를 선택해 주세요.\\n\\n"
-            "🎨 **커미션 문의**\\n"
-            "GFX · Roblox 복장 · FAMILY UI 사전 체험\\n\\n"
-            "🤝 **지원 & 제휴 문의**\\n"
-            "개발자 지원 · 파트너 문의\\n\\n"
-            "📋 **가격표 확인**\\n"
-            "일반 · 단골 20% · FAMILY 20% · FAMILY+단골 30%\\n\\n"
+            "원하시는 카테고리를 선택해 주세요.\n\n"
+            "🎨 **커미션 문의**\n"
+            "GFX · Roblox 복장 · FAMILY UI 사전 체험\n\n"
+            "🤝 **지원 & 제휴 문의**\n"
+            "개발자 지원 · 파트너 문의\n\n"
+            "📋 **가격표 확인**\n"
+            "일반 · 단골 20% · FAMILY 20% · FAMILY+단골 30%\n\n"
             "※ 전용 서비스는 해당 회원에게만 제공됩니다."
         ),
         color=0x5865F2,
