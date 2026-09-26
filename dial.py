@@ -36,6 +36,7 @@ from database.services.ticket_layout import ticket_name, get_or_create_ticket_ca
 from database.services.point_ranking import build_point_embed, refresh_point_ranking
 from database.services.update_announcement import announce_once, announce_family_preview_once, GUILD_ID as DDS_RELEASE_GUILD_ID
 from database.services.ui_poll_announcement import publish_ui_poll_once
+from database.services.family_launch_announcement import announce_family_launch_once
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -883,6 +884,21 @@ async def before_publish_dds_family_preview():
     await bot.wait_until_ready()
 
 
+# New FAMILY launch notice supersedes the former preview reminder.
+# The first run begins after Discord is ready; failures retry safely.
+@tasks.loop(minutes=10)
+async def publish_dds_family_launch():
+    try:
+        await announce_family_launch_once(bot)
+    except Exception as exc:
+        print(f"[DDS FAMILY 시작 공지 재시도 대기] {type(exc).__name__}: {exc}")
+
+
+@publish_dds_family_launch.before_loop
+async def before_publish_dds_family_launch():
+    await bot.wait_until_ready()
+
+
 @tasks.loop(count=1)
 async def publish_dds_ui_poll():
     try:
@@ -952,8 +968,9 @@ class DialianBot(commands.Bot):
         if not publish_dds_ui_poll.is_running():
             publish_dds_ui_poll.start()
 
-        if not publish_dds_family_preview.is_running():
-            publish_dds_family_preview.start()
+        # Do not re-post an outdated 'coming soon' preview after launch.
+        if not publish_dds_family_launch.is_running():
+            publish_dds_family_launch.start()
 
 
 intents = discord.Intents.default()
@@ -2444,6 +2461,28 @@ async def update_bot(ctx):
 
 
 # Failed first attempts may be retried without permitting a second post.
+@bot.command(name="패밀리시작공지1회")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def manually_publish_family_launch(ctx):
+    """Idempotent recovery if the automatic start notice was not delivered."""
+    if ctx.guild.id != DDS_RELEASE_GUILD_ID:
+        return await ctx.send("❌ DDS 공식 서버에서만 실행할 수 있습니다.")
+    try:
+        posted = await announce_family_launch_once(bot)
+    except Exception as exc:
+        print(f"[DDS FAMILY 시작 공지 수동 재시도 실패] {type(exc).__name__}: {exc}")
+        return await ctx.send(
+            "⚠️ FAMILY 시작 공지를 아직 게시하지 못했습니다. "
+            "실제 체험 시작 기록, 업데이트 채널 권한 및 Dialian 로그를 확인해주세요."
+        )
+    await ctx.send(
+        "✅ DDS FAMILY 시작 안내가 공식 업데이트 채널에 게시되었습니다."
+        if posted else
+        "ℹ️ 이번 FAMILY 시작 안내는 이미 게시되었거나 체험 기간이 종료되었습니다."
+    )
+
+
 @bot.command(name="패밀리사전공지1회")
 @commands.guild_only()
 @commands.has_permissions(administrator=True)
