@@ -1556,16 +1556,16 @@ async def family_admin_status(ctx, member: discord.Member):
     buyer_role = BUYER_ROLE_ID in ids
     active = await is_family_active(member)
     record_text = (
-        f"유형: {row[0]} / 상태: {row[1]}\\n"
-        f"시작: {row[2]}\\n종료: {row[3]}"
+        f"유형: {row[0]} / 상태: {row[1]}\n"
+        f"시작: {row[2]}\n종료: {row[3]}"
         if row else "해당 계정의 FAMILY 이용 기록 없음"
     )
     start_text = f"{rollout[0]} → {rollout[1]}" if rollout else "시작 기록 없음"
     await ctx.send(
-        f"🔎 {member.mention} FAMILY 확인\\n"
-        f"구매자 역할: {buyer_role} / FAMILY 역할: {family_role}\\n"
-        f"실제 혜택 접근: {active}\\n"
-        f"개인 기록: {record_text}\\n전체 무료 체험: {start_text}\\n"
+        f"🔎 {member.mention} FAMILY 확인\n"
+        f"구매자 역할: {buyer_role} / FAMILY 역할: {family_role}\n"
+        f"실제 혜택 접근: {active}\n"
+        f"개인 기록: {record_text}\n전체 무료 체험: {start_text}\n"
         "※ FAMILY 역할만 수동 지급한 계정은 DB에 유효한 기록이 없으면 이용할 수 없습니다.",
         allowed_mentions=discord.AllowedMentions.none(),
     )
@@ -1582,7 +1582,7 @@ async def family_admin_repair_trial(ctx, member: discord.Member):
         return await ctx.send(f"❌ {exc}")
     await ctx.send(
         f"{'✅ 기존 체험 기록을 복구했습니다.' if inserted else 'ℹ️ 이미 체험/구독 기록이 있습니다.'} "
-        f"대상: {member.mention} / 원래 종료 시각: {expires}\\n"
+        f"대상: {member.mention} / 원래 종료 시각: {expires}\n"
         "기존 기간은 연장하지 않았습니다.",
         allowed_mentions=discord.AllowedMentions.none(),
     )
