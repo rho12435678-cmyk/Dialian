@@ -23,7 +23,7 @@ from database.monthly_stats import (
     update_monthly_stats_message,
 )
 from database.services.family import (is_family_active, discounted_price, start_trial_once,
-    reconcile_roles, activate_paid_after_confirmation)
+    reconcile_roles, activate_paid_after_confirmation, ensure_family_promo_permissions)
 from database.modal.ui_modal import UIQuantityView
 from database.services.points import (
     add_user_points,
@@ -1508,7 +1508,7 @@ async def family_membership_maintenance():
     guild = bot.get_guild(DDS_RELEASE_GUILD_ID)
     if guild:
         await start_trial_once(guild)
-        await reconcile_roles(guild)
+        await ensure_family_promo_permissions(guild)
 
 @family_membership_maintenance.before_loop
 async def before_family_membership_maintenance():
