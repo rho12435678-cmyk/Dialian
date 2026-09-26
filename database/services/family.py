@@ -95,6 +95,42 @@ async def reconcile_roles(guild):
         except (discord.HTTPException,discord.Forbidden) as exc:
             print(f"[FAMILY] Role sync failed for {uid}: {exc}")
 
+
+async def reconcile_admin_confirmed_trial(guild, member):
+    """Repair an existing-buyer trial role manually granted by staff.
+
+    Only administrators should call this after verifying the buyer held the
+    role at the original rollout. Reuses the existing global trial dates,
+    never extends an expired trial or changes an existing paid membership.
+    """
+    await init_family_tables()
+    ids = {role.id for role in member.roles}
+    if BUYER_ROLE_ID not in ids or FAMILY_ROLE_ID not in ids:
+        raise ValueError("구매자 역할과 FAMILY 역할을 모두 보유해야 합니다.")
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT started_at, expires_at FROM family_trial_rollout WHERE guild_id=?",
+            (guild.id,),
+        ) as cur:
+            dates = await cur.fetchone()
+        if not dates:
+            await db.rollback()
+            raise ValueError("이 서버의 무료 체험 시작 기록이 없습니다.")
+        started, expires = dates
+        if datetime.fromisoformat(expires) <= utcnow():
+            await db.rollback()
+            raise ValueError("원래 무료 체험 기간이 이미 종료되어 연장할 수 없습니다.")
+        cursor = await db.execute(
+            """INSERT OR IGNORE INTO family_memberships
+               (guild_id,user_id,kind,starts_at,expires_at,state)
+               VALUES (?,?,'trial',?,?,'active')""",
+            (guild.id, member.id, started, expires),
+        )
+        inserted = cursor.rowcount == 1
+        await db.commit()
+    return inserted, expires
+
 async def activate_paid_after_confirmation(guild,member,days):
     """Human-admin action after payment verification. No recurring charging."""
     if not 1<=days<=366:
