@@ -9,10 +9,10 @@ UI_BASE = {"단품 (1개)": 5000, "2+1 묶음": 10000, "3+1 묶음": 15000}
 class UIPreviewModal(PurchaseModal):
     COMMISSION_NAME = "Roblox UI 사전 체험"
 
-    def __init__(self, bundle_type="단품 (1개)"):
+    def __init__(self, bundle_type="단품 (1개)", selected_designer=None):
         discord.ui.Modal.__init__(self, title=f"🖥️ UI 커미션 사전 체험 [{bundle_type}]")
         self.bundle_type = bundle_type
-        self.selected_designer = None
+        self.selected_designer = selected_designer
         self.roblox_nickname = discord.ui.TextInput(label="🎮 Roblox 사용자명/프로젝트", required=True, max_length=100)
         self.gfx_genre = discord.ui.TextInput(label="🖥️ UI 종류", placeholder="예: 게임 메뉴, 상점, 설정", max_length=100)
         self.gfx_style = discord.ui.TextInput(label="📝 UI 요구사항", style=discord.TextStyle.paragraph, max_length=1000)
