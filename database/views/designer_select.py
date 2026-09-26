@@ -2,17 +2,21 @@ import discord
 from config import DESIGNER_ROLE_IDS
 from database.modal.gfx_modal import PurchaseModal
 from database.modal.uniform_modal import UniformModal
+from database.modal.ui_modal import UIPreviewModal
+from database.services.family import is_family_active
 
 # 모달 매핑
 MODALS = {
     "gfx": PurchaseModal,
     "uniform": UniformModal,
+    "ui": UIPreviewModal,
 }
 
 # 카테고리 라벨
 CATEGORY_LABELS = {
     "gfx": "GFX",
     "uniform": "Roblox 복장",
+    "ui": "Roblox UI",
 }
 
 
@@ -69,6 +73,10 @@ class DesignerSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if self.category == "ui" and not await is_family_active(interaction.user):
+            return await interaction.response.send_message(
+                "🔒 UI 사전 체험은 FAMILY 활성 회원 전용입니다.", ephemeral=True,
+            )
         selected_val = self.values[0]
 
         if selected_val == "none":
@@ -122,6 +130,10 @@ class QuantitySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if self.category == "ui" and not await is_family_active(interaction.user):
+            return await interaction.response.send_message(
+                "🔒 UI 사전 체험은 FAMILY 활성 회원 전용입니다.", ephemeral=True,
+            )
         bundle_type = self.values[0]
         modal_class = MODALS.get(self.category)
 

@@ -26,6 +26,7 @@ from database.services.family import (is_family_active, discounted_price, start_
     reconcile_roles, activate_paid_after_confirmation, ensure_family_promo_permissions,
     init_family_tables, reconcile_admin_confirmed_trial)
 from database.modal.ui_modal import UIQuantityView
+from database.services.ui_designer_role import ensure_ui_designer_role
 from database.services.points import (
     add_user_points,
     get_user_points,
@@ -687,7 +688,19 @@ class CategorySelectView(ui.View):
     async def btn_ui_preview(self, interaction: discord.Interaction, button: ui.Button):
         if not await is_family_active(interaction.user):
             return await interaction.response.send_message("🔒 FAMILY 활성 회원만 UI 사전 체험을 신청할 수 있습니다.", ephemeral=True)
-        await interaction.response.send_message("🖥️ UI 사전 체험: 묶음을 선택하세요.", view=UIQuantityView(), ephemeral=True)
+        role = await ensure_ui_designer_role(interaction.guild)
+        if role is None:
+            return await interaction.response.send_message(
+                "⚠️ UI 디자이너 역할이 아직 설정되지 않았습니다. 관리자에게 문의해 주세요.",
+                ephemeral=True,
+            )
+        view = await DesignerView.create(interaction.guild, "ui")
+        embed = discord.Embed(
+            title="🖥️ UI 디자이너 선택 (FAMILY 전용)",
+            description="담당 UI 디자이너를 선택하거나 추후 배정을 요청하세요.",
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply", row=1)
     async def btn_dev_apply(self, interaction: discord.Interaction, button: ui.Button):
@@ -1188,6 +1201,17 @@ async def build_designer_tier_embed(guild: discord.Guild):
         inline=False
     )
 
+    ui_role_id = DESIGNER_ROLE_IDS.get("ui")
+    ui_members = [
+        m.mention for m in guild.members
+        if ui_role_id and any(r.id == ui_role_id for r in m.roles)
+    ]
+    embed.add_field(
+        name="🖥️ Roblox UI 디자이너 목록",
+        value=f"🖥️ **UI 디자이너**: {fmt(ui_members)}",
+        inline=False,
+    )
+
     embed.set_footer(text="자동 동기화 시스템 작동 중 | 멤버 및 역할 변경 시 자동 반영")
     return embed
 
@@ -1525,6 +1549,7 @@ async def before_repair_review_awards():
 async def family_membership_maintenance():
     guild = bot.get_guild(DDS_RELEASE_GUILD_ID)
     if guild:
+        await ensure_ui_designer_role(guild)
         await start_trial_once(guild)
         await ensure_family_promo_permissions(guild)
 
