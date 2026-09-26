@@ -270,6 +270,8 @@ class PurchaseModal(discord.ui.Modal):
         except (discord.Forbidden, discord.HTTPException):
             pass
         await interaction.followup.send(f"✅ 신청 완료!\n{ticket_channel.mention}", ephemeral=True)
+        # Return the exact ticket to subclasses instead of querying for the latest user ticket.
+        return ticket_channel
 
 
 class UniformModal(PurchaseModal):
