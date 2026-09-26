@@ -9,6 +9,8 @@ GFX_PRICES = {
     "상급": (8500, 17000, 25500),
 }
 UNIFORM_PRICES = (5000, 10000, 15000)
+# Optional colour/design variation added to a uniform order, per variation.
+UNIFORM_VARIATION_BASE = 500
 
 def bundle_index(name):
     if "3+1" in str(name):
