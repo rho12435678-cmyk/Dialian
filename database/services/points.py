@@ -12,6 +12,7 @@ from config import (
     REVIEW_POINTS_SINGLE,
     TARGET_REGULAR_POINTS,
 )
+from database.services.family import is_family_active
 from database.database import DATABASE
 from database.services.point_ranking import refresh_point_ranking
 
@@ -120,7 +121,7 @@ async def add_user_points(guild, member, amount: int) -> int:
 
 
 async def process_daily_attendance(guild, member) -> tuple[bool, int, int]:
-    """매일 1회 출석체크 처리 (+10P)"""
+    """매일 1회 출석체크: 일반 +10P, FAMILY +15P."""
     today_str = datetime.now(KST).date().isoformat()
     user_id = member.id
 
@@ -155,9 +156,10 @@ async def process_daily_attendance(guild, member) -> tuple[bool, int, int]:
         )
         await db.commit()
 
-    # 10 포인트 지급
-    new_total = await add_user_points(guild, member, 10)
-    return True, 10, new_total
+    # FAMILY +15P; 일반 +10P. Existing daily once-only lock remains unchanged.
+    reward = 15 if await is_family_active(member) else 10
+    new_total = await add_user_points(guild, member, reward)
+    return True, reward, new_total
 
 
 async def add_review_points_by_bundle(
@@ -171,6 +173,8 @@ async def add_review_points_by_bundle(
     else:
         points_to_add = REVIEW_POINTS_SINGLE
 
+    if await is_family_active(member):
+        points_to_add = points_to_add * 3 // 2
     new_total = await add_user_points(guild, member, points_to_add)
     return points_to_add, new_total
 
@@ -280,11 +284,12 @@ class PointsCog(commands.Cog):
         embed.add_field(
             name="1️⃣ 포인트 적립 방법 안내",
             value=(
-                "• **출석체크**: `!출석체크` 입력 시 매일 **+10P** 지급!\n"
+                "• **출석체크**: 일반 **+10P** / FAMILY **+15P** (매일 1회)\n"
                 "• **후기 작성**\n"
                 f"  - 단품 구매 후기: **{REVIEW_POINTS_SINGLE}P**\n"
                 f"  - 2+1 묶음 구매 후기: **{REVIEW_POINTS_2_PLUS_1}P**\n"
-                f"  - 3+1 묶음 구매 후기: **{REVIEW_POINTS_3_PLUS_1}P**"
+                f"  - 3+1 묶음 구매 후기: **{REVIEW_POINTS_3_PLUS_1}P**\n"
+                "• FAMILY 구매 후기: 단품 75P / 2+1 150P / 3+1 225P"
             ),
             inline=False,
         )
@@ -304,7 +309,7 @@ class PointsCog(commands.Cog):
             value=(
                 "```text\n"
                 "[ 포인트 확인 & 출석체크 ]\n"
-                "!출석체크 (또는 !출석, !출체) - 매일 1회 10P 적립\n"
+                "!출석체크 (또는 !출석, !출체) - 일반 10P / FAMILY 15P\n"
                 "!포인트 (또는 !마일리지, !p) [@유저 선택]\n"
                 "- 보유 포인트 및 티어/혜택 현황 확인\n\n"
                 "[ 포인트 오락실 & 미니게임 확률 안내 ]\n"

@@ -7,6 +7,7 @@ import config
 from config import *
 from database.database import DATABASE  # 중앙 DB 경로 모듈 직접 연결
 from database.services.points import credit_review_award
+from database.services.family import is_family_active
 
 
 def parse_designer_id(text):
@@ -215,6 +216,10 @@ class StarRatingView(discord.ui.View):
                         REVIEW_POINTS_2_PLUS_1 if "2+1" in bundle_type else
                         REVIEW_POINTS_SINGLE
                     )
+                    # Snapshot FAMILY multiplier when the review is created,
+                    # so expiry/retry cannot change an already-earned award.
+                    if await is_family_active(interaction.user):
+                        award = award * 3 // 2
                     await db.execute(
                         """INSERT INTO review_point_awards
                            (ticket_channel, customer_id, amount, status)

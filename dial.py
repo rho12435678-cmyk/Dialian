@@ -22,6 +22,9 @@ from database.monthly_stats import (
     save_monthly_stats_message,
     update_monthly_stats_message,
 )
+from database.services.family import (is_family_active, discounted_price, start_trial_once,
+    reconcile_roles, activate_paid_after_confirmation)
+from database.modal.ui_modal import UIQuantityView
 from database.services.points import (
     add_user_points,
     get_user_points,
@@ -52,7 +55,7 @@ TOKEN = os.getenv("TOKEN")
 # 📌 런타임 전용 설정
 # 채널/역할/포인트 정책 값은 config.py를 단일 소스로 사용합니다.
 # ----------------------------------------------------
-ATTENDANCE_REWARD = 10
+ATTENDANCE_REWARD = 10  # FAMILY gets 15 via points service
 DAILY_ACTION_LIMIT = 3
 MAX_BET = 500  # 포인트 폭주 방지용 최대 배팅 제한
 
@@ -678,6 +681,12 @@ class CategorySelectView(ui.View):
         embed = discord.Embed(title="👔 Roblox 복장 디자이너 선택", description="원하시는 디자이너를 선택하거나 랜덤 배정을 선택해주세요.", color=0x5865F2)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
+    @ui.button(label="🖥️ UI 커미션 (FAMILY 사전 체험)", style=discord.ButtonStyle.primary, custom_id="ticket_ui_preview", row=0)
+    async def btn_ui_preview(self, interaction: discord.Interaction, button: ui.Button):
+        if not await is_family_active(interaction.user):
+            return await interaction.response.send_message("🔒 FAMILY 활성 회원만 UI 사전 체험을 신청할 수 있습니다.", ephemeral=True)
+        await interaction.response.send_message("🖥️ UI 사전 체험: 묶음을 선택하세요.", view=UIQuantityView(), ephemeral=True)
+
     @ui.button(label="💻 개발자 지원", style=discord.ButtonStyle.secondary, custom_id="ticket_dev_apply", row=1)
     async def btn_dev_apply(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.send_modal(DevApplyModal())
@@ -773,6 +782,27 @@ class CategorySelectView(ui.View):
         embed.add_field(name="👑 단골 혜택 안내", value=vip_info, inline=False)
         embed.set_footer(text="✨ 늘 이용해 주셔서 감사합니다!")
 
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+    @ui.button(label="💎 FAMILY 전용 (20% 할인) 가격표", style=discord.ButtonStyle.primary, custom_id="price_family", row=3)
+    async def btn_price_family(self, interaction: discord.Interaction, button: ui.Button):
+        if not await is_family_active(interaction.user):
+            return await interaction.response.send_message("🔒 활성 FAMILY 회원만 가격표를 볼 수 있습니다.", ephemeral=True)
+        regular = any(r.id == REGULAR_CUSTOMER_ROLE_ID for r in interaction.user.roles)
+        rate = 30 if regular else 20
+        rows = (
+            ("GFX 초급", (5000, 10000, 15000)),
+            ("GFX 중급", (6500, 13000, 19500)),
+            ("GFX 상급", (8500, 17000, 25500)),
+            ("복장 개별", (5000, 10000, 15000)),
+            ("UI 사전 체험", (5000, 10000, 15000)),
+        )
+        embed = discord.Embed(title=f"💎 DDS FAMILY 전용 가격표 ({rate}% 할인)", color=discord.Color.teal())
+        for name, prices in rows:
+            amounts = [discounted_price(p, family=True, regular=regular) for p in prices]
+            embed.add_field(name=name, value="단품 **{:,}원** / 2+1 **{:,}원** / 3+1 **{:,}원**".format(*amounts), inline=False)
+        embed.set_footer(text="FAMILY 20% + 단골 동시 보유 시 10% 추가 = 총 30%. 40% 중복 할인 없음.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -912,6 +942,9 @@ class DialianBot(commands.Bot):
 
         if not repair_review_awards.is_running():
             repair_review_awards.start()
+
+        if not family_membership_maintenance.is_running():
+            family_membership_maintenance.start()
 
         if not publish_combined_dds_update.is_running():
             publish_combined_dds_update.start()
@@ -1468,6 +1501,31 @@ async def repair_review_awards():
 async def before_repair_review_awards():
     await bot.wait_until_ready()
 
+# First deployment takes a one-time existing-buyer snapshot. Database prevents
+# another free trial when the bot restarts; expiries retry every 10 minutes.
+@tasks.loop(minutes=10)
+async def family_membership_maintenance():
+    guild = bot.get_guild(DDS_RELEASE_GUILD_ID)
+    if guild:
+        await start_trial_once(guild)
+        await reconcile_roles(guild)
+
+@family_membership_maintenance.before_loop
+async def before_family_membership_maintenance():
+    await bot.wait_until_ready()
+
+@bot.command(name="패밀리구독지급")
+@commands.has_permissions(administrator=True)
+async def family_admin_paid(ctx, member: discord.Member, days: int):
+    """Admin only, after a verified external payment. Never auto-bill."""
+    try:
+        expiry = await activate_paid_after_confirmation(ctx.guild, member, days)
+    except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
+        return await ctx.send(f"❌ FAMILY 활성화 실패: {exc}")
+    await ctx.send(f"✅ {member.mention} FAMILY 기간: {expiry:%Y-%m-%d %H:%M} UTC")
+
+
+
 
 # ==================== [채널 유효성 및 일일 제한 헬퍼] ====================
 
@@ -1714,7 +1772,7 @@ async def command_list(ctx):
             "`!재시작` (관리자 전용 봇 재시작)\n"
             "`!업데이트확인` `!업데이트` (최신 Git Pull 반영)\n\n"
             "**[포인트 & 프로필]** *(명령어 채널 전용)*\n"
-            "`!출석체크` (매일 1회 출석 체크 시 **+10P** 지급!)\n"
+            "`!출석체크` (매일 1회 일반 **+10P** / FAMILY **+15P**)\n"
             "`!포인트` `!포인트지급 @유저 금액` `!포인트차감 @유저 금액` `!포인트리셋 @유저`\n\n"
             "**[🎰 오락실 & 미니게임]** *(명령어 채널 전용 / 최대 배팅: 500P)*\n"
             "`!뽑기` - 20P 소모 (최대 150P 획득 가능)\n"
