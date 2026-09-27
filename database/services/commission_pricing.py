@@ -9,6 +9,7 @@ GFX_PRICES = {
     "상급": (8500, 17000, 25500),
 }
 UNIFORM_PRICES = (5000, 10000, 15000)
+UI_PRICES = (5000, 10000, 15000)
 # Optional colour/design variation added to a uniform order, per variation.
 UNIFORM_VARIATION_BASE = 500
 
@@ -28,9 +29,13 @@ async def quote_for(category, bundle, member, designer=None):
             return None
     elif category == "Roblox 복장":
         price_table = UNIFORM_PRICES
+    elif category == "Roblox UI 사전 체험":
+        price_table = UI_PRICES
     else:
         return None
     family = await is_family_active(member)
+    if category == "Roblox UI 사전 체험" and not family:
+        return None
     regular = any(r.id == REGULAR_CUSTOMER_ROLE_ID for r in member.roles)
     base = price_table[bundle_index(bundle)]
     return {
