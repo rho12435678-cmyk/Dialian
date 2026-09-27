@@ -7,8 +7,8 @@ import discord
 from database.views.review_view import build_review_ticket_notice
 
 
-class ReviewTicketNoticeTests(unittest.TestCase):
-    def test_all_commission_categories_show_stars_and_safe_close(self):
+class ReviewTicketNoticeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_commission_categories_show_stars_and_safe_close(self):
         customer = SimpleNamespace(mention="<@111>")
         for category in ("GFX", "Roblox 복장", "UI"):
             with self.subTest(category=category):
@@ -29,7 +29,7 @@ class ReviewTicketNoticeTests(unittest.TestCase):
                     for item in view.children
                 ))
 
-    def test_missing_designer_does_not_mention_someone_else(self):
+    async def test_missing_designer_does_not_mention_someone_else(self):
         embed, view = build_review_ticket_notice(
             5, "GFX", "단품 (1개)", SimpleNamespace(mention="<@111>"),
             None, "https://discord.com/channels/10/20/30",
