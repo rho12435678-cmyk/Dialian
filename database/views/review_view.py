@@ -38,6 +38,47 @@ async def find_designer_id_from_ticket(channel):
     return None
 
 
+def build_review_ticket_notice(stars, category_name, bundle_type, customer, designer_id, review_url):
+    """Build an in-ticket receipt; the existing close handler keeps permission checks."""
+    from database.views.close_ticket import TicketCloseView
+
+    embed = discord.Embed(
+        title="✅ 고객 별점 후기 등록 완료",
+        description=(
+            "고객의 후기가 후기 채널에 정상적으로 게시되었습니다.\\n"
+            "담당 디자이너는 이 티켓에서 별점을 확인한 뒤 "
+            "**🔒 티켓 닫기**를 눌러 안전하게 보관할 수 있습니다."
+        ),
+        color=discord.Color.green(),
+        timestamp=datetime.now(),
+    )
+    embed.add_field(name="👤 작성자", value=customer.mention, inline=True)
+    embed.add_field(
+        name="👨‍💻 담당 디자이너",
+        value=f"<@{designer_id}>" if designer_id else "미지정",
+        inline=True,
+    )
+    embed.add_field(name="⭐ 고객 별점", value=f"{'⭐' * stars} ({stars}/5점)", inline=False)
+    embed.add_field(
+        name="📦 커미션",
+        value=f"{category_name} · {bundle_type}",
+        inline=False,
+    )
+    embed.set_footer(text="DDS · 후기 등록 확인 후 담당 디자이너/관리자만 종료 가능")
+
+    view = TicketCloseView()
+    # Only display the safe archive action here, not the destructive delete action.
+    for item in list(view.children):
+        if getattr(item, "custom_id", None) == "delete_ticket":
+            view.remove_item(item)
+    view.add_item(discord.ui.Button(
+        label="📝 후기 원문 보기",
+        style=discord.ButtonStyle.link,
+        url=review_url,
+    ))
+    return embed, view
+
+
 class StarRatingView(discord.ui.View):
 
     def __init__(self, designer_id=None):
@@ -294,6 +335,35 @@ class StarRatingView(discord.ui.View):
                 )
                 await db.commit()
 
+            # Publish a same-ticket receipt only after the public review was
+            # successfully posted and its publication recorded in the DB.
+            # Never let a notification failure roll back or duplicate a review.
+            ticket_notice_warning = ""
+            try:
+                ticket_embed, ticket_view = build_review_ticket_notice(
+                    stars, category_name, bundle_type, ticket_owner,
+                    designer_id, sent_review.jump_url,
+                )
+                await channel.send(
+                    content=(
+                        f"<@{designer_id}> 고객 후기가 등록되었습니다. "
+                        "아래에서 별점을 확인하고 티켓을 종료해 주세요."
+                        if designer_id else
+                        "✅ 고객 후기가 등록되었습니다. 담당자 또는 관리자가 확인해 주세요."
+                    ),
+                    embed=ticket_embed,
+                    view=ticket_view,
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True, roles=False, everyone=False,
+                    ),
+                )
+            except (discord.HTTPException, discord.Forbidden) as notice_err:
+                print(f"[티켓 후기 알림 실패] ticket={channel.id}: {notice_err}")
+                ticket_notice_warning = (
+                    "\\n⚠️ 티켓 내 알림을 게시하지 못했습니다. "
+                    "후기 원문은 아래 링크로 확인할 수 있습니다."
+                )
+
             role_notice = ""
             try:
                 buyer_role = guild.get_role(BUYER_ROLE_ID)
@@ -336,7 +406,7 @@ class StarRatingView(discord.ui.View):
             )
 
             await interaction.followup.send(
-                f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!{points_notice}{role_notice}",
+                f"🎉 성공적으로 **{stars}점** 별점이 제출되었습니다!{points_notice}{role_notice}{ticket_notice_warning}",
                 view=success_view,
                 ephemeral=True,
             )
