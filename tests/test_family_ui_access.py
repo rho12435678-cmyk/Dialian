@@ -40,7 +40,7 @@ class UIPreviewFlowTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_modal.assert_not_awaited()
         interaction.response.send_message.assert_awaited_once()
 
-    async def test_submission_quotes_exact_ticket_instead_of_newest_database_row(self):
+    async def test_submission_reuses_parent_ticket_without_duplicate_ui_price(self):
         channel=SimpleNamespace(id=4567,send=AsyncMock())
         member=SimpleNamespace(roles=[SimpleNamespace(id=REGULAR_CUSTOMER_ROLE_ID)])
         interaction=SimpleNamespace(user=member,followup=SimpleNamespace(send=AsyncMock()))
@@ -49,8 +49,9 @@ class UIPreviewFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(PurchaseModal,"create_ticket",new=AsyncMock(return_value=channel)) as base:
             await modal.create_ticket(interaction)
         base.assert_awaited_once_with(interaction)
-        channel.send.assert_awaited_once()
-        self.assertIn("7,000원",channel.send.await_args.args[0])
+        # Parent now includes the UI quote in its unified ticket guide.
+        # Subclass must not send an additional price message.
+        channel.send.assert_not_awaited()
 
 
 class FamilyTrialRepairTests(unittest.IsolatedAsyncioTestCase):

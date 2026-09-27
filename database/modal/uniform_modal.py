@@ -10,7 +10,8 @@ from database.views.payment_view import PaymentView
 from database.views.claim_view import ClaimTicketView
 from database.ticket_notice import build_ticket_notice_embed
 from database.purchase_log import send_purchase_log
-from database.services.commission_pricing import quote_for
+from database.services.commission_pricing import quote_for, UNIFORM_VARIATION_BASE
+from database.services.family import discounted_price
 from database.services.ticket_layout import get_or_create_ticket_category, ticket_name
 from database.views.ticket_guard import (
     acquire_ticket_creation_lock,
@@ -169,37 +170,26 @@ class PurchaseModal(discord.ui.Modal):
             embed.add_field(name=bonus_title, value=self.fourth_style.value, inline=False)
 
         # 1. 신청서 전송 (하단에 [내가 담당하기] 버튼 View 부착)
-        await ticket_channel.send(content=f"{user.mention}\n신청이 접수되었습니다. (**{self.COMMISSION_NAME}** / 담당: {designer_mention})", embed=embed, view=claim_view)
+        await ticket_channel.send(content=f"📩 {user.mention} 신청이 접수되었습니다. 담당: {designer_mention}", embed=embed, view=claim_view)
 
-        # Show the FAMILY + regular additive discount in the actual order ticket.
-        # No payment is collected here; the assigned designer verifies final pricing.
-        quote = await quote_for(self.COMMISSION_NAME, self.bundle_type, user, developer)
-        if quote is None and self.COMMISSION_NAME == "GFX":
-            await ticket_channel.send(
-                "💰 **가격 안내:** 담당 디자이너 등급이 확정되면 "
-                "FAMILY·단골 역할에 따른 할인액을 안내합니다."
-            )
-        elif quote is not None:
-            await ticket_channel.send(
-                f"💰 **커미션 예상 결제액**\n"
-                f"기준가 {quote['base']:,}원 · 할인 {quote['rate']}% "
-                f"· **할인가 {quote['total']:,}원**\n"
-                "※ 티켓 생성 시점의 혜택을 기준으로 안내합니다. "
-                "입금은 담당 디자이너의 최종 확인 후 진행하세요."
-            )
-
-        # 2. 안내, 참고자료 전송
+        # Unified mobile-friendly ticket guide: price, rules and references.
+        # Keep the order form and designer claim button unchanged.
         try:
-            guide_embed = build_ticket_notice_embed() 
-            ref_embed = discord.Embed(
-                title="🖼️ 참고 자료(이미지/파일) 첨부 안내",
-                description=f"{user.mention}님, 원하시는 구도, 분위기, 색감, 참고용 이미지/파일을 구체적으로 올려주세요!",
-                color=0x5865F2
+            quote = await quote_for(
+                self.COMMISSION_NAME, self.bundle_type, user, developer
             )
-            ref_embed.set_footer(text="참고 자료가 상세할수록 높은 완성도의 결과물이 나옵니다 ✨")
-            await ticket_channel.send(embeds=[guide_embed, ref_embed])
+            variation_unit = None
+            if self.COMMISSION_NAME == "Roblox 복장" and quote is not None:
+                variation_unit = discounted_price(
+                    UNIFORM_VARIATION_BASE, quote["family"], quote["regular"]
+                )
+            await ticket_channel.send(
+                embed=build_ticket_notice_embed(
+                    self.COMMISSION_NAME, quote, variation_unit
+                )
+            )
         except Exception as notice_err:
-            print(f"[안내 임베드 생성/전송 오류] {notice_err}")
+            print(f"[통합 커미션 안내 전송 오류] {notice_err}")
 
         # 3. 구매 로그 전송
         try:
