@@ -8,6 +8,7 @@ from config import *
 from database.database import DATABASE  # 중앙 DB 경로 모듈 직접 연결
 from database.services.points import credit_review_award
 from database.services.family import is_family_active
+from database.services.ops_health import record_failure
 
 
 def parse_designer_id(text):
@@ -358,7 +359,7 @@ class StarRatingView(discord.ui.View):
                     ),
                 )
             except (discord.HTTPException, discord.Forbidden) as notice_err:
-                print(f"[티켓 후기 알림 실패] ticket={channel.id}: {notice_err}")
+                await record_failure("review_notice", notice_err)
                 ticket_notice_warning = (
                     "\\n⚠️ 티켓 내 알림을 게시하지 못했습니다. "
                     "후기 원문은 아래 링크로 확인할 수 있습니다."

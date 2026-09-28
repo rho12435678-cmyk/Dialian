@@ -7,6 +7,8 @@ from datetime import datetime
 from config import *
 from database.database import DATABASE
 from database.views.ticket_context import resolve_ticket_channel
+from database.services.ticket_access import ticket_assignment, can_manage_assignment
+from database.services.ops_health import record_failure
 
 
 def has_designer_role(member):
@@ -164,33 +166,16 @@ def parse_mention_id(text):
 
 
 async def find_ticket_designer_id(channel):
-    async for msg in channel.history(limit=50, oldest_first=True):
-        for embed in msg.embeds:
-            for field in embed.fields:
-                designer_id = parse_mention_id(field.value)
-
-                if designer_id:
-                    return designer_id
-
-            designer_id = parse_mention_id(embed.description)
-
-            if designer_id:
-                return designer_id
-
-    return None
+    return (await ticket_assignment(channel)).designer_id
 
 
 def can_manage_ticket(member, user_id, designer_id):
+    """Legacy compatibility helper; use can_manage_assignment for decisions."""
     if member is None:
         return False
-
     if member.guild_permissions.administrator:
         return True
-
-    if designer_id is not None:
-        return user_id == designer_id
-
-    return has_designer_role(member)
+    return designer_id is not None and user_id == designer_id
 
 
 async def delete_ticket_channel(channel, deleted_by=None):
@@ -268,59 +253,13 @@ class TicketCloseView(discord.ui.View):
                         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                             ticket_owner = None
 
-            try:
-
-                async for msg in channel.history(
-                    limit=20,
-                    oldest_first=True
-                ):
-
-                    if not msg.embeds:
-                        continue
-
-                    embed = msg.embeds[0]
-
-                    if "커미션 신청서" not in embed.title:
-                        continue
-
-                    for field in embed.fields:
-
-                        if field.name == "👨‍💻 담당 디자이너":
-
-                            if "<@" in field.value:
-
-                                designer_id = int(
-                                    field.value.replace("<@", "")
-                                               .replace("!", "")
-                                               .replace(">", "")
-                                )
-
-                            break
-
-                    if designer_id:
-                        break
-
-            except Exception:
-                pass
-
+            assignment = await ticket_assignment(channel)
+            designer_id = assignment.designer_id
             closer = guild.get_member(interaction.user.id)
-            is_manager = (
-                closer is not None
-                and closer.guild_permissions.administrator
-            )
-            is_assigned_designer = (
-                designer_id is not None
-                and interaction.user.id == designer_id
-            )
-            is_role_designer = (
-                designer_id is None
-                and has_designer_role(closer)
-            )
-
-            if not (is_manager or is_assigned_designer or is_role_designer):
+            if not can_manage_assignment(closer, assignment):
                 return await interaction.followup.send(
-                    "❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.",
-                    ephemeral=True
+                    "❌ 현재 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True,
                 )
 
             dm_deleted_count = 0
@@ -499,7 +438,7 @@ class TicketCloseView(discord.ui.View):
             await archive_ticket_channel(channel)
 
         except Exception as e:
-            print(f"[티켓 닫기 에러] {e}")
+            await record_failure("ticket_close", e)
 
     @discord.ui.button(
         label="🗑️ 티켓 삭제",
@@ -526,13 +465,12 @@ class TicketCloseView(discord.ui.View):
                     ephemeral=True
                 )
 
-            designer_id = await find_ticket_designer_id(channel)
+            assignment = await ticket_assignment(channel)
             deleter = guild.get_member(interaction.user.id)
-
-            if not can_manage_ticket(deleter, interaction.user.id, designer_id):
+            if not can_manage_assignment(deleter, assignment):
                 return await interaction.response.send_message(
-                    "❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.",
-                    ephemeral=True
+                    "❌ 현재 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.",
+                    ephemeral=True,
                 )
 
             await interaction.response.send_message(
@@ -543,4 +481,4 @@ class TicketCloseView(discord.ui.View):
             await delete_ticket_channel(channel, interaction.user)
 
         except Exception as e:
-            print(f"[티켓 삭제 에러] {e}")
+            await record_failure("ticket_delete", e)

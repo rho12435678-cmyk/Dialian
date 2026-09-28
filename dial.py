@@ -50,6 +50,9 @@ from database.views.close_ticket import (
 from database.views.commission_panel import build_panel_views
 from database.views.payment_view import PaymentView
 from database.views.review_view import StarRatingView
+from database.services.ticket_access import ticket_assignment, can_manage_channel
+from database.services.review_recovery import reconcile_review_awards
+from database.services.ops_health import health_snapshot, record_failure
 from database.views.verify_view import RobloxConfirmView, VerifyView
 
 TOKEN = os.getenv("TOKEN")
@@ -212,34 +215,8 @@ async def find_ticket_owner(channel: discord.TextChannel):
 
 
 async def find_ticket_designer_id(channel: discord.TextChannel) -> int | None:
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("SELECT designer_id FROM commissions WHERE ticket_channel = ?", (channel.id,)) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0]:
-                return row[0]
-
-    async for msg in channel.history(limit=50, oldest_first=True):
-        for embed in msg.embeds:
-            for field in embed.fields:
-                if field.name == "👨‍💻 담당 디자이너":
-                    designer_id = parse_mention_id(field.value)
-                    if designer_id:
-                        return designer_id
-            if embed.description:
-                designer_id = parse_mention_id(embed.description)
-                if designer_id:
-                    return designer_id
-    return None
-
-
-def can_manage_ticket(member: discord.Member, user_id: int, designer_id: int | None) -> bool:
-    if member is None:
-        return False
-    if member.guild_permissions.administrator:
-        return True
-    if designer_id is not None:
-        return user_id == designer_id
-    return has_designer_role(member)
+    """Compatibility wrapper; button and command authorization use one policy."""
+    return (await ticket_assignment(channel)).designer_id
 
 
 async def update_commission_progress(channel: discord.TextChannel, progress: int):
@@ -703,7 +680,7 @@ async def scheduled_database_backup():
         if backup_path:
             print(f"[DB Backup] 백업 완료: {backup_path}")
     except Exception as e:
-        print(f"[DB Backup Error] {e}")
+        await record_failure("scheduled_backup", e)
 
 
 # ==================== [월간 통계 자동 갱신 태스크] ====================
@@ -1342,6 +1319,7 @@ async def update_point_ranking_message(bot_instance):
 
 @tasks.loop(minutes=3)
 async def repair_review_awards():
+    """Scheduling remains here; reconciliation and retries live in a service."""
     guild = None
     ranking_channel = bot.get_channel(POINT_RANKING_CHANNEL_ID)
     if ranking_channel:
@@ -1350,63 +1328,16 @@ async def repair_review_awards():
         guild = bot.guilds[0]
     if not guild:
         return
-
-    # Resolve publication-unknown reviews without accidentally rewarding a
-    # review that never appeared in the public channel.
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("""
-            SELECT ticket_channel FROM review_point_awards
-            WHERE status='unpublished' ORDER BY created_at LIMIT 30
-        """) as cursor:
-            unknown_ids = {record[0] for record in await cursor.fetchall()}
-    if unknown_ids:
-        review_channel = guild.get_channel(REVIEWS_CHANNEL_ID)
-        if review_channel is None:
-            review_channel = discord.utils.get(guild.text_channels, name=REVIEW_CHANNEL_NAME)
-        published = {}
-        if review_channel:
-            try:
-                async for message in review_channel.history(limit=1000):
-                    if message.author.id != bot.user.id:
-                        continue
-                    for embed in message.embeds:
-                        if embed.title != "✨ 소중한 커미션 후기가 도착했습니다!":
-                            continue
-                        footer = embed.footer.text if embed.footer else ""
-                        match = re.search(r"Ticket ID:\s*(\d+)", footer or "")
-                        if match and int(match.group(1)) in unknown_ids:
-                            published[int(match.group(1))] = message.id
-                    if len(published) == len(unknown_ids):
-                        break
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                print(f"[후기 게시 확인 실패] {exc}")
-        if published:
-            async with aiosqlite.connect(DATABASE) as db:
-                await db.execute("BEGIN IMMEDIATE")
-                for ticket_id, message_id in published.items():
-                    await db.execute(
-                        """UPDATE review_point_awards
-                           SET status='pending', review_message_id=?
-                           WHERE ticket_channel=? AND status='unpublished'""",
-                        (message_id, ticket_id),
-                    )
-                await db.commit()
-
-    async with aiosqlite.connect(DATABASE) as db:
-        async with db.execute("""
-            SELECT ticket_channel, customer_id FROM review_point_awards
-            WHERE status='pending' ORDER BY created_at LIMIT 30
-        """) as cursor:
-            pending = await cursor.fetchall()
-
-    for ticket_id, customer_id in pending:
-        try:
-            member = guild.get_member(customer_id) or discord.Object(id=customer_id)
-            await credit_review_award(guild, member, ticket_id)
-        except Exception as exc:
-            print(f"[후기 포인트 자동 복구 실패] ticket={ticket_id} {exc}")
-
-    await refresh_point_ranking(guild)
+    review_channel = guild.get_channel(REVIEWS_CHANNEL_ID)
+    if review_channel is None:
+        review_channel = discord.utils.get(guild.text_channels, name=REVIEW_CHANNEL_NAME)
+    try:
+        await reconcile_review_awards(
+            guild, bot.user.id, review_channel,
+            credit_review_award, refresh_point_ranking,
+        )
+    except Exception as exc:
+        await record_failure("review_repair", exc)
 
 
 @repair_review_awards.before_loop
@@ -2339,6 +2270,51 @@ async def update_check(ctx):
     await ctx.send(embed=embed)
 
 
+@bot.command(name="운영상태")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def operational_status(ctx):
+    """Sanitized operator-only health summary; never publish customer data."""
+    try:
+        status = await health_snapshot()
+        latency_ms = round(bot.latency * 1000) if bot.latency >= 0 else None
+        embed = discord.Embed(
+            title="🩺 Dialian 운영 상태",
+            color=(discord.Color.orange()
+                   if status["pending_reviews"] or status["unpublished_reviews"]
+                   or status["errors_24h"] else discord.Color.green()),
+            timestamp=discord.utils.utcnow(),
+        )
+        embed.add_field(name="진행 중 티켓", value=str(status["active_tickets"]))
+        embed.add_field(
+            name="후기 복구 대기",
+            value=f"지급 대기 {status['pending_reviews']} · 게시 확인 대기 {status['unpublished_reviews']}",
+            inline=False,
+        )
+        embed.add_field(
+            name="최근 24시간 오류",
+            value=str(status["errors_24h"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Discord 지연",
+            value=f"{latency_ms}ms" if latency_ms is not None else "확인 불가",
+        )
+        if status["error_components"]:
+            embed.add_field(
+                name="오류 발생 영역",
+                value="\n".join(
+                    f"{component}: {count}회"
+                    for component, count in status["error_components"]
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="개인정보·고객 메시지는 수집하지 않습니다")
+        await ctx.send(embed=embed)
+    except Exception:
+        await ctx.send("❌ 상태를 조회하지 못했습니다. 서버 DB 연결을 확인해주세요.")
+
+
 @bot.command(name="재시작", aliases=["봇재시작", "restart"])
 @commands.guild_only()
 @commands.has_permissions(administrator=True)
@@ -2529,7 +2505,7 @@ async def call_customer_command(ctx):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     designer_id = await find_ticket_designer_id(ctx.channel)
-    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+    if not await can_manage_channel(ctx.author, ctx.channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 손님을 호출할 수 있습니다.")
 
     await handle_customer_call(ctx.channel, ctx.author)
@@ -2643,21 +2619,17 @@ async def send_bank_to_ticket(ctx, member: discord.Member = None):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     author = ctx.guild.get_member(ctx.author.id) if ctx.guild else None
-    is_admin = author and author.guild_permissions.administrator
-    is_staff_designer = author and has_designer_role(author)
-
-    # 타 디자이너 계좌를 대리 전송(인자 지정)하거나 기본 담당 디자이너 조회
-    target_designer_id = member.id if member else await find_ticket_designer_id(ctx.channel)
-
-    if target_designer_id is None and is_staff_designer:
-        target_designer_id = ctx.author.id
-
-    if target_designer_id is None:
-        return await ctx.send("❌ 전송할 대상 디자이너 정보나 티켓 담당 디자이너를 찾지 못했습니다.")
-
-    # 권한 검사: 관리자 또는 디자이너 역할을 가진 경우 다른 디자이너의 계좌도 대리 전송 가능
-    if not (is_admin or is_staff_designer or ctx.author.id == target_designer_id):
-        return await ctx.send("❌ 담당 디자이너, 디자이너 역할 보유자 또는 관리자만 계좌를 전송할 수 있습니다.")
+    is_admin = bool(author and author.guild_permissions.administrator)
+    assignment = await ticket_assignment(ctx.channel)
+    # A designer may send only their own bank account, and only while the
+    # database records them as the assigned designer on this open ticket.
+    if not is_admin and not await can_manage_channel(author, ctx.channel):
+        return await ctx.send("❌ 현재 담당 디자이너 또는 관리자만 결제 정보를 전송할 수 있습니다.")
+    if member is not None and not is_admin and member.id != assignment.designer_id:
+        return await ctx.send("❌ 다른 디자이너의 계좌는 관리자만 대신 전송할 수 있습니다.")
+    target_designer_id = member.id if member else assignment.designer_id
+    if not target_designer_id:
+        return await ctx.send("❌ 담당 디자이너가 확정된 후 결제 정보를 전송해주세요.")
 
     if not await send_payment_info(ctx.channel, target_designer_id):
         target_name = member.mention if member else "해당 디자이너"
@@ -2746,7 +2718,7 @@ async def close_ticket_by_command(ctx):
     designer_id = await find_ticket_designer_id(channel)
     closer = guild.get_member(ctx.author.id) if guild else None
 
-    if not can_manage_ticket(closer, ctx.author.id, designer_id):
+    if not await can_manage_channel(closer, channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.")
 
     notice = await ctx.send("🔒 티켓 종료 처리 중입니다.")
@@ -2775,7 +2747,7 @@ async def delete_ticket_by_command(ctx):
     designer_id = await find_ticket_designer_id(channel)
     deleter = guild.get_member(ctx.author.id) if guild else None
 
-    if not can_manage_ticket(deleter, ctx.author.id, designer_id):
+    if not await can_manage_channel(deleter, channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.")
 
     await ctx.send("🗑️ 티켓을 삭제합니다.")
@@ -2794,7 +2766,7 @@ async def progress(ctx, percent: int):
         return await ctx.send("사용법: `!진행 0|25|50|75|100`")
 
     designer_id = await find_ticket_designer_id(ctx.channel)
-    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+    if not await can_manage_channel(ctx.author, ctx.channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 진행률을 수정할 수 있습니다.")
 
     status_labels = {0: "🟢 상담/대기중", 25: "🟡 작업 시작", 50: "🟠 작업 진행중", 75: "🔵 마무리 작업", 100: "✅ 완료"}
@@ -2819,7 +2791,7 @@ async def expected_time(ctx, *, time_str: str):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     designer_id = await find_ticket_designer_id(ctx.channel)
-    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+    if not await can_manage_channel(ctx.author, ctx.channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 예상 시간을 설정할 수 있습니다.")
 
     embed = discord.Embed(
@@ -2836,7 +2808,7 @@ async def complete(ctx):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     designer_id = await find_ticket_designer_id(ctx.channel)
-    if not can_manage_ticket(ctx.author, ctx.author.id, designer_id):
+    if not await can_manage_channel(ctx.author, ctx.channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 완료 처리할 수 있습니다.")
 
     await update_commission_progress(ctx.channel, 100)
