@@ -115,6 +115,20 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
             await ticket_closure.begin_ticket_close(700,path=self.path), "in_progress",
         )
 
+    async def test_legacy_ticket_uses_single_inflight_close(self):
+        # Pre-DB historical tickets still support the authorized close flow.
+        first = await ticket_closure.begin_ticket_close(999, path=self.path)
+        self.assertEqual(first, "legacy")
+        self.assertFalse(await ticket_closure.begin_ticket_close(999, path=self.path))
+        await ticket_closure.abort_ticket_close(
+            999, path=self.path, previous_status=first,
+        )
+        again = await ticket_closure.begin_ticket_close(999, path=self.path)
+        self.assertEqual(again, "legacy")
+        await ticket_closure.finish_ticket_close(
+            999, path=self.path, previous_status=again,
+        )
+
     async def test_snapshot_restores_in_isolation_and_does_not_touch_live_db(self):
         await self.add_ticket()
         backup = await backups.backup_database(
