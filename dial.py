@@ -53,6 +53,8 @@ from database.views.review_view import StarRatingView
 from database.services.ticket_access import ticket_assignment, can_manage_channel
 from database.services.review_recovery import reconcile_review_awards
 from database.services.ops_health import health_snapshot, record_failure
+from database.services.ops_alerts import send_operational_alerts
+from database.services.ticket_closure import (begin_ticket_close, finish_ticket_close, abort_ticket_close)
 from database.views.verify_view import RobloxConfirmView, VerifyView
 
 TOKEN = os.getenv("TOKEN")
@@ -817,6 +819,9 @@ class DialianBot(commands.Bot):
         if not repair_review_awards.is_running():
             repair_review_awards.start()
 
+        if not operator_health_alerts.is_running():
+            operator_health_alerts.start()
+
         if not family_membership_maintenance.is_running():
             family_membership_maintenance.start()
 
@@ -1338,6 +1343,22 @@ async def repair_review_awards():
         )
     except Exception as exc:
         await record_failure("review_repair", exc)
+
+
+@tasks.loop(minutes=10)
+async def operator_health_alerts():
+    """One deduplicated, private alert per condition per cooldown window."""
+    guild = bot.get_guild(DDS_RELEASE_GUILD_ID)
+    if guild:
+        try:
+            await send_operational_alerts(bot, guild)
+        except Exception as exc:
+            await record_failure("ops_alert", exc)
+
+
+@operator_health_alerts.before_loop
+async def before_operator_health_alerts():
+    await bot.wait_until_ready()
 
 
 @repair_review_awards.before_loop
@@ -2712,29 +2733,44 @@ async def change_designer(ctx, designer: discord.Member):
 async def close_ticket_by_command(ctx):
     if not is_ticket_channel(ctx.channel):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
-
     channel = ctx.channel
-    guild = ctx.guild
-    designer_id = await find_ticket_designer_id(channel)
-    closer = guild.get_member(ctx.author.id) if guild else None
-
+    closer = ctx.guild.get_member(ctx.author.id)
     if not await can_manage_channel(closer, channel):
-        return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.")
-
-    notice = await ctx.send("🔒 티켓 종료 처리 중입니다.")
-    designer = await fetch_member_or_none(guild, designer_id)
-
-    if designer:
-        await delete_ticket_dm_messages(bot.user, designer, channel)
-
-    await update_commission_progress(channel, 100)
-    
-    # 월간 통계 메시지 자동 갱신 연동
-    await update_monthly_stats_message(bot)
-
-    await notice.edit(content="✅ 티켓 종료 처리 완료. 곧 보관함으로 이동합니다.")
-    await asyncio.sleep(5)
-    await archive_ticket_channel(channel)
+        return await ctx.send("❌ 현재 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.")
+    prior_status = await begin_ticket_close(channel.id)
+    if not prior_status:
+        return await ctx.send("ℹ️ 이미 종료 처리 중이거나 종료된 티켓입니다.")
+    try:
+        notice = await ctx.send("🔒 티켓 종료 처리 중입니다.")
+        designer_id = (await ticket_assignment(channel)).designer_id
+        designer = await fetch_member_or_none(ctx.guild, designer_id)
+        if designer:
+            await delete_ticket_dm_messages(bot.user, designer, channel)
+        # Maintain closing status while recording the completed work.
+        async with aiosqlite.connect(DATABASE) as db:
+            await db.execute(
+                """UPDATE commissions SET progress=100,
+                   completed_at=COALESCE(completed_at, ?)
+                   WHERE ticket_channel=? AND status='closing'""",
+                (discord.utils.utcnow().isoformat(), channel.id),
+            )
+            await db.commit()
+        # Stats are informational: a temporary failure should not prevent closure.
+        try:
+            await update_monthly_stats_message(bot)
+        except Exception as exc:
+            await record_failure("monthly_stats", exc)
+        await notice.edit(content="✅ 종료 처리가 완료되었습니다. 잠시 후 보관합니다.")
+        await asyncio.sleep(5)
+        await archive_ticket_channel(channel)
+        await finish_ticket_close(channel.id, previous_status=prior_status)
+    except Exception as exc:
+        try:
+            await abort_ticket_close(channel.id, previous_status=prior_status)
+        except Exception as rollback_exc:
+            await record_failure("ticket_close", rollback_exc)
+        await record_failure("ticket_close", exc)
+        await ctx.send("❌ 티켓 종료 중 문제가 발생했습니다. 잠시 후 재시도해주세요.")
 
 
 @bot.command(name="티켓삭제", aliases=["티켓제거", "삭제"])
@@ -2746,6 +2782,8 @@ async def delete_ticket_by_command(ctx):
     guild = ctx.guild
     designer_id = await find_ticket_designer_id(channel)
     deleter = guild.get_member(ctx.author.id) if guild else None
+    if (await ticket_assignment(channel)).status == "closing":
+        return await ctx.send("ℹ️ 종료 처리 중인 티켓은 삭제할 수 없습니다.")
 
     if not await can_manage_channel(deleter, channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.")

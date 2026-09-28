@@ -9,6 +9,7 @@ from database.database import DATABASE
 from database.views.ticket_context import resolve_ticket_channel
 from database.services.ticket_access import ticket_assignment, can_manage_assignment
 from database.services.ops_health import record_failure
+from database.services.ticket_closure import (begin_ticket_close, finish_ticket_close, abort_ticket_close)
 
 
 def has_designer_role(member):
@@ -217,6 +218,8 @@ class TicketCloseView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        claim_status = None
+        channel = None
         try:
 
             await interaction.response.defer()
@@ -259,6 +262,13 @@ class TicketCloseView(discord.ui.View):
             if not can_manage_assignment(closer, assignment):
                 return await interaction.followup.send(
                     "❌ 현재 담당 디자이너 또는 관리자만 티켓을 종료할 수 있습니다.",
+                    ephemeral=True,
+                )
+
+            claim_status = await begin_ticket_close(channel.id)
+            if not claim_status:
+                return await interaction.followup.send(
+                    "ℹ️ 이미 종료 처리 중이거나 종료된 티켓입니다.",
                     ephemeral=True,
                 )
 
@@ -419,26 +429,27 @@ class TicketCloseView(discord.ui.View):
 
             await channel.send(embed=archive_notice)
 
-            async with aiosqlite.connect(DATABASE) as db:
-                await db.execute(
-                    """
-                    UPDATE commissions
-                    SET status = CASE
-                        WHEN status = 'completed' THEN status
-                        ELSE 'closed'
-                    END,
-                    updated_at = ?
-                    WHERE ticket_channel = ?
-                    """,
-                    (discord.utils.utcnow().isoformat(), channel.id),
-                )
-                await db.commit()
-
             await asyncio.sleep(5)
             await archive_ticket_channel(channel)
+            await finish_ticket_close(channel.id, previous_status=claim_status)
+            claim_status = None
 
         except Exception as e:
+            if claim_status and channel is not None:
+                try:
+                    await abort_ticket_close(
+                        channel.id, previous_status=claim_status,
+                    )
+                except Exception as rollback_error:
+                    await record_failure("ticket_close", rollback_error)
             await record_failure("ticket_close", e)
+            try:
+                await interaction.followup.send(
+                    "❌ 종료 중 오류가 발생했습니다. 잠시 후 재시도해주세요.",
+                    ephemeral=True,
+                )
+            except discord.HTTPException:
+                pass
 
     @discord.ui.button(
         label="🗑️ 티켓 삭제",
@@ -466,6 +477,11 @@ class TicketCloseView(discord.ui.View):
                 )
 
             assignment = await ticket_assignment(channel)
+            if assignment.status == "closing":
+                return await interaction.response.send_message(
+                    "ℹ️ 종료 처리 중인 티켓은 삭제할 수 없습니다.",
+                    ephemeral=True,
+                )
             deleter = guild.get_member(interaction.user.id)
             if not can_manage_assignment(deleter, assignment):
                 return await interaction.response.send_message(

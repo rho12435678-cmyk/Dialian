@@ -7,7 +7,7 @@ from database import database
 logger = logging.getLogger("dialian.ops")
 ALLOWED_COMPONENTS = frozenset({
     "review_repair", "review_notice", "ticket_close", "ticket_delete",
-    "scheduled_backup", "monthly_stats",
+    "scheduled_backup", "monthly_stats", "ops_alert",
 })
 
 
