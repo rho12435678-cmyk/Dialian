@@ -2782,6 +2782,8 @@ async def delete_ticket_by_command(ctx):
     guild = ctx.guild
     designer_id = await find_ticket_designer_id(channel)
     deleter = guild.get_member(ctx.author.id) if guild else None
+    if (await ticket_assignment(channel)).status == "closing":
+        return await ctx.send("ℹ️ 종료 처리 중인 티켓은 삭제할 수 없습니다.")
 
     if not await can_manage_channel(deleter, channel):
         return await ctx.send("❌ 담당 디자이너 또는 관리자만 티켓을 삭제할 수 있습니다.")
