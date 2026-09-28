@@ -29,7 +29,7 @@ def matching_review_posts(messages, bot_id, ticket_ids):
 
 async def reconcile_review_awards(
     guild, bot_user_id, review_channel, credit, refresh, *, path=None,
-    history_limit=1000,
+    history_limit=10000,
 ):
     """Never issue credit until a corresponding publication was confirmed."""
     path = path or database.DATABASE
@@ -44,8 +44,15 @@ async def reconcile_review_awards(
     if unknown_ids and review_channel:
         try:
             # Do not assume unscanned posts were never published.
-            messages = [m async for m in review_channel.history(limit=history_limit)]
-            published = matching_review_posts(messages, bot_user_id, unknown_ids)
+            # Stream and stop as soon as every missing post is located.
+            # Leave old unmatched reviews unpublished rather than issuing
+            # unverified credit. The admin can inspect persistent alerts.
+            async for message in review_channel.history(limit=history_limit):
+                published.update(
+                    matching_review_posts([message], bot_user_id, unknown_ids)
+                )
+                if len(published) == len(unknown_ids):
+                    break
         except (discord.HTTPException, discord.Forbidden) as exc:
             await record_failure("review_repair", exc, path=path)
 
