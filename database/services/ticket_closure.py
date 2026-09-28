@@ -3,6 +3,7 @@
 SQLite BEGIN IMMEDIATE serializes simultaneous button and command clicks.
 A stale 'closing' claim can be retried after 15 minutes following a crash.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -10,6 +11,8 @@ import aiosqlite
 from database import database
 
 STALE_AFTER = timedelta(minutes=15)
+_legacy_guard = asyncio.Lock()
+_legacy_inflight = set()
 
 
 def _timestamp(value):
@@ -27,14 +30,18 @@ async def begin_ticket_close(channel_id, *, path=None, now=None):
     async with aiosqlite.connect(path, timeout=10) as db:
         await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
-            "SELECT status, updated_at FROM commissions WHERE ticket_channel=?",
+            "SELECT status, updated_at, progress, completed_at FROM commissions WHERE ticket_channel=?",
             (channel_id,),
         ) as cursor:
             record = await cursor.fetchone()
         if record is None:
             await db.rollback()
-            return False
-        status, updated_at = record
+            async with _legacy_guard:
+                if channel_id in _legacy_inflight:
+                    return False
+                _legacy_inflight.add(channel_id)
+                return "legacy"
+        status, updated_at, progress, completed_at = record
         if status in ("closed", "cancelled"):
             await db.rollback()
             return False
@@ -49,10 +56,18 @@ async def begin_ticket_close(channel_id, *, path=None, now=None):
             (now.isoformat(), channel_id),
         )
         await db.commit()
-        return status if cursor.rowcount == 1 and status != 'closing' else ('in_progress' if cursor.rowcount == 1 else False)
+        if cursor.rowcount != 1:
+            return False
+        if status == 'closing':
+            return 'completed' if progress == 100 or completed_at else 'in_progress'
+        return status
 
 
 async def finish_ticket_close(channel_id, *, path=None, previous_status='in_progress'):
+    if previous_status == 'legacy':
+        async with _legacy_guard:
+            _legacy_inflight.discard(channel_id)
+        return
     async with aiosqlite.connect(path or database.DATABASE) as db:
         await db.execute(
             """UPDATE commissions SET status=?, updated_at=?
@@ -64,6 +79,10 @@ async def finish_ticket_close(channel_id, *, path=None, previous_status='in_prog
 
 async def abort_ticket_close(channel_id, *, path=None, previous_status='in_progress'):
     """Reopen on a transient error; do not modify completed/other statuses."""
+    if previous_status == 'legacy':
+        async with _legacy_guard:
+            _legacy_inflight.discard(channel_id)
+        return
     async with aiosqlite.connect(path or database.DATABASE) as db:
         await db.execute(
             """UPDATE commissions SET status=?, updated_at=?
