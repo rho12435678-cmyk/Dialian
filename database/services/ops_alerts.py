@@ -26,9 +26,11 @@ async def collect_alerts(*, path=None):
               (SELECT COUNT(*) FROM review_point_awards
                WHERE status='unpublished' AND datetime(created_at) < datetime('now','-30 minutes')),
               (SELECT COUNT(*) FROM ops_health_events
-               WHERE datetime(created_at) >= datetime('now','-1 hour'))"""
+               WHERE datetime(created_at) >= datetime('now','-1 hour')),
+              (SELECT COUNT(*) FROM commissions WHERE status='closing'
+               AND datetime(updated_at) < datetime('now','-15 minutes'))"""
         ) as cursor:
-            old_pending, old_unpublished, errors = await cursor.fetchone()
+            old_pending, old_unpublished, errors, stale_closing = await cursor.fetchone()
     alerts = {}
     if old_pending:
         alerts["review_pending"] = f"30분 이상 대기 중인 후기 포인트: {old_pending}건"
@@ -36,6 +38,8 @@ async def collect_alerts(*, path=None):
         alerts["review_unpublished"] = f"30분 이상 게시 확인이 필요한 후기: {old_unpublished}건"
     if errors >= 5:
         alerts["repeated_errors"] = f"최근 1시간에 오류 {errors}건 발생"
+    if stale_closing:
+        alerts["stale_closing"] = f"15분 이상 종료 처리 중인 티켓: {stale_closing}건"
     return alerts
 
 
