@@ -39,6 +39,7 @@ from database.services.update_announcement import announce_once, announce_family
 from database.services.ui_poll_announcement import publish_ui_poll_once
 from database.services.family_launch_announcement import announce_family_launch_once
 from database.services.short_panel_update_announcement import announce_short_panel_update_once
+from database.services.stability_release_announcement import announce_stability_once
 from database.views.claim_view import ClaimTicketView
 from database.views.close_ticket import (
     TicketCloseView,
@@ -753,6 +754,22 @@ async def publish_short_panel_update():
         print(f"[DDS 문의 패널 간단 업데이트 공지 재시도 대기] {type(exc).__name__}: {exc}")
 
 
+@tasks.loop(count=1)
+async def publish_stability_release():
+    """Automatically announce this release once when updated Dialian starts."""
+    try:
+        await announce_stability_once(bot)
+    except Exception as exc:
+        # No blind retry after uncertain Discord publish: manual retry checks
+        # both DB and the bot's prior posts before sending.
+        print(f"[DDS 안정화 공지 실패] {type(exc).__name__}")
+
+
+@publish_stability_release.before_loop
+async def before_publish_stability_release():
+    await bot.wait_until_ready()
+
+
 @publish_short_panel_update.before_loop
 async def before_publish_short_panel_update():
     await bot.wait_until_ready()
@@ -837,6 +854,9 @@ class DialianBot(commands.Bot):
 
         if not publish_short_panel_update.is_running():
             publish_short_panel_update.start()
+
+        if not publish_stability_release.is_running():
+            publish_stability_release.start()
 
 
 intents = discord.Intents.default()
@@ -2472,6 +2492,24 @@ async def manually_publish_combined_update(ctx):
         if posted else
         "ℹ️ 이번 업데이트 공지는 이미 게시되었습니다. 중복 게시하지 않았습니다."
     )
+
+
+@bot.command(name="안정화공지1회")
+@commands.guild_only()
+@commands.has_permissions(administrator=True)
+async def retry_stability_release(ctx):
+    """Admin-only retry with the same once-only DB + Discord checks."""
+    if ctx.guild.id != DDS_RELEASE_GUILD_ID:
+        return await ctx.send("❌ DDS 공식 서버에서만 사용할 수 있습니다.")
+    try:
+        posted = await announce_stability_once(bot)
+        await ctx.send(
+            "✅ 안정화 업데이트 공지를 게시했습니다." if posted
+            else "ℹ️ 이미 게시된 안정화 공지입니다. 중복 게시하지 않았습니다."
+        )
+    except Exception as exc:
+        print(f"[DDS 안정화 공지 재시도 실패] {type(exc).__name__}")
+        await ctx.send("❌ 공지 전송에 실패했습니다. 공지 채널 권한과 로그를 확인해주세요.")
 
 
 @bot.command(name="간단업뎃공지1회", aliases=["패널업뎃공지1회"])
