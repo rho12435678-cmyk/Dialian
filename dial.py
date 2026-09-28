@@ -680,7 +680,7 @@ async def scheduled_database_backup():
         if backup_path:
             print(f"[DB Backup] 백업 완료: {backup_path}")
     except Exception as e:
-        print(f"[DB Backup Error] {e}")
+        await record_failure("scheduled_backup", e)
 
 
 # ==================== [월간 통계 자동 갱신 태스크] ====================
@@ -2619,21 +2619,17 @@ async def send_bank_to_ticket(ctx, member: discord.Member = None):
         return await ctx.send("❌ 티켓 채널에서만 사용할 수 있습니다.")
 
     author = ctx.guild.get_member(ctx.author.id) if ctx.guild else None
-    is_admin = author and author.guild_permissions.administrator
-    is_staff_designer = author and has_designer_role(author)
-
-    # 타 디자이너 계좌를 대리 전송(인자 지정)하거나 기본 담당 디자이너 조회
-    target_designer_id = member.id if member else await find_ticket_designer_id(ctx.channel)
-
-    if target_designer_id is None and is_staff_designer:
-        target_designer_id = ctx.author.id
-
-    if target_designer_id is None:
-        return await ctx.send("❌ 전송할 대상 디자이너 정보나 티켓 담당 디자이너를 찾지 못했습니다.")
-
-    # 권한 검사: 관리자 또는 디자이너 역할을 가진 경우 다른 디자이너의 계좌도 대리 전송 가능
-    if not (is_admin or is_staff_designer or ctx.author.id == target_designer_id):
-        return await ctx.send("❌ 담당 디자이너, 디자이너 역할 보유자 또는 관리자만 계좌를 전송할 수 있습니다.")
+    is_admin = bool(author and author.guild_permissions.administrator)
+    assignment = await ticket_assignment(ctx.channel)
+    # A designer may send only their own bank account, and only while the
+    # database records them as the assigned designer on this open ticket.
+    if not is_admin and not await can_manage_channel(author, ctx.channel):
+        return await ctx.send("❌ 현재 담당 디자이너 또는 관리자만 결제 정보를 전송할 수 있습니다.")
+    if member is not None and not is_admin and member.id != assignment.designer_id:
+        return await ctx.send("❌ 다른 디자이너의 계좌는 관리자만 대신 전송할 수 있습니다.")
+    target_designer_id = member.id if member else assignment.designer_id
+    if not target_designer_id:
+        return await ctx.send("❌ 담당 디자이너가 확정된 후 결제 정보를 전송해주세요.")
 
     if not await send_payment_info(ctx.channel, target_designer_id):
         target_name = member.mention if member else "해당 디자이너"
