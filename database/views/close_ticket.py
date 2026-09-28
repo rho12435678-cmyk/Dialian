@@ -477,6 +477,11 @@ class TicketCloseView(discord.ui.View):
                 )
 
             assignment = await ticket_assignment(channel)
+            if assignment.status == "closing":
+                return await interaction.response.send_message(
+                    "ℹ️ 종료 처리 중인 티켓은 삭제할 수 없습니다.",
+                    ephemeral=True,
+                )
             deleter = guild.get_member(interaction.user.id)
             if not can_manage_assignment(deleter, assignment):
                 return await interaction.response.send_message(
