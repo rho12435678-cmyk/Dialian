@@ -49,25 +49,25 @@ async def begin_ticket_close(channel_id, *, path=None, now=None):
             (now.isoformat(), channel_id),
         )
         await db.commit()
-        return cursor.rowcount == 1
+        return status if cursor.rowcount == 1 and status != 'closing' else ('in_progress' if cursor.rowcount == 1 else False)
 
 
-async def finish_ticket_close(channel_id, *, path=None):
+async def finish_ticket_close(channel_id, *, path=None, previous_status='in_progress'):
     async with aiosqlite.connect(path or database.DATABASE) as db:
         await db.execute(
-            """UPDATE commissions SET status='closed', updated_at=?
+            """UPDATE commissions SET status=?, updated_at=?
                WHERE ticket_channel=? AND status='closing'""",
-            (datetime.now(timezone.utc).isoformat(), channel_id),
+            ('completed' if previous_status == 'completed' else 'closed', datetime.now(timezone.utc).isoformat(), channel_id),
         )
         await db.commit()
 
 
-async def abort_ticket_close(channel_id, *, path=None):
+async def abort_ticket_close(channel_id, *, path=None, previous_status='in_progress'):
     """Reopen on a transient error; do not modify completed/other statuses."""
     async with aiosqlite.connect(path or database.DATABASE) as db:
         await db.execute(
-            """UPDATE commissions SET status='in_progress', updated_at=?
+            """UPDATE commissions SET status=?, updated_at=?
                WHERE ticket_channel=? AND status='closing'""",
-            (datetime.now(timezone.utc).isoformat(), channel_id),
+            (previous_status if previous_status != 'closing' else 'in_progress', datetime.now(timezone.utc).isoformat(), channel_id),
         )
         await db.commit()
