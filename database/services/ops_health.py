@@ -1,6 +1,5 @@
 """Persistent, bounded, sanitized operational diagnostics; no user payloads."""
 import logging
-import re
 
 import aiosqlite
 from database import database
@@ -10,7 +9,6 @@ ALLOWED_COMPONENTS = frozenset({
     "review_repair", "review_notice", "ticket_close", "ticket_delete",
     "scheduled_backup", "monthly_stats",
 })
-_SECRET = re.compile(r"\b(?:\d[ -]?){10,20}\b|\b[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}\b")
 
 
 async def init_health_table(db):
