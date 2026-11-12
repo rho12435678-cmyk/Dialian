@@ -1,5 +1,9 @@
 """Repeatable provisioning of explicitly managed DDH resources."""
+import logging
+
 import discord
+
+log = logging.getLogger(__name__)
 
 from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, everyone_permissions, overwrites, role_permissions
 
@@ -103,10 +107,30 @@ async def provision(guild, store, settings):
         role = await role.edit(**params) if role else await guild.create_role(**params)
         roles[key] = role
         await store.set(guild.id, f"role:{key}", role.id)
-    # Keep community roles below staff; never move the bot or unrelated roles.
+    # Sorting is cosmetic. Discord forbids moving a role above the bot's top
+    # role; a new server often has the bot low in the role list. In that case
+    # do not abort the rest of the server provisioning.
     ordered = [roles[key] for key in ROLES if key != "staff"] + [roles["staff"]]
-    await guild.edit_role_positions(positions={role: i + 1 for i, role in enumerate(ordered)},
-                                    reason="DDH 역할 정렬")
+    reorder_pending = guild.me.top_role.position <= len(ordered)
+    if not reorder_pending:
+        try:
+            await guild.edit_role_positions(
+                positions={role: i + 1 for i, role in enumerate(ordered)},
+                reason="DDH 역할 정렬",
+            )
+        except discord.HTTPException as error:
+            # Discord code 50013 can occur at the bulk reorder endpoint even
+            # when Manage Roles and individual role edits are permitted.
+            if error.code != 50013:
+                raise
+            reorder_pending = True
+    if reorder_pending:
+        log.warning(
+            "DDH role ordering skipped (Discord 50013 or insufficient role height). "
+            "Move the Dialian role above all DDH roles; staff should be above "
+            "ordinary developer/member roles. Other setup will proceed."
+        )
+    await store.set(guild.id, "role_order_pending", reorder_pending)
     await guild.default_role.edit(permissions=everyone_permissions(), reason="DDH 기본 역할 권한")
     categories = {}
     for index, spec in enumerate(CATEGORIES):
