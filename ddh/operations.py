@@ -8,7 +8,8 @@ from uuid import uuid4
 import discord
 
 from ddh.backups import latest_backup, verify_snapshot
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, overwrites, role_permissions
+from ddh.blueprint import (CATEGORIES, CHANNELS, ROLES, overwrites,
+                           role_permissions, strict_readonly_overwrites)
 from ddh.security import rule_trigger_type, specifications
 from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
 
@@ -102,10 +103,14 @@ async def inspect_layout(guild, store):
         if spec.forum and not channel.available_tags:
             findings.append(f"포럼 태그 누락 · {spec.name}")
         if roles["staff"] and roles["admin"] and (spec.policy not in roles or roles[spec.policy]):
-            policy = forum_permissions(guild, roles, spec.policy) if spec.forum else overwrites(
-                guild, roles, spec.policy, voice=spec.voice)
-            if spec.key == "updates":
-                policy[guild.me].mention_everyone = True
+            policy = (
+                forum_permissions(guild, roles, spec.policy)
+                if spec.forum else
+                strict_readonly_overwrites(
+                    guild, roles, updates=spec.key == "updates",
+                ) if spec.policy == "readonly" else
+                overwrites(guild, roles, spec.policy, voice=spec.voice)
+            )
             if channel.overwrites != policy:
                 findings.append(f"채널 권한 불일치 · {spec.name}")
     for ticket in await store.tickets(guild.id, "open"):

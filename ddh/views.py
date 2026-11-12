@@ -52,8 +52,10 @@ class RulesView(GuardedView):
     @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
     async def accept(self, interaction, button):
         await interaction.response.defer(ephemeral=True)
-        if interaction.channel_id != await self.bot.store.get(interaction.guild.id, "channel:rules"):
-            raise UserError("규칙 채널의 멤버 인증 버튼을 사용해 주세요.")
+        # The official persistent DDH button can also be displayed in a
+        # Discord Server Guide resource page. Its interaction.channel_id may
+        # differ from the stored rules text channel; that must not block joining.
+        # The server/role/account checks inside verify_member still apply.
         granted = await verify_member(self.bot, interaction.guild, interaction.user.id)
         await reply(interaction, "멤버 인증 완료. 채팅·포럼·음성 채널을 이용할 수 있습니다." if granted
                     else "이미 인증된 멤버입니다.")

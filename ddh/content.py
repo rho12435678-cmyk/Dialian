@@ -72,7 +72,7 @@ async def retire_update_alerts_panel(bot, guild):
     return bool(messages)
 
 
-PANELS_VERSION = "2026-11-trade-report-v1"
+PANELS_VERSION = "2026-11-verify-and-public-notice-v2"
 GUIDE_VERSION = "2026-11-owner-layout-guide-v2"
 
 
@@ -152,7 +152,14 @@ async def guide(guild, store):
 async def publish_guide(bot, guild):
     """Create or edit one guide embed; never spam duplicate guide messages."""
     channel = await channel_for(guild, bot.store, "guide")
-    message = await upsert_panel(channel, bot.store, "guide", await guide(guild, bot.store))
+    from ddh.views import RulesView
+
+    # Give members a second, persistent path to certification when the
+    # native Discord Server Guide changes where the rules panel is shown.
+    message = await upsert_panel(
+        channel, bot.store, "guide", await guide(guild, bot.store),
+        view=RulesView(bot),
+    )
     await bot.store.set(guild.id, "guide:version", GUIDE_VERSION)
     return message
 
@@ -201,7 +208,9 @@ async def publish_panels(bot, guild):
                   "**5. 거래는 당사자끼리 협의하기** — DDH는 외주 제작팀이나 결제 중개 서비스가 아닙니다. "
                   "개발자 역할은 거래 이행이나 실력을 보증하지 않습니다.\n"
                   "**6. 문제가 생기면 신고하기** — 사기·도용·규칙 위반은 거래·도용 신고 버튼으로 비공개로 알려 주세요.\n\n"
-                  "규칙에 동의하고 아래 버튼을 누르면 Discord 계정 조건을 확인해 멤버 역할을 지급합니다.")
+                  "먼저 Discord 서버 규칙 동의를 완료한 뒤 아래 **멤버 인증** 버튼을 누르세요. "
+                  f"계정 생성 후 {bot.settings.verification_min_days}일 이상인 계정은 조건 확인 후 "
+                  "멤버 역할을 받습니다. 인증이 거절되면 표시되는 이유를 확인해 주세요.")
     support = embed("DDH 문의·신청",
                     "**파트너 문의**: 서버 소개와 제휴 제안\n"
                     "**서버 피드백**: 서버 개선 제안·오류 제보\n"
