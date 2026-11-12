@@ -17,7 +17,9 @@ from ddh.backups import backup, restore_dry_run, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
-from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, repair_missing_panels, retire_update_alerts_panel
+from ddh.content import (GUIDE_VERSION, guide, publish_guide, publish_panels,
+                         repair_legacy_verification_panels, repair_missing_panels,
+                         retire_update_alerts_panel)
 from ddh.operations import inspect_automod, inspect_layout
 from ddh.permissions import operator_migration
 from ddh.verification import verify_member
@@ -507,6 +509,64 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel.messages[0].id, first.id)
         self.assertEqual(await protect_announcement_channels(self.bot, self.guild), [])
         self.assertEqual(len((await self.channel("updates")).messages), 0)
+
+    async def test_old_verification_v1_panel_migrates_without_deleting_message(self):
+        legacy_channel = await self.guild.create_text_channel("인증-verify")
+        legacy = discord.Embed(
+            title="DDH 멤버 인증", description="이전 인증 시스템 안내",
+        )
+        legacy.set_footer(text="DDH:verification:v1")
+        outdated = discord.ui.View(timeout=None)
+        outdated.add_item(discord.ui.Button(
+            label="규칙 동의 · 멤버 인증", custom_id="ddh:verification:old",
+        ))
+        message = await legacy_channel.send(embed=legacy, view=outdated)
+        original_id = message.id
+        self.assertTrue(
+            await repair_legacy_verification_panels(self.bot, self.guild)
+        )
+        self.assertEqual(len(legacy_channel.messages), 1)
+        self.assertEqual(message.id, original_id)
+        self.assertEqual(message.embeds[0].footer.text, "DDH:verification:v1")
+        self.assertEqual(
+            [item.custom_id for item in message.view.children],
+            ["ddh:rules:v1"],
+        )
+        self.assertFalse(
+            await repair_legacy_verification_panels(self.bot, self.guild)
+        )
+        self.assertEqual(
+            await self.bot.store.get(self.guild.id, "message:verification"),
+            original_id,
+        )
+
+    async def test_old_verification_not_migrated_if_written_by_other_bot(self):
+        channel = await self.guild.create_text_channel("인증-verify")
+        card = discord.Embed(title="인증")
+        card.set_footer(text="DDH:verification:v1")
+        message = await channel.send(embed=card)
+        message.author = SimpleNamespace(id=999999)
+        self.assertFalse(
+            await repair_legacy_verification_panels(self.bot, self.guild)
+        )
+        self.assertIsNone(message.view)
+
+    async def test_rules_view_acknowledges_before_database_checks(self):
+        interaction = AsyncMock()
+        interaction.guild = self.guild
+        interaction.user = self.visitor
+        original = self.bot.tickets.ready
+        async def check_ack(guild):
+            interaction.response.defer.assert_awaited_once_with(
+                ephemeral=True, thinking=True,
+            )
+            return await original(guild)
+        with patch.object(self.bot.tickets, "ready", side_effect=check_ack):
+            view = RulesView(self.bot)
+            self.assertTrue(await view.interaction_check(interaction))
+            await view.accept.callback(interaction)
+        interaction.response.defer.assert_awaited_once()
+        self.visitor.add_roles.assert_awaited_once()
 
     async def test_missing_live_verification_button_is_repaired_on_startup(self):
         await publish_panels(self.bot, self.guild)

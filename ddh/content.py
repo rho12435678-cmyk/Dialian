@@ -193,6 +193,72 @@ def _panel_has_required_buttons(message, key):
     return expected <= present
 
 
+async def repair_legacy_verification_panels(bot, guild):
+    """Reconnect old DDH:verification:v1 buttons to the current persistent view.
+
+    Some DDH installations have a separate older #인증 channel/panel. Its
+    message predates the managed rules/guide panels and used a different
+    custom_id, so simply repairing the modern buttons cannot fix it.
+    Only edit Dialian-authored messages with the exact old footer marker.
+    """
+    if not await bot.store.get(guild.id, "setup_complete", False):
+        return False
+
+    from ddh.views import RulesView
+
+    marker = "DDH:verification:v1"
+    saved_id = await bot.store.get(guild.id, "message:verification")
+    channel_ids = {
+        await bot.store.get(guild.id, "channel:verification"),
+        await bot.store.get(guild.id, "channel:rules"),
+        await bot.store.get(guild.id, "channel:guide"),
+    }
+    channels = [
+        channel for channel in guild.channels
+        if isinstance(channel, discord.TextChannel)
+        and (
+            channel.id in channel_ids
+            or "인증" in channel.name
+            or "verify" in channel.name.lower()
+            or "verification" in channel.name.lower()
+        )
+    ]
+    changed = False
+    for channel in channels:
+        messages = []
+        if saved_id:
+            try:
+                messages.append(await channel.fetch_message(saved_id))
+            except discord.NotFound:
+                pass
+            except discord.Forbidden:
+                continue
+
+        seen = {message.id for message in messages}
+        try:
+            async for message in channel.history(limit=200):
+                if message.id not in seen:
+                    messages.append(message)
+                    seen.add(message.id)
+        except discord.Forbidden:
+            continue
+
+        for message in messages:
+            if message.author.id != guild.me.id or not any(
+                embed.footer.text == marker for embed in message.embeds
+            ):
+                continue
+            if not _panel_has_required_buttons(message, "rules"):
+                await message.edit(
+                    embed=message.embeds[0],
+                    view=RulesView(bot),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                changed = True
+            await bot.store.set(guild.id, "message:verification", message.id)
+    return changed
+
+
 async def repair_missing_panels(bot, guild):
     """Self-heal missing public guides/forms, without changing server layout.
 
@@ -201,6 +267,7 @@ async def repair_missing_panels(bot, guild):
     """
     if not await bot.store.get(guild.id, "setup_complete", False):
         return False
+    repaired_legacy = await repair_legacy_verification_panels(bot, guild)
     if await bot.store.get(guild.id, "panels:version") != PANELS_VERSION:
         async with bot.mutation_lock:
             await publish_panels(bot, guild)
@@ -224,7 +291,7 @@ async def repair_missing_panels(bot, guild):
         async with bot.mutation_lock:
             await publish_panels(bot, guild)
         return True
-    return False
+    return repaired_legacy
 
 
 async def publish_panels(bot, guild):
