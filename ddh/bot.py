@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+from ddh.announcements import protect_announcement_channels
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
@@ -194,6 +195,7 @@ class Dialian(discord.Client):
         self.started_at = utcnow()
         self.last_backup_day = None
         self.last_panel_check = None
+        self.last_announcement_check = None
         self.release_sha = deployed_revision()
         self.update_lock = asyncio.Lock()
         self.last_policy_check = None
@@ -261,6 +263,7 @@ class Dialian(discord.Client):
         log.info("Dialian connected to DDH guild %s", guild.id)
         if await self.store.get(guild.id, "setup_complete", False):
             for name, action in (
+                ("lock down public announcement channels", protect_announcement_channels),
                 ("repair deleted onboarding panels", repair_missing_panels),
                 ("outdated update signup removal", retire_update_alerts_panel),
                 ("redact old release source links", redact_legacy_release_links),
@@ -270,6 +273,30 @@ class Dialian(discord.Client):
                     await action(self, guild)
                 except Exception:
                     log.exception("DDH %s failed at startup; maintenance will retry", name)
+
+    async def on_guild_channel_update(self, before, after):
+        # Repair notice permission edits promptly, without deleting any posts.
+        if after.guild.id != self.settings.guild_id:
+            return
+        try:
+            changed = await self.store.settings(after.guild.id)
+            notice_ids = {
+                changed.get(f"channel:{key}")
+                for key in ("announcements", "updates", "rules", "guide",
+                            "support_panel", "partners")
+            }
+            if after.id in notice_ids and before.overwrites != after.overwrites:
+                await protect_announcement_channels(self, after.guild)
+        except Exception:
+            log.exception("DDH announcement permission repair failed after edit")
+
+    async def on_guild_role_create(self, role):
+        if role.guild.id != self.settings.guild_id:
+            return
+        try:
+            await protect_announcement_channels(self, role.guild)
+        except Exception:
+            log.exception("DDH announcement permission update failed for new role")
 
     async def on_member_join(self, member):
         await self.operations.membership(member.guild, member, joined=True)
@@ -324,6 +351,14 @@ class Dialian(discord.Client):
                 self.last_panel_check = now
             except Exception:
                 log.exception("DDH safe panel repair failed; will retry")
+        if (guild and await self.store.get(guild.id, "setup_complete", False)
+                and (self.last_announcement_check is None
+                     or (now - self.last_announcement_check).total_seconds() >= 300)):
+            try:
+                await protect_announcement_channels(self, guild)
+                self.last_announcement_check = now
+            except Exception:
+                log.exception("DDH announcement lockdown failed; will retry")
         if guild:
             # Gateway events are backed up by a cursor over Discord audit history.
             try:
