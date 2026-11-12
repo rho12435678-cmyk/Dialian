@@ -51,6 +51,7 @@ def model_data(guild, name, kind, **kwargs):
 class Message:
     def __init__(self, channel, card, content="", view=None):
         self.id = channel.guild.next_id()
+        self.channel = channel
         self.author = channel.guild.me
         self.embeds = [card] if card else []
         self.content = content
@@ -60,6 +61,10 @@ class Message:
         self.embeds = [kwargs["embed"]] if kwargs.get("embed") else []
         self.view = kwargs.get("view")
         return self
+
+    async def delete(self, **kwargs):
+        if self in self.channel.messages:
+            self.channel.messages.remove(self)
 
 
 class ChannelMethods:
@@ -94,6 +99,11 @@ class Text(ChannelMethods, discord.TextChannel):
         msg = Message(self, embed, content, view)
         self.messages.append(msg)
         return msg
+
+    async def set_permissions(self, target, *, overwrite=None, reason=None):
+        permissions = self.overwrites
+        permissions[target] = overwrite
+        self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=permissions))
 
     async def edit(self, **kwargs):
         if self.fail_edit:
