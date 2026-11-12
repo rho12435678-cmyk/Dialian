@@ -3,9 +3,9 @@ import logging
 
 import discord
 
-log = logging.getLogger(__name__)
-
 from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, everyone_permissions, overwrites, role_permissions
+
+log = logging.getLogger(__name__)
 
 REQUIRED_PERMISSIONS = (
     "manage_roles", "manage_channels", "manage_guild", "view_channel", "send_messages", "read_message_history",
