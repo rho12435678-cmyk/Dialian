@@ -63,7 +63,7 @@ class RulesView(GuardedView):
                 )
             except Exception:
                 log.exception("Could not persist DDH verification diagnosis")
-        await report_error(interaction, error, item)
+        await report_error(interaction, error)
 
     @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
     async def accept(self, interaction, button):
