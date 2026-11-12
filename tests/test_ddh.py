@@ -566,6 +566,7 @@ class PureTests(unittest.TestCase):
     def test_overwrites_cannot_accidentally_leak_private_category(self):
         guild = Guild()
         staff = guild.make_role("staff")
-        policy = overwrites(guild, {"staff": staff}, "private")
+        admin = guild.make_role("admin")
+        policy = overwrites(guild, {"staff": staff, "admin": admin}, "private")
         self.assertFalse(policy[guild.default_role].view_channel)
-        self.assertEqual(set(policy), {guild.default_role, guild.me, staff})
+        self.assertEqual(set(policy), {guild.default_role, guild.me, staff, admin})
