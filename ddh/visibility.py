@@ -88,7 +88,10 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
             target: _copy_overwrite(value)
             for target, value in channel.overwrites.items()
         }
-        original = dict(overwrites)
+        original = {
+            target: _copy_overwrite(value)
+            for target, value in overwrites.items()
+        }
         visible_to_everyone = channel.permissions_for(guild.default_role).view_channel
         original_bot_visible = channel.permissions_for(guild.me).view_channel
         original_staff = {
