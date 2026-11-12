@@ -10,7 +10,8 @@ from ddh.backups import backup
 from ddh.blueprint import layout_summary
 from ddh.content import publish_panels
 from ddh.notices import publish_due
-from ddh.server import UserError, is_admin, preflight, provision, require_guild
+from ddh.security import configure_security
+from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
@@ -49,14 +50,20 @@ class DDHCommands(app_commands.Group):
             return
         if self.bot.mutation_lock.locked():
             raise UserError("다른 서버 구성이 진행 중입니다. 잠시 후 다시 시도해 주세요.")
-        async with self.bot.mutation_lock:
-            roles, categories, channels = await provision(interaction.guild, self.bot.store, self.bot.settings)
-            await publish_panels(self.bot, interaction.guild)
-            if not await self.bot.store.get(interaction.guild.id, "setup_at"):
-                await self.bot.store.set(interaction.guild.id, "setup_at", utcnow())
-            await self.bot.store.set(interaction.guild.id, "setup_complete", True)
+        counts, safeguards = await self.bot.apply_setup(interaction.guild, with_layout=True)
+        roles, categories, channels = counts
         await reply(interaction, f"DDH 구성 완료: 역할 {roles}개 · 카테고리 {categories}개 · 채널 {channels}개.\n"
-                    "시작·규칙과 문의·신청 패널을 확인해 주세요. 운영진 역할은 서버 소유자가 직접 지정합니다.")
+                    f"AutoMod 보안: {len(safeguards)}개 규칙 처리. 운영-로그 채널에서 차단 알림을 확인하세요.\n"
+                    "운영진 역할은 서버 소유자가 직접 지정합니다.")
+
+    @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    async def security(self, interaction: discord.Interaction):
+        self.admin(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        _, safeguards = await self.bot.apply_setup(interaction.guild, with_layout=False)
+        await reply(interaction, "보안 설정 적용: " + " / ".join(safeguards))
 
     @app_commands.command(name="panels", description="규칙·안내·문의 패널 복구 또는 갱신")
     @app_commands.guild_only()
@@ -84,7 +91,8 @@ class DDHCommands(app_commands.Group):
         require_guild(interaction.guild, self.bot.settings)
         ready = await self.bot.store.get(interaction.guild.id, "setup_complete", False)
         notices = await self.bot.store.get(interaction.guild.id, "notices_enabled", self.bot.settings.notices_enabled)
-        await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n"
+        security = await self.bot.store.get(interaction.guild.id, "security_complete", False)
+        await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}\n"
                     f"자동 공지: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
@@ -115,12 +123,42 @@ class Dialian(discord.Client):
         await self.tree.sync(guild=target)
         self.maintenance.start()
 
+    async def apply_setup(self, guild, *, with_layout):
+        """Repeatable DDH provisioning + native security; no unrelated resources deleted."""
+        require_guild(guild, self.settings)
+        async with self.mutation_lock:
+            if with_layout:
+                counts = await provision(guild, self.store, self.settings)
+                await publish_panels(self, guild)
+            else:
+                if not await self.store.get(guild.id, "setup_complete", False):
+                    raise UserError("먼저 /ddh setup apply:True로 서버 구성을 완료해 주세요.")
+                counts = (0, 0, 0)
+            roles = await roles_for(guild, self.store)
+            audit = await channel_for(guild, self.store, "audit")
+            safeguards = await configure_security(guild, staff_role=roles["staff"], audit_channel=audit)
+            await self.store.set(guild.id, "security_complete", True)
+            if not await self.store.get(guild.id, "setup_at"):
+                await self.store.set(guild.id, "setup_at", utcnow())
+            await self.store.set(guild.id, "setup_complete", True)
+            return counts, safeguards
+
     async def on_ready(self):
         guild = self.get_guild(self.settings.guild_id)
         if guild is None:
             log.error("Configured DDH guild is unavailable; check DDH_GUILD_ID and bot invitation")
-        else:
-            log.info("Dialian connected to DDH guild %s; no automatic server provisioning", guild.id)
+            return
+        log.info("Dialian connected to DDH guild %s", guild.id)
+        if self.settings.auto_setup and (
+            not await self.store.get(guild.id, "setup_complete", False)
+            or not await self.store.get(guild.id, "security_complete", False)
+        ):
+            try:
+                needs_layout = not await self.store.get(guild.id, "setup_complete", False)
+                await self.apply_setup(guild, with_layout=needs_layout)
+                log.info("DDH automatic provisioning and AutoMod protections applied")
+            except Exception:
+                log.exception("DDH automatic setup failed; check roles, permissions and resource conflicts")
 
     async def on_guild_channel_delete(self, channel):
         if channel.guild.id != self.settings.guild_id:
