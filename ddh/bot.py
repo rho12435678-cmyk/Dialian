@@ -8,6 +8,7 @@ from discord.ext import tasks
 
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
+from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, publish_guide, publish_panels
 from ddh.notices import publish_due
 from ddh.security import configure_security
@@ -25,24 +26,28 @@ class DDHCommands(app_commands.Group):
         super().__init__(name="ddh", description="Dial Dev Hub 서버 관리·안내")
         self.bot = bot
 
-    def admin(self, interaction):
+    async def admin(self, interaction):
         require_guild(interaction.guild, self.bot.settings)
-        if not is_admin(interaction.user):
-            raise UserError("서버 소유자 또는 관리자만 사용할 수 있습니다.")
+        admin_id = await self.bot.store.get(interaction.guild.id, "role:admin", 0)
+        permitted = is_admin(interaction.user) or any(
+            role.id == admin_id for role in getattr(interaction.user, "roles", ())
+        )
+        if not permitted:
+            raise UserError("서버 소유자 또는 DDH 관리자 역할만 사용할 수 있습니다.")
 
     @app_commands.command(name="plan", description="DDH 채널·역할·권한 구성 미리보기")
     @app_commands.guild_only()
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(manage_guild=True)
     async def plan(self, interaction: discord.Interaction):
-        self.admin(interaction)
+        await self.admin(interaction)
         await reply(interaction, layout_summary())
 
     @app_commands.command(name="setup", description="DDH 서버 구성. apply=True일 때 실제 적용합니다")
     @app_commands.describe(apply="True: 역할·채널·권한과 안내 패널을 실제 생성/갱신")
     @app_commands.guild_only()
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(manage_guild=True)
     async def setup(self, interaction: discord.Interaction, apply: bool = False):
-        self.admin(interaction)
+        await self.admin(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
         if not apply:
             found = await preflight(interaction.guild, self.bot.store)
@@ -72,23 +77,41 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, f"DDH 구성 완료: 역할 {roles}개 · 카테고리 {categories}개 · 채널 {channels}개.\n"
                     f"AutoMod 보안: {len(safeguards)}개 규칙 처리. 운영-로그 채널에서 차단 알림을 확인하세요.\n"
                     + ordering + announcement
-                    + "구인·구직/제작의뢰/포트폴리오는 포럼으로 관리합니다. 기존 텍스트 글은 읽기 전용으로 보존됩니다.\n"
-                    + "운영진 역할은 서버 소유자가 직접 지정합니다.")
+                    + "구인·제작의뢰·포트폴리오는 포럼으로 운영됩니다.\n"
+                    + "관리자/운영진 역할은 서버 소유자가 직접 지정합니다.")
+
+    @app_commands.command(name="cleanup", description="소유자 확인 후 기존 티켓·보관 카테고리 영구 정리")
+    @app_commands.describe(confirm="True: 기존 보관/종료 채널을 영구 삭제 (복구 불가능)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    async def cleanup(self, interaction: discord.Interaction, confirm: bool = False):
+        require_guild(interaction.guild, self.bot.settings)
+        if interaction.user.id != interaction.guild.owner_id:
+            raise UserError("채널 영구 삭제는 서버 소유자만 승인할 수 있습니다.")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if self.bot.mutation_lock.locked():
+            raise UserError("다른 서버 변경 작업이 진행 중입니다.")
+        async with self.bot.mutation_lock:
+            summary = await cleanup_legacy(
+                interaction.guild, self.bot.store, self.bot.settings,
+                confirm=confirm,
+            )
+        await reply(interaction, summary)
 
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(manage_guild=True)
     async def security(self, interaction: discord.Interaction):
-        self.admin(interaction)
+        await self.admin(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
         _, safeguards = await self.bot.apply_setup(interaction.guild, with_layout=False)
         await reply(interaction, "보안 설정 적용: " + " / ".join(safeguards))
 
     @app_commands.command(name="panels", description="규칙·안내·문의 패널 복구 또는 갱신")
     @app_commands.guild_only()
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(manage_guild=True)
     async def panels(self, interaction: discord.Interaction):
-        self.admin(interaction)
+        await self.admin(interaction)
         await self.bot.tickets.ready(interaction.guild)
         await interaction.response.defer(ephemeral=True, thinking=True)
         async with self.bot.mutation_lock:
@@ -97,9 +120,9 @@ class DDHCommands(app_commands.Group):
 
     @app_commands.command(name="notices", description="정기 DDH 안내 공지 켜기/끄기")
     @app_commands.guild_only()
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(manage_guild=True)
     async def notices(self, interaction: discord.Interaction, enabled: bool):
-        self.admin(interaction)
+        await self.admin(interaction)
         await self.bot.store.set(interaction.guild.id, "notices_enabled", enabled)
         await reply(interaction, f"자동 공지 {'켜짐' if enabled else '꺼짐'} · "
                     f"한국 시간 {self.bot.settings.notice_hour}시 / {self.bot.settings.notice_interval_days}일 간격")
