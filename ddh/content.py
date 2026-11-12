@@ -156,6 +156,35 @@ async def publish_guide(bot, guild):
     return message
 
 
+async def repair_missing_panels(bot, guild):
+    """Self-heal missing public guides/forms, without changing server layout.
+
+    Stable message IDs are checked first; the complete set is only refreshed if
+    a panel was deleted. No role/channels are created and no users are pinged.
+    """
+    if not await bot.store.get(guild.id, "setup_complete", False):
+        return False
+    for key, channel_key in (
+        ("rules", "rules"),
+        ("guide", "guide"),
+        ("support", "support_panel"),
+    ):
+        channel = await channel_for(guild, bot.store, channel_key)
+        saved = await bot.store.get(guild.id, f"message:{key}")
+        if saved:
+            try:
+                message = await channel.fetch_message(saved)
+                if (message.author.id == guild.me.id
+                        and any(e.footer.text == f"DDH:{key}:v1" for e in message.embeds)):
+                    continue
+            except discord.NotFound:
+                pass
+        async with bot.mutation_lock:
+            await publish_panels(bot, guild)
+        return True
+    return False
+
+
 async def publish_panels(bot, guild):
     from ddh.views import RulesView, SupportView
 
