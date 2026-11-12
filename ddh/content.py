@@ -36,7 +36,7 @@ async def upsert_panel(channel, store, key, card, *, view=None):
     return message
 
 
-GUIDE_VERSION = "2026-11-onboarding-v2"
+GUIDE_VERSION = "2026-11-minimal-layout-guide-v1"
 
 
 async def guide(guild, store):
@@ -80,14 +80,14 @@ async def guide(guild, store):
             f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
             f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
             f"**④ 함께할 사람 찾기** — {await link('hiring')}·{await link('commissions')}에서 "
-            f"협업·주문제작 의뢰 확인, 승인된 개발자는 {await link('looking')}에서 구직 글 작성"
+            f"협업·주문제작 의뢰 확인, 개발자는 {await link('portfolio')}에서 작품·구직 정보 공유"
         ),
         inline=False,
     )
     card.add_field(
         name="📂 도움이 되는 채널",
         value=(
-            f"**작품 공유·피드백** {await link('showcase')}  |  "
+            f"**포트폴리오** {await link('portfolio')}  |  "
             f"**개발 자료** {await link('resources')}\n"
             f"**업데이트 공지** {await link('updates')}  |  "
             f"**문의·신청** {await link('support_panel')}"
