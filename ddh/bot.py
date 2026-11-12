@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+from ddh.audit_details import identity
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
@@ -13,13 +14,16 @@ from ddh.content import publish_panels
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
+from ddh.onboarding import connect_existing_bots, enforce_entry, install_onboarding
 from ddh.security import configure_security
-from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
+from ddh.server import (
+    UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for,
+)
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
 from ddh.updates import deployed_revision, publish_release
 from ddh.verification import verify_member
-from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, reply, report_error
+from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, VerificationView, reply, report_error
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +47,13 @@ class DDHCommands(app_commands.Group):
         if interaction.user.id != interaction.guild.owner_id:
             raise UserError("이 명령은 Discord 서버 소유자만 실행할 수 있습니다.")
 
+    async def audit_change(self, interaction, command, result, *, sink="audit"):
+        await self.bot.operations.record(
+            interaction.guild, f"**소유자 명령 적용** · `/ddh {command}`\n"
+            f"요청자 · {identity(interaction.user)}\n실행 · Dialian\n결과 · {result}",
+            key=f"owner-command:{interaction.id}", sink=sink,
+        )
+
     @app_commands.command(name="plan", description="DDH 채널·역할·권한 구성 미리보기")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -63,6 +74,7 @@ class DDHCommands(app_commands.Group):
                         f"새로 생성 {sum(v is None for v in found.values())}개.")
             return
         await self.bot.bootstrap(interaction.guild)
+        await self.audit_change(interaction, "setup", "초기 구성 완료 · 누락된 역할과 채널 생성 및 연결")
         await reply(interaction, "초기 구성을 완료했습니다. 기존 항목을 재사용하고 누락된 항목만 생성했습니다.")
 
     @app_commands.command(name="layout", description="소유자가 가이드·질문·아이디어·자료 채널 정리")
@@ -74,7 +86,47 @@ class DDHCommands(app_commands.Group):
         await interaction.response.defer(ephemeral=True, thinking=True)
         async with self.bot.mutation_lock:
             summary = await cosmetic_layout(interaction.guild, self.bot.store, apply=apply)
+        if apply:
+            await self.audit_change(interaction, "layout", summary)
         await reply(interaction, summary)
+
+    @app_commands.command(name="onboarding", description="인증·입퇴장·명령어 채널과 외부봇 역할 설정")
+    @app_commands.describe(apply="True: 입장 채널을 연결하고 인증 전 채널 보기 제한 적용")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def onboarding(self, interaction: discord.Interaction, apply: bool = False):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        if not apply:
+            await reply(interaction, "안내 위 입장 구역에 인증·비공개 입퇴장 채널을 배치하고 규칙 버튼을 제거합니다. 명령어 채널과 "
+                        "외부봇 역할을 구성합니다. 인증 전에는 인증 채널만 보이도록 하고, 다른 채널에 "
+                        "미인증자에게 보기 권한을 주는 역할·개별 허용을 정리합니다. "
+                        "`/ddh onboarding apply:True`로 적용하세요.")
+            return
+        async with self.bot.mutation_lock:
+            await self.bot.tickets.ready(guild)
+            role, mentions, adjusted, review, unseen = await install_onboarding(self.bot, guild)
+        note = "\n입퇴장과 신규 봇 연결은 Server Members Intent를 켜고 재시작하면 작동합니다."
+        if self.bot.intents.members:
+            try:
+                count, blocked = await connect_existing_bots(guild, role)
+                note = f"\n기존 외부 봇 역할 지급 {count}개."
+                if blocked:
+                    note += f" 역할을 지급하지 못한 봇 {blocked}개는 Dialian 역할 순서를 확인해 주세요."
+            except discord.HTTPException:
+                note = "\n기존 봇 목록을 읽지 못했습니다. 기존 봇에게는 외부봇 역할을 직접 지정해 주세요."
+        note += "\n조회한 채널에는 인증 전 채널 보기 제한을 적용했습니다."
+        if adjusted:
+            note += f"\n기존 채널 보기 허용 정리 {len(adjusted)}곳 · " + ", ".join(adjusted[:8])
+        if review:
+            note += f"\n기존 역할 차단을 우선한 채널 {len(review)}곳 · " + ", ".join(review[:8])
+        if unseen:
+            note += (f"\nDiscord에서 조회되지 않은 등록 채널 {len(unseen)}곳 · "
+                     + ", ".join(f"<#{channel_id}>" for channel_id in unseen[:8])
+                     + " · 채널 존재 여부와 Dialian의 보기 권한을 확인해 주세요.")
+        await self.audit_change(interaction, "onboarding", "입장·인증·명령어 채널 연결 · " + " · ".join(mentions) + note)
+        await reply(interaction, "설치 완료 · " + " · ".join(mentions) + note)
 
     @app_commands.command(name="cleanup", description="소유자 확인 후 기존 티켓·보관 카테고리 영구 정리")
     @app_commands.describe(confirm="True: 기존 보관/종료 채널을 영구 삭제 (복구 불가능)")
@@ -99,6 +151,7 @@ class DDHCommands(app_commands.Group):
         self.owner(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
         safeguards = await self.bot.apply_security(interaction.guild)
+        await self.audit_change(interaction, "security", " / ".join(safeguards), sink="security_log")
         await reply(interaction, "보안 설정 적용: " + " / ".join(safeguards))
 
     @app_commands.command(name="panels", description="규칙·안내·문의 패널 복구 또는 갱신")
@@ -150,8 +203,13 @@ class DDHCommands(app_commands.Group):
     async def release(self, interaction: discord.Interaction):
         self.owner(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
-        published = await publish_release(self.bot, interaction.guild)
-        await reply(interaction, "업데이트 공지를 게시했습니다." if published else "게시할 새 업데이트가 없습니다.")
+        guild = interaction.guild
+        published = await publish_release(self.bot, guild, manual=True)
+        channel_id = await self.bot.store.get(guild.id, "release:last_channel")
+        message_id = await self.bot.store.get(guild.id, "release:last_message")
+        link = f"\nhttps://discord.com/channels/{guild.id}/{channel_id}/{message_id}" if channel_id and message_id else ""
+        result = "업데이트 공지를 게시했습니다." if published else "이미 게시된 업데이트 공지를 확인했습니다."
+        await reply(interaction, result + link)
 
     @app_commands.command(name="status", description="Dialian 연결·구성 상태 확인")
     @app_commands.guild_only()
@@ -163,7 +221,9 @@ class DDHCommands(app_commands.Group):
         news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
-                    f"자동 공지: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
+                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n"
+                    f"배포 공지: {'켜짐' if self.bot.settings.auto_release else '꺼짐'}\n"
+                    f"시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
@@ -173,7 +233,7 @@ class Dialian(discord.Client):
         intents.guilds = True
         intents.members = settings.member_events
         intents.moderation = True
-        super().__init__(intents=intents, member_cache_flags=discord.MemberCacheFlags.none(),
+        super().__init__(intents=intents, member_cache_flags=discord.MemberCacheFlags(voice=False, joined=settings.member_events),
                          chunk_guilds_at_startup=False, allowed_mentions=discord.AllowedMentions.none())
         self.settings = settings
         self.store = Store(settings.database)
@@ -192,7 +252,8 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), UpdateAlertsView(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), UpdateAlertsView(self),
+                     VerificationView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
@@ -231,9 +292,31 @@ class Dialian(discord.Client):
             log.error("Configured DDH guild is unavailable; check DDH_GUILD_ID and bot invitation")
             return
         log.info("Dialian connected to DDH guild %s", guild.id)
+        await self.announce_update(guild)
+
+    async def announce_update(self, guild):
+        if not self.settings.auto_release:
+            return
+        try:
+            await publish_release(self, guild)
+        except UserError as error:
+            log.warning("DDH release announcement pending: %s", error)
+        except Exception:
+            log.exception("DDH release announcement failed; will retry")
 
     async def on_member_join(self, member):
+        try:
+            await enforce_entry(self, member, joined=True)
+        except (discord.HTTPException, UserError):
+            log.exception("DDH 입장 역할 처리 실패 · 회원 ID %s", member.id)
         await self.operations.membership(member.guild, member, joined=True)
+
+    async def on_member_update(self, before, after):
+        if before.roles != after.roles and not after.bot:
+            try:
+                await enforce_entry(self, after)
+            except (discord.HTTPException, UserError):
+                log.exception("DDH 입장 역할 복원 검사 실패 · 회원 ID %s", after.id)
 
     async def on_raw_member_remove(self, payload):
         guild = self.get_guild(payload.guild_id)
@@ -273,6 +356,7 @@ class Dialian(discord.Client):
                     log.exception("DDH %s failed; will retry", name)
         now = datetime.now(timezone.utc)
         if guild:
+            await self.announce_update(guild)
             # Gateway events are backed up by a cursor over Discord audit history.
             try:
                 await self.operations.catch_up(guild)

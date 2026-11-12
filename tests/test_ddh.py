@@ -16,7 +16,7 @@ from ddh.backups import backup
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
-from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
+from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, upsert_panel
 from ddh.operations import inspect_layout
 from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
@@ -25,8 +25,8 @@ from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
-from ddh.updates import publish_release, release_embed
-from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView
+from ddh.updates import RECAP_FIELD, RECAP_KEY, publish_release, release_embed
+from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, VerificationView
 from fakes import Guild, Text
 
 
@@ -72,16 +72,19 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((admin.name, admin.position), ("owner-custom-admin", 230))
         self.assertEqual(channel.id, (await self.channel("general")).id)
 
-    async def test_startup_leaves_legacy_automation_disabled(self):
+    async def test_startup_announces_release_without_reconfiguring_server(self):
         await self.bot.store.set(self.guild.id, "notices_enabled", True)
+        self.bot.release_sha = "1" * 40
         with (patch.object(self.bot, "get_guild", return_value=self.guild),
               patch.object(self.bot, "bootstrap", new_callable=AsyncMock) as setup,
-              patch.object(self.bot, "apply_security", new_callable=AsyncMock) as security,
-              patch("ddh.bot.publish_release", new_callable=AsyncMock) as release):
+              patch.object(self.bot, "apply_security", new_callable=AsyncMock) as security):
+            await self.bot.on_ready()
             await self.bot.on_ready()
         setup.assert_not_awaited()
         security.assert_not_awaited()
-        release.assert_not_awaited()
+        updates = (await self.channel("updates")).messages
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].embeds[0].fields[0].name, RECAP_FIELD)
         self.assertFalse((await self.channel("guide")).messages)
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
@@ -89,7 +92,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "security", "panels", "verify", "notices", "release", "cleanup"):
+        for command in ("setup", "layout", "security", "panels", "verify", "notices", "release", "cleanup", "onboarding"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
@@ -147,7 +150,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.bot.store.get(guild.id, "news_format_pending"))
 
     async def test_compact_bilingual_layout_and_announce_support(self):
-        self.assertEqual(len(CATEGORIES), 6)
+        self.assertEqual(len(CATEGORIES), 7)
         names = {ch.name for ch in CHANNELS}
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
@@ -202,7 +205,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(admin, self.roles["staff"])
         rules = await self.channel("rules")
         self.assertEqual(self.guild.rules_channel.id, rules.id)
-        self.assertEqual([ch.key for ch in CHANNELS][:2], ["announcements", "updates"])
+        self.assertEqual([ch.key for ch in CHANNELS if ch.category == "info"][:2], ["announcements", "updates"])
 
     async def test_active_ticket_in_staff_area_and_closed_channel_removed(self):
         channel = await self.bot.tickets.create(
@@ -218,8 +221,8 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["state"], "closed")
 
     async def test_support_categories_follow_notice_categories(self):
-        expected = ["info", "support", "community", "jobs"]
-        self.assertEqual([category.key for category in CATEGORIES][:4], expected)
+        expected = ["entry", "info", "support", "community", "jobs"]
+        self.assertEqual([category.key for category in CATEGORIES][:5], expected)
 
     async def test_adopts_original_screenshot_channels(self):
         guild = Guild(self.guild.id + 1)
@@ -251,7 +254,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         voice = await self.channel("lounge")
         gfx = self.guild.member(6, [self.roles["member"], self.roles["developer"], self.roles["field:gfx"]])
         vfx = self.guild.member(7, [self.roles["member"], self.roles["developer"], self.roles["field:vfx"]])
-        self.assertTrue(general.permissions_for(self.visitor).view_channel)
+        self.assertFalse(general.permissions_for(self.visitor).view_channel)
         self.assertFalse(general.permissions_for(self.visitor).send_messages)
         self.assertTrue(general.permissions_for(self.member).send_messages)
         self.assertFalse(rules.permissions_for(self.member).send_messages)
@@ -400,15 +403,15 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(channel.permissions_for(self.member).view_channel)
         self.assertTrue(channel.permissions_for(self.staff).view_channel)
 
-    async def test_rules_button_cannot_grant_a_modified_powerful_role(self):
+    async def test_verification_button_cannot_grant_a_modified_powerful_role(self):
         role = self.roles["member"]
         role._permissions = discord.Permissions(manage_roles=True).value
         interaction = AsyncMock()
         interaction.guild = self.guild
-        interaction.channel_id = (await self.channel("rules")).id
+        interaction.channel_id = (await self.channel("verification")).id
         interaction.user = self.visitor
         with self.assertRaises(UserError):
-            await RulesView(self.bot).accept.callback(interaction)
+            await VerificationView(self.bot).accept.callback(interaction)
         self.visitor.add_roles.assert_not_called()
 
     async def test_public_guide_explains_purpose_and_first_steps(self):
@@ -440,7 +443,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.bot.store.get(guild.id, 'channel:guide'), old_channel.id)
         self.assertEqual(old_channel.name, '이용안내')
     async def test_panels_are_persistent_and_repair_without_duplicates(self):
-        for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView):
+        for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView, VerificationView):
             self.assertTrue(view_type(self.bot).is_persistent())
         await publish_panels(self.bot, self.guild)
         counts = [len(c.messages) for c in self.guild.channels if isinstance(c, Text)]
@@ -477,23 +480,23 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_release_announces_once_per_deployed_revision(self):
         self.bot.release_sha = "1" * 40
-        self.assertFalse(await publish_release(self.bot, self.guild))
+        await self.bot.store.set(self.guild.id, "release:last_revision", self.bot.release_sha)
+        self.assertTrue(await publish_release(self.bot, self.guild))
         channel = await self.channel("updates")
-        self.assertEqual(len(channel.messages), 0)
+        self.assertEqual(channel.messages[0].embeds[0].fields[0].name, RECAP_FIELD)
         self.bot.release_sha = "2" * 40
         self.assertTrue(await publish_release(self.bot, self.guild))
         self.assertFalse(await publish_release(self.bot, self.guild))
-        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(len(channel.messages), 2)
         self.assertEqual(channel.messages[0].content, self.roles["update_alerts"].mention)
-        self.assertIn("DDH:release:", channel.messages[0].embeds[0].footer.text)
+        self.assertNotIn(RECAP_FIELD, [field.name for field in channel.messages[1].embeds[0].fields])
+        self.assertEqual(channel.messages[1].embeds[0].footer.text, f"DDH:release:{self.bot.release_sha}")
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
         self.bot.release_sha = "3" * 40
-        await publish_release(self.bot, self.guild)
-        self.bot.release_sha = "4" * 40
         real_set = self.bot.store.set
         async def fail_record(guild_id, key, value):
-            if key == "release:last_revision":
+            if key == RECAP_KEY:
                 raise RuntimeError("after-send write failed")
             return await real_set(guild_id, key, value)
         with patch.object(self.bot.store, "set", side_effect=fail_record):
@@ -501,6 +504,52 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
                 await publish_release(self.bot, self.guild)
         self.assertFalse(await publish_release(self.bot, self.guild))
         self.assertEqual(len((await self.channel("updates")).messages), 1)
+        self.assertTrue(await self.bot.store.get(self.guild.id, RECAP_KEY))
+
+    async def test_release_works_without_a_subscription_role(self):
+        self.bot.release_sha = "4" * 40
+        await self.bot.store.set(self.guild.id, "role:update_alerts", None)
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertIsNone((await self.channel("updates")).messages[0].content)
+
+    async def test_summary_backfill_works_without_setup_or_git_and_with_old_recap_record(self):
+        guild_id = self.guild.id
+        channel = await self.channel("updates")
+        self.bot.release_sha = None
+        await self.bot.store.set(guild_id, "setup_complete", False)
+        await self.bot.store.set(guild_id, "channel:updates", None)
+        await self.bot.store.set(guild_id, "release:operations_recap", True)
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertFalse(await publish_release(self.bot, self.guild))
+        card = channel.messages[0].embeds[0]
+        self.assertIn("전체 업데이트 안내", card.title)
+        self.assertEqual(len(card.fields), 6)
+        self.assertIn("입장 권한 적용이 끝나면", card.fields[0].value)
+        self.assertLess(len(card), 6000)
+
+    async def test_manual_release_recovers_deleted_summary_and_returns_link(self):
+        self.bot.release_sha = "5" * 40
+        channel = await self.channel("updates")
+        await publish_release(self.bot, self.guild)
+        old_id = channel.messages.pop().id
+        interaction = AsyncMock(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id))
+        interaction.response.is_done = Mock(return_value=True)
+        group = DDHCommands(self.bot)
+        await group.release.callback(group, interaction)
+        await group.release.callback(group, interaction)
+        self.assertEqual(len(channel.messages), 1)
+        message = channel.messages[0]
+        self.assertNotEqual(message.id, old_id)
+        self.assertIn("전체 업데이트 안내", message.embeds[0].title)
+        self.assertIn(f"https://discord.com/channels/{self.guild.id}/{channel.id}/{message.id}",
+                      interaction.followup.send.await_args.args[0])
+
+    async def test_release_explains_channel_permission_failure(self):
+        channel = await self.channel("updates")
+        with patch.object(channel, "permissions_for", return_value=discord.Permissions(view_channel=True)):
+            with self.assertRaisesRegex(UserError, "메시지 보내기"):
+                await publish_release(self.bot, self.guild, manual=True)
+        self.assertFalse(channel.messages)
 
     async def test_update_opt_in_and_out_does_not_grant_privileges(self):
         view = UpdateAlertsView(self.bot)
@@ -586,6 +635,172 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(unrelated, guild.channels)
         self.assertEqual(guide_channel.type, discord.ChannelType.text)
 
+    async def test_owner_onboarding_creates_the_requested_channels_and_publishes_panel(self):
+        for key in ("verification", "member_log", "commands"):
+            await (await self.channel(key)).delete()
+            await self.bot.store.set(self.guild.id, f"channel:{key}", None)
+        existing_ids = {channel.id for channel in self.guild.channels}
+        pictures = await self.channel("pictures")
+        await self.bot.store.set(self.guild.id, "channel:pictures", None)
+        await pictures.set_permissions(self.guild.default_role,
+                                       overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True))
+        external = self.guild.member(40)
+        external.bot = True
+        rules = await self.channel("rules")
+        group = DDHCommands(self.bot)
+        interaction = AsyncMock()
+        interaction.guild = self.guild
+        interaction.user = SimpleNamespace(id=self.guild.owner_id)
+        interaction.response.is_done = Mock(return_value=True)
+        await group.onboarding.callback(group, interaction)
+        self.assertEqual({c.id for c in self.guild.channels}, existing_ids)
+        await group.onboarding.callback(group, interaction, apply=True)
+        verification = await self.channel("verification")
+        member_log = await self.channel("member_log")
+        commands = await self.channel("commands")
+        self.assertEqual({c.id for c in self.guild.channels} - existing_ids, {verification.id, member_log.id, commands.id})
+        role = self.guild.get_role(await self.bot.store.get(self.guild.id, "role:external_bots"))
+        self.assertEqual(role.permissions.value, 0)
+        self.assertIn(role, external.roles)
+        self.assertTrue(commands.permissions_for(external).send_messages)
+        self.assertFalse(member_log.permissions_for(external).view_channel)
+        self.assertFalse(commands.permissions_for(self.visitor).view_channel)
+        self.assertFalse(pictures.permissions_for(self.visitor).send_messages)
+        self.assertTrue(pictures.permissions_for(self.member).send_messages)
+        self.assertTrue(verification.permissions_for(self.visitor).view_channel)
+        self.assertFalse(verification.permissions_for(self.visitor).send_messages)
+        self.assertFalse(member_log.permissions_for(self.visitor).view_channel)
+        self.assertFalse(rules.messages)
+        await group.onboarding.callback(group, interaction, apply=True)
+        self.assertEqual(len(verification.messages), 1)
+
+        interaction.channel_id = verification.id
+        interaction.user = self.visitor
+        await verification.messages[0].view.accept.callback(interaction)
+        self.assertIn(self.roles["member"], self.visitor.roles)
+        self.assertFalse(verification.permissions_for(self.visitor).view_channel)
+        self.assertTrue(pictures.permissions_for(self.visitor).view_channel)
+
+    async def test_onboarding_closes_legacy_visibility_and_preserves_private_boundaries(self):
+        guild = self.guild
+        other_role = guild.make_role("구형 역할")
+        await self.visitor.add_roles(other_role, self.roles["developer"])
+        ticket = await self.bot.tickets.create(guild, self.member, "feedback", {"제목": "권한", "내용": "확인"})
+        custom = await guild.create_text_channel("추가-채널", overwrites={
+            guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            other_role: discord.PermissionOverwrite(view_channel=True, attach_files=True),
+            self.visitor: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        })
+        restricted = await guild.create_text_channel("기존-역할-제한", overwrites={
+            guild.default_role: discord.PermissionOverwrite(view_channel=True),
+            other_role: discord.PermissionOverwrite(view_channel=False),
+        })
+        rules = await self.channel("rules")
+        await rules.edit(overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False)})
+        await ticket.set_permissions(guild.default_role, overwrite=discord.PermissionOverwrite(view_channel=True))
+        log = await self.channel("member_log")
+        await log.set_permissions(other_role, overwrite=discord.PermissionOverwrite(view_channel=True))
+        group = DDHCommands(self.bot)
+        interaction = AsyncMock(guild=guild, user=SimpleNamespace(id=guild.owner_id))
+        interaction.response.is_done = Mock(return_value=True)
+
+        await group.onboarding.callback(group, interaction, apply=True)
+
+        visible = {c.id for c in guild.channels if not isinstance(c, discord.CategoryChannel)
+                   and c.permissions_for(self.visitor).view_channel}
+        verification = await self.channel("verification")
+        self.assertEqual(visible, {verification.id})
+        self.assertIn("서로 존중하기", verification.messages[0].embeds[0].description)
+        self.assertTrue(custom.permissions_for(self.member).send_messages)
+        self.assertTrue(custom.overwrites_for(other_role).attach_files)
+        self.assertFalse(restricted.permissions_for(self.member).view_channel)
+        self.assertTrue(rules.permissions_for(self.member).view_channel)
+        self.assertFalse(rules.permissions_for(self.member).send_messages)
+        self.assertTrue(ticket.permissions_for(self.member).view_channel)
+        self.assertFalse(ticket.permissions_for(guild.member(80, [self.roles["member"]])).view_channel)
+        self.assertTrue(log.permissions_for(self.staff).view_channel)
+
+    async def test_rejoin_requires_verification_to_restore_personal_ticket_visibility(self):
+        from ddh.onboarding import INSTALLED, VISIBILITY_INSTALLED
+
+        guild = self.guild
+        await self.bot.store.set(guild.id, INSTALLED, True)
+        await self.bot.store.set(guild.id, VISIBILITY_INSTALLED, True)
+        ticket = await self.bot.tickets.create(guild, self.member, "feedback", {"제목": "테스트", "내용": "문의"})
+        self.member.joined_at += timedelta(days=1)
+        await self.bot.on_member_join(self.member)
+        self.assertFalse(ticket.permissions_for(self.member).view_channel)
+        self.assertTrue(await verify_member(self.bot, guild, self.member.id))
+        self.assertTrue(ticket.permissions_for(self.member).view_channel)
+
+    async def test_existing_entry_channels_move_without_sync_and_rules_button_is_removed(self):
+        guild = self.guild
+        store = self.bot.store
+        entry = guild.get_channel(await store.get(guild.id, "category:entry"))
+        info = guild.get_channel(await store.get(guild.id, "category:info"))
+        staff = guild.get_channel(await store.get(guild.id, "category:ops"))
+        verification = await self.channel("verification")
+        member_log = await self.channel("member_log")
+        rules = await self.channel("rules")
+        await verification.edit(category=info)
+        await member_log.edit(category=staff)
+        entry.position = 90
+        await entry.delete()
+        await store.set(guild.id, "category:entry", None)
+        previous_permissions = member_log.overwrites
+        log_message = await member_log.send("이전 입퇴장 기록")
+        owner_message = await rules.send("내 규칙 안내")
+        legacy_panel = await upsert_panel(
+            rules, store, "rules", discord.Embed(description="기존 규칙\n\n아래 버튼으로 인증하세요."),
+            view=RulesView(self.bot),
+        )
+        group = DDHCommands(self.bot)
+        interaction = AsyncMock()
+        interaction.guild = guild
+        interaction.user = SimpleNamespace(id=guild.owner_id)
+        interaction.response.is_done = Mock(return_value=True)
+
+        await group.onboarding.callback(group, interaction, apply=True)
+
+        new_entry = guild.get_channel(await store.get(guild.id, "category:entry"))
+        self.assertLess(new_entry.position, info.position)
+        self.assertEqual(verification.category_id, new_entry.id)
+        self.assertEqual(member_log.category_id, new_entry.id)
+        self.assertLess(verification.position, member_log.position)
+        self.assertEqual(member_log.overwrites, previous_permissions)
+        self.assertFalse(member_log.permissions_for(self.visitor).view_channel)
+        self.assertIn(log_message, member_log.messages)
+        self.assertIn(owner_message, rules.messages)
+        self.assertIsNone(legacy_panel.view)
+        self.assertIn(verification.mention, legacy_panel.embeds[0].description)
+        self.assertTrue(verification.messages[0].view.is_persistent())
+
+        new_entry.position = 90
+        await group.onboarding.callback(group, interaction, apply=True)
+        self.assertEqual(new_entry.position, 90)
+
+    async def test_rejoin_rejects_restored_roles_until_current_join_is_verified(self):
+        from ddh.onboarding import INSTALLED
+
+        guild = self.guild
+        await self.bot.store.set(guild.id, INSTALLED, True)
+        member = self.visitor
+        self.assertTrue(await verify_member(self.bot, guild, member.id))
+        role = self.roles["member"]
+        original_join = member.joined_at
+        member.joined_at = original_join + timedelta(days=1)
+        await self.bot.on_member_join(member)
+        self.assertNotIn(role, member.roles)
+
+        before = SimpleNamespace(roles=list(member.roles))
+        await member.add_roles(role)
+        await self.bot.on_member_update(before, member)
+        self.assertNotIn(role, member.roles)
+        self.assertTrue(await verify_member(self.bot, guild, member.id))
+        await self.bot.on_member_join(member)
+        self.assertIn(role, member.roles)
+        self.assertTrue((await self.channel("commands")).permissions_for(member).use_application_commands)
+
     async def test_member_screening_account_age_and_manual_exception(self):
         self.visitor.pending = True
         with self.assertRaises(UserError):
@@ -601,7 +816,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("수동 인증", (await self.channel("audit")).messages[-1].embeds[0].description)
 
     async def test_member_events_queue_while_log_permissions_are_unsafe(self):
-        audit = await self.channel("audit")
+        audit = await self.channel("member_log")
         self.assertTrue(audit.permissions_for(self.staff).view_channel)
         self.assertFalse(audit.permissions_for(self.staff).send_messages)
         self.assertFalse(audit.permissions_for(self.staff).manage_messages)
@@ -614,13 +829,13 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.bot, "get_guild", return_value=self.guild):
             await self.bot.on_raw_member_remove(SimpleNamespace(guild_id=self.guild.id, user=self.visitor))
         self.assertFalse(audit.messages)
-        self.assertEqual(len(await self.bot.store.pending_events(self.guild.id, "audit")), 2)
-        self.assertIn("채널 권한 불일치 · 로그-logs", await inspect_layout(self.guild, self.bot.store))
+        self.assertEqual(len(await self.bot.store.pending_events(self.guild.id, "member_log")), 2)
+        self.assertIn("채널 권한 불일치 · 입퇴장-join-leave", await inspect_layout(self.guild, self.bot.store))
         await audit.edit(overwrites=original)
         await self.bot.operations.flush(self.guild)
         self.assertIn("입장", audit.messages[-1].embeds[0].description)
         self.assertIn("퇴장", audit.messages[-1].embeds[0].description)
-        self.assertFalse(await self.bot.store.pending_events(self.guild.id, "audit"))
+        self.assertFalse(await self.bot.store.pending_events(self.guild.id, "member_log"))
 
     async def test_audit_event_is_deduplicated_across_gateway_and_poll(self):
         entry = SimpleNamespace(guild=self.guild, id=901, user_id=self.staff.id,
@@ -636,6 +851,63 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         log_channel = await self.channel("security_log")
         self.assertEqual(len(log_channel.messages), 1)
         self.assertIn("채널 삭제", log_channel.messages[0].embeds[0].description)
+
+    async def test_audit_channel_shows_name_change_and_protects_free_text(self):
+        channel = await self.channel("general")
+        actor = SimpleNamespace(id=20, display_name="Dial **운영** @everyone")
+        entry = SimpleNamespace(guild=self.guild, id=903, user_id=actor.id, user=actor,
+                                action=discord.AuditLogAction.channel_update, target=channel,
+                                before=SimpleNamespace(name="이전 채팅", topic="old-secret", slowmode_delay=0),
+                                after=SimpleNamespace(name="새 채팅", topic="new-secret", slowmode_delay=10),
+                                reason="secret-reason", created_at=datetime.now(timezone.utc))
+        await self.bot.operations.audit(entry)
+        body = (await self.channel("audit")).messages[-1].embeds[0].description
+        for detail in (r"Dial \*\*운영\*\*", "ID `20`", f"ID `{channel.id}`", "감사 ID `903`",
+                       "이름 · 이전 채팅 → 새 채팅", "슬로우모드(초) · 0 → 10", "채널 주제 변경"):
+            self.assertIn(detail, body)
+        self.assertNotIn("@everyone", body)
+        self.assertNotIn("secret", body)
+
+    async def test_security_channel_shows_role_and_channel_permission_diffs(self):
+        target = self.roles["member"]
+        common = dict(guild=self.guild, user_id=self.staff.id, user=self.staff, created_at=datetime.now(timezone.utc))
+        await self.bot.operations.audit(SimpleNamespace(
+            id=904, action=discord.AuditLogAction.role_update, target=target,
+            before=SimpleNamespace(permissions=discord.Permissions(send_messages=True)),
+            after=SimpleNamespace(permissions=discord.Permissions(administrator=True)), **common))
+        self.guild._state = Mock()
+        channel = await self.channel("general")
+        view_bit = str(discord.Permissions(view_channel=True).value)
+        await self.bot.operations.audit(discord.AuditLogEntry(
+            guild=self.guild, users={}, integrations={}, app_commands={}, automod_rules={}, webhooks={},
+            data={"id": "905", "action_type": discord.AuditLogAction.overwrite_update.value,
+                  "target_id": str(channel.id), "user_id": str(self.staff.id),
+                  "options": {"id": str(target.id), "type": "0"},
+                  "changes": [{"key": "deny", "old_value": view_bit, "new_value": "0"},
+                              {"key": "allow", "old_value": "0", "new_value": view_bit}]},
+        ))
+        security = await self.channel("security_log")
+        role_body, overwrite_body = [message.embeds[0].description for message in security.messages]
+        self.assertIn("역할 권한 추가: 관리자", role_body)
+        self.assertIn("역할 권한 해제: 메시지 보내기", role_body)
+        self.assertIn(f"권한 적용 대상 · {target.name} (ID `{target.id}`)", overwrite_body)
+        self.assertIn("채널 허용 추가: 채널 보기", overwrite_body)
+        self.assertIn("채널 거부 해제: 채널 보기", overwrite_body)
+        self.assertFalse((await self.channel("audit")).messages)
+
+    async def test_security_audit_records_unknown_actor_and_automod_context(self):
+        channel = await self.channel("general")
+        entry = SimpleNamespace(
+            guild=self.guild, id=906, user_id=None, action=discord.AuditLogAction.automod_block_message,
+            target=self.visitor, created_at=datetime.now(timezone.utc),
+            extra=SimpleNamespace(channel=channel, automod_rule_name="DDH 멘션 도배 방지",
+                                  automod_rule_trigger_type=discord.AutoModRuleTriggerType.mention_spam))
+        await self.bot.operations.audit(entry)
+        body = (await self.channel("security_log")).messages[-1].embeds[0].description
+        self.assertIn("실행자 · Discord 기록 없음", body)
+        self.assertIn(f"대상 · {self.visitor.name} (ID `{self.visitor.id}`)", body)
+        self.assertIn(f"관련 채널 · {channel.name} (ID `{channel.id}`)", body)
+        self.assertIn("감지 규칙 · DDH 멘션 도배 방지", body)
 
     async def test_existing_ticket_blocks_resending_without_overriding_owner_permissions(self):
         payload = self.payload()
@@ -655,7 +927,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "release"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "release", "onboarding"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

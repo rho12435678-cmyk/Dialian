@@ -56,9 +56,17 @@ class Message:
         self.content = content
         self.view = view
 
+    @property
+    def components(self):
+        return [SimpleNamespace(children=self.view.children)] if self.view else []
+
     async def edit(self, **kwargs):
-        self.embeds = [kwargs["embed"]] if kwargs.get("embed") else []
-        self.view = kwargs.get("view")
+        if "embed" in kwargs:
+            self.embeds = [kwargs["embed"]] if kwargs["embed"] else []
+        if "embeds" in kwargs:
+            self.embeds = kwargs["embeds"]
+        if "view" in kwargs:
+            self.view = kwargs["view"]
         return self
 
 
@@ -67,11 +75,34 @@ class ChannelMethods:
         if self in self.guild.channels:
             self.guild.channels.remove(self)
 
+    async def set_permissions(self, target, *, overwrite, **kwargs):
+        current = self.overwrites
+        current[target] = overwrite
+        await self.edit(overwrites=current)
+
+    async def move(self, *, before=None, beginning=False, category=None, sync_permissions=False, **kwargs):
+        if category is not None:
+            self.category_id = category.id
+            if sync_permissions:
+                await self.edit(overwrites=category.overwrites)
+        if isinstance(self, discord.CategoryChannel):
+            siblings = self.guild.categories
+        else:
+            siblings = [channel for channel in self.guild.channels if channel.category_id == self.category_id]
+        siblings = sorted((channel for channel in siblings if channel.id != self.id),
+                          key=lambda channel: (channel.position, channel.id))
+        index = siblings.index(before) if before else 0
+        siblings.insert(index, self)
+        for index, channel in enumerate(siblings):
+            channel.position = index
+
     async def edit(self, **kwargs):
         if "name" in kwargs:
             self.name = kwargs["name"]
         if "category" in kwargs:
             self.category_id = kwargs["category"].id
+        if "position" in kwargs:
+            self.position = kwargs["position"]
         if "overwrites" in kwargs:
             self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=kwargs["overwrites"]))
         if "topic" in kwargs:
@@ -172,6 +203,7 @@ class Guild:
         member = Mock(spec=discord.Member)
         member.id = member_id
         member.name = f"member-{member_id}"
+        member.display_name = member.name
         member.bot = False
         member.pending = False
         member.created_at = datetime.now(timezone.utc) - timedelta(days=90)
@@ -204,6 +236,10 @@ class Guild:
 
     def get_channel(self, channel_id):
         return next((c for c in self.channels if c.id == channel_id), None)
+
+    async def fetch_members(self, **kwargs):
+        for member in list(self.members.values()):
+            yield member
 
     async def fetch_channels(self):
         return list(self.channels)

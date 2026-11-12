@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 import discord
 
+from ddh.audit_details import identity
 from ddh.blueprint import FIELDS, KINDS, overwrites
 from ddh.content import embed, upsert_panel
 from ddh.operations import private_channel
@@ -117,7 +118,8 @@ class Tickets:
         await upsert_panel(channel, self.store, f"ticket:{ticket['id']}", card, view=TicketActions(self.bot))
         if ticket["state"] == "creating":
             await self.store.update_ticket(ticket["id"], guild.id, state="open")
-            await self.audit(guild, f"문의 #{ticket['id']} 생성 · {KINDS[ticket['kind']]} · 신청자 ID {member.id} · {channel.mention}")
+            await self.audit(guild, f"**문의 #{ticket['id']} 생성** · {KINDS[ticket['kind']]}\n"
+                             f"신청자 · {identity(member)}\n채널 · {channel.mention} (ID `{channel.id}`)")
         return channel
 
     async def current(self, guild, channel_id):
@@ -153,7 +155,9 @@ class Tickets:
             return "반려"
 
     async def review_notice(self, guild, channel, ticket, label, reason, reviewer_id):
-        await self.audit(guild, f"신청 #{ticket['id']} {label} · 심사자 ID {reviewer_id}")
+        await self.audit(guild, f"**신청 #{ticket['id']} {label}** · {KINDS[ticket['kind']]}\n"
+                         f"심사자 · {identity(guild.get_member(reviewer_id), identifier=reviewer_id)}\n"
+                         f"채널 · {channel.mention} (ID `{channel.id}`)")
         try:
             await channel.send(embed=embed(f"신청 {label}", reason), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
@@ -206,7 +210,10 @@ class Tickets:
         await self.complete_close(guild, ticket)
 
     async def complete_close(self, guild, ticket):
-        await self.audit(guild, f"문의 #{ticket['id']} 종료 · 처리자 ID {ticket['closed_by'] or '자동 복구'} · 채널 ID {ticket['channel_id']}",
+        actor_id = ticket["closed_by"]
+        actor = identity(guild.get_member(actor_id), identifier=actor_id) if actor_id else "Dialian 자동 처리"
+        await self.audit(guild, f"**문의 #{ticket['id']} 종료** · {KINDS[ticket['kind']]}\n"
+                         f"처리자 · {actor}\n정리한 채널 ID `{ticket['channel_id']}`",
                          key=f"ticket:closed:{ticket['id']}")
         await self.store.update_ticket(ticket["id"], guild.id, state="closed")
 
