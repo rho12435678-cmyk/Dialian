@@ -70,6 +70,12 @@ Discord Developer Portal의 Dialian 애플리케이션에서 OAuth2 URL Generato
 
 운영진 역할에 위임할 권한까지 봇이 보유해야 역할을 생성할 수 있습니다.
 봇 역할을 **DDH 운영진·개발자·파트너·멤버·분야 역할보다 위**에 놓으세요.
+Discord의 역할 정렬 API에서 50013 Missing Permissions가 발생하거나 봇 역할이 아래쪽이면,
+봇은 **역할 표시 순서만 건너뛰고** 채널·권한·가이드·보안 설정을 계속 진행합니다.
+`/ddh setup`과 `/ddh status`에서 역할 순서를 수동 확인해야 한다고 안내합니다.
+서버 설정 → 역할에서 Dialian을 DDH 역할보다 위로, DDH 운영진은 일반 개발자·멤버보다 위로 배치한 뒤
+`/ddh setup apply:True`를 재실행하면 정렬을 다시 시도합니다.
+기타 Discord API 오류는 숨기지 않고 실패로 보고합니다.
 관리자 권한은 필수가 아닙니다. Server Members / Message Content 같은 특권 인텐트도 필요 없습니다.
 이 구현은 메시지 내용을 읽는 `!명령어` 대신 슬래시 명령어를 사용합니다.
 
