@@ -1,0 +1,21 @@
+[Unit]
+Description=Dialian - Dial Dev Hub
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Dialian
+EnvironmentFile=/root/Dialian/.env.ddh
+ExecStart=/root/Dialian/venv-ddh/bin/python -u /root/Dialian/dial.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
