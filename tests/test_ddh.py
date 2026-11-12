@@ -17,13 +17,13 @@ from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, repair_missing_panels, retire_update_alerts_panel
-from ddh.operations import inspect_layout
+from ddh.operations import inspect_automod, inspect_layout
 from ddh.permissions import operator_migration
 from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
-from ddh.security import specifications
+from ddh.security import rule_trigger_type, specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
 from ddh.updates import publish_release, redact_legacy_release_links, release_embed
@@ -75,17 +75,64 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.apply_security(self.guild)
         self.assertFalse(await self.bot.store.get(self.guild.id, "security_complete"))
 
+    async def test_actual_automod_trigger_shape_does_not_break_health_checks(self):
+        # discord.py AutoModRule from the live server has .trigger.type,
+        # not necessarily .trigger_type. The old code crashed every minute.
+        active_rules = [
+            SimpleNamespace(
+                name=name, trigger=SimpleNamespace(type=trigger.type),
+                enabled=True,
+                actions=[
+                    discord.AutoModRuleAction(),
+                    discord.AutoModRuleAction(
+                        channel_id=await self.bot.store.get(self.guild.id, "channel:security_log")
+                    ),
+                ],
+            )
+            for name, trigger, _ in specifications()
+        ]
+        self.guild.fetch_automod_rules = AsyncMock(return_value=active_rules)
+        self.assertIsNone(getattr(active_rules[0], "trigger_type", None))
+        self.assertEqual(rule_trigger_type(active_rules[0]),
+                         discord.AutoModRuleTriggerType.keyword)
+        self.assertEqual(await inspect_automod(self.guild, self.bot.store), [])
+        self.assertIsInstance(await self.bot.operations.check(self.guild), list)
+
+    async def test_security_reuses_active_rule_without_trigger_type_attribute(self):
+        existing = [SimpleNamespace(
+            name="서버 기존 스팸 차단",
+            trigger=SimpleNamespace(type=discord.AutoModRuleTriggerType.spam),
+            enabled=True,
+            actions=[discord.AutoModRuleAction()],
+        )]
+        self.guild.fetch_automod_rules = AsyncMock(side_effect=lambda: list(existing))
+
+        async def create_rule(**kwargs):
+            rule = SimpleNamespace(
+                name=kwargs["name"],
+                trigger=SimpleNamespace(type=kwargs["trigger"].type),
+                enabled=True, actions=kwargs["actions"],
+            )
+            existing.append(rule)
+            return rule
+
+        self.guild.create_automod_rule = AsyncMock(side_effect=create_rule)
+        result = await self.bot.apply_security(self.guild)
+        self.assertTrue(await self.bot.store.get(self.guild.id, "security_complete"))
+        self.assertIn("기존 활성 규칙 유지", " ".join(result))
+        self.assertEqual(len(existing), 3)
+
     async def test_security_does_not_claim_success_with_disabled_existing_spam(self):
         rules = [SimpleNamespace(
             name="서버 기존 스팸 차단",
-            trigger_type=discord.AutoModRuleTriggerType.spam,
+            trigger=SimpleNamespace(type=discord.AutoModRuleTriggerType.spam),
             enabled=False, actions=[],
         )]
         self.guild.fetch_automod_rules = AsyncMock(side_effect=lambda: list(rules))
 
         async def create_rule(**params):
             rule = SimpleNamespace(
-                name=params["name"], trigger_type=params["trigger"].type,
+                name=params["name"], trigger=SimpleNamespace(type=params["trigger"].type),
                 enabled=params["enabled"], actions=params["actions"],
             )
             rules.append(rule)
@@ -102,7 +149,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
         async def create_rule(**params):
             rule = SimpleNamespace(
-                name=params["name"], trigger_type=params["trigger"].type,
+                name=params["name"], trigger=SimpleNamespace(type=params["trigger"].type),
                 enabled=params["enabled"], actions=params["actions"],
             )
             rules.append(rule)
