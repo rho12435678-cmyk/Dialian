@@ -164,6 +164,35 @@ async def publish_guide(bot, guild):
     return message
 
 
+def _panel_has_required_buttons(message, key):
+    """Check actual Discord component IDs, not just an embed's footer marker."""
+    expected = {
+        "rules": {"ddh:rules:v1"},
+        "guide": {"ddh:rules:v1"},
+        "support": {
+            "ddh:partner:v1", "ddh:feedback:v1",
+            "ddh:developer:v1", "ddh:report:v1",
+        },
+    }.get(key, set())
+    if not expected:
+        return True
+    # Fake messages in integration tests keep the edited view; real REST
+    # messages expose ActionRows in message.components.
+    rows = getattr(message, "components", None)
+    components = []
+    if rows is not None:
+        for row in rows:
+            components.extend(getattr(row, "children", ()))
+    else:
+        view = getattr(message, "view", None)
+        components.extend(getattr(view, "children", ()) if view else ())
+    present = {
+        getattr(item, "custom_id", None)
+        for item in components if not getattr(item, "disabled", False)
+    }
+    return expected <= present
+
+
 async def repair_missing_panels(bot, guild):
     """Self-heal missing public guides/forms, without changing server layout.
 
@@ -187,7 +216,8 @@ async def repair_missing_panels(bot, guild):
             try:
                 message = await channel.fetch_message(saved)
                 if (message.author.id == guild.me.id
-                        and any(e.footer.text == f"DDH:{key}:v1" for e in message.embeds)):
+                        and any(e.footer.text == f"DDH:{key}:v1" for e in message.embeds)
+                        and _panel_has_required_buttons(message, key)):
                     continue
             except discord.NotFound:
                 pass
