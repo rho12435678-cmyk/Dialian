@@ -66,7 +66,7 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, "초기 구성을 완료했습니다. 기존 항목을 재사용하고 누락된 항목만 생성했습니다.")
 
     @app_commands.command(name="layout", description="소유자가 가이드·질문·아이디어·자료 채널 정리")
-    @app_commands.describe(apply="True: 표시된 정리 작업을 한 번 적용")
+    @app_commands.describe(apply="True: 포럼 정리 및 자료 채널 영구 삭제")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def layout(self, interaction: discord.Interaction, apply: bool = False):

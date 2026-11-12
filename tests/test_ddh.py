@@ -19,7 +19,7 @@ from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
 from ddh.operations import inspect_layout
 from ddh.verification import verify_member
-from ddh.layout import cosmetic_layout
+from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import specifications
@@ -152,7 +152,8 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
         self.assertNotIn("english-chat", names)
-        self.assertEqual(len([ch for ch in CHANNELS if ch.forum]), 4)
+        self.assertEqual({ch.key for ch in CHANNELS if ch.forum and ch.category == "community"},
+                         {"questions", "ideas"})
         self.assertEqual((await self.channel("support_panel")).type, discord.ChannelType.news)
         self.assertEqual((await self.channel("partners")).type, discord.ChannelType.news)
         self.assertEqual((await self.channel("portfolio")).type, discord.ChannelType.forum)
@@ -524,12 +525,15 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         questions = await self.channel("questions")
         questions.name = "내-질문-포럼"
         old_question = await self.guild.create_text_channel("질문-help", category=community)
-        old_idea = await self.guild.create_forum("아이디어-ideas", category=community)
+        idea = await self.channel("ideas")
+        old_idea = await self.guild.create_text_channel("아이디어-ideas", category=community)
         resources = await self.guild.create_text_channel("자료-resources", category=community)
-        await resources.send("보존할 자료")
+        await resources.send("삭제할 자료")
         hiring = await self.channel("hiring")
         hiring.name = "내-구인-포럼"
-        self.assertIn("Staff로 이동할", await cosmetic_layout(self.guild, self.bot.store))
+        preview = await cosmetic_layout(self.guild, self.bot.store)
+        self.assertIn("Staff로 이동할", preview)
+        self.assertIn("영구 삭제할 자료 채널 1개", preview)
         self.assertEqual(guide_channel.type, discord.ChannelType.text)
         self.assertEqual(resources.category_id, community.id)
 
@@ -541,14 +545,45 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.channel("questions")).id, questions.id)
         self.assertEqual(questions.name, "내-질문-포럼")
         self.assertEqual(hiring.name, "내-구인-포럼")
-        self.assertIsInstance(await self.channel("ideas"), discord.TextChannel)
-        for old in (old_question, old_idea, resources):
+        self.assertEqual((await self.channel("ideas")).id, idea.id)
+        self.assertIsInstance(await self.channel("ideas"), discord.ForumChannel)
+        for old in (old_question, old_idea):
             self.assertEqual(old.category_id, ops.id)
             self.assertFalse(old.permissions_for(self.visitor).view_channel)
-        self.assertEqual(resources.messages[0].content, "보존할 자료")
+        self.assertNotIn(resources, self.guild.channels)
+        self.assertIsNone(await self.bot.store.get(self.guild.id, "channel:resources"))
 
         await guide_channel.edit(type=discord.ChannelType.text)
         self.assertIn("이미 적용", await cosmetic_layout(self.guild, self.bot.store, apply=True))
+        self.assertEqual(guide_channel.type, discord.ChannelType.text)
+
+    async def test_layout_corrects_previous_migration_and_deletes_archived_resources(self):
+        store = self.bot.store
+        guild = self.guild
+        await store.set(guild.id, LEGACY_MIGRATION_KEY, True)
+        community = guild.get_channel(await store.get(guild.id, "category:community"))
+        staff = guild.get_channel(await store.get(guild.id, "category:ops"))
+        original_idea = await self.channel("ideas")
+        await original_idea.edit(name="보관-아이디어-ideas", category=staff)
+        replacement = await guild.create_text_channel("아이디어-ideas", category=community)
+        await store.set(guild.id, "channel:ideas", replacement.id)
+        old_resources = await guild.create_forum("보관-자료-resources", category=staff)
+        new_resources = await guild.create_text_channel("자료-resources", category=community)
+        await store.set(guild.id, "channel:resources", new_resources.id)
+        unrelated = await guild.create_text_channel("내-작업자료", category=staff)
+        guide_channel = await self.channel("guide")
+        await guide_channel.edit(type=discord.ChannelType.text)
+
+        await cosmetic_layout(guild, store, apply=True)
+
+        self.assertEqual((await self.channel("ideas")).id, original_idea.id)
+        self.assertEqual(original_idea.category_id, community.id)
+        self.assertEqual(original_idea.name, "아이디어-ideas")
+        self.assertTrue(original_idea.permissions_for(self.member).send_messages)
+        self.assertEqual(replacement.category_id, staff.id)
+        self.assertNotIn(old_resources, guild.channels)
+        self.assertNotIn(new_resources, guild.channels)
+        self.assertIn(unrelated, guild.channels)
         self.assertEqual(guide_channel.type, discord.ChannelType.text)
 
     async def test_member_screening_account_age_and_manual_exception(self):

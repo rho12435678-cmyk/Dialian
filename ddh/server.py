@@ -95,6 +95,8 @@ def forum_tags(spec):
         names = ("유급", "협의", "팀원모집", "모집완료")
     elif spec.key == "questions":
         names = ("Studio", "스크립팅", "아트·디자인", "기타", "해결")
+    elif spec.key == "ideas":
+        names = ("게임", "커뮤니티", "협업", "기타")
     elif spec.key == "commissions":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "모집완료")
     elif spec.key == "portfolio":
@@ -132,8 +134,6 @@ async def preflight(guild, store):
             found[f"channel:{spec.key}"] = await find_forum_resource(guild, store, spec)
         else:
             expected = discord.VoiceChannel if spec.voice else discord.TextChannel
-            if spec.key == "ideas":
-                expected = (discord.TextChannel, discord.ForumChannel)
             found[f"channel:{spec.key}"] = await find_resource(
                 guild, store, f"channel:{spec.key}", spec.name, expected, spec.aliases)
     if len(guild.roles) + sum(found[f"role:{key}"] is None for key in ROLES) > 250:

@@ -8,7 +8,7 @@ FIELDS = {
     "vfx": "VFX", "building": "빌더", "modeling": "모델러", "animation": "애니메이터",
 }
 KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청"}
-LAYOUT_VERSION = "2026-11-owner-controlled-v3"
+LAYOUT_VERSION = "2026-11-owner-controlled-v4"
 
 # Preserve field-specific verification and ticket approvals, but expose just
 # one portfolio board with field tags to reduce the visible channel list.
@@ -101,7 +101,7 @@ CHANNELS = (
     Channel("questions", "질문-question", "community", forum=True,
             aliases=("개발질문", "질문-help"),
             topic="개발 질문: 환경 / 기대 동작 / 오류 / 시도한 방법. 토큰과 개인정보는 지워 주세요."),
-    Channel("ideas", "아이디어-ideas", "community",
+    Channel("ideas", "아이디어-ideas", "community", forum=True,
             topic="게임과 커뮤니티 아이디어: 제안 / 기대 효과 / 필요한 작업"),
 
     Channel("hiring", "구인-hiring", "jobs", forum=True,
