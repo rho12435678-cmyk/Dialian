@@ -122,6 +122,11 @@ async def restrict_visibility(guild, store, roles, entry, verification, commands
     adjusted = []
     review = []
     channels = await guild.fetch_channels()
+    fetched_ids = {channel.id for channel in channels}
+    known_ids = {channel.id for channel in guild.channels} | {entry.id, verification.id, commands.id}
+    known_ids.update(channel_id for key, channel_id in state.items()
+                     if key.startswith(("channel:", "category:")) and isinstance(channel_id, int))
+    unseen = sorted(known_ids - fetched_ids)
     for channel in channels:
         if channel.id in entry_ids:
             expected = overwrites(guild, roles, "verification")
@@ -202,7 +207,7 @@ async def restrict_visibility(guild, store, roles, entry, verification, commands
                 raise UserError(f"{channel.mention}의 권한 변경이 거부됐습니다. Dialian의 채널·권한 관리 권한을 확인한 뒤 다시 실행해 주세요.") from None
         if removed:
             adjusted.append(channel.mention)
-    return adjusted, review
+    return adjusted, review, unseen
 
 
 async def arrange_entry(guild, store, entry, info, verification, member_log):
@@ -280,10 +285,12 @@ async def install_onboarding(bot, guild):
     await arrange_entry(guild, store, entry, info, channels["verification"], channels["member_log"])
     await publish_verification(bot, guild)
     await remove_rules_verification_button(bot, guild, channels["verification"])
-    adjusted, review = await restrict_visibility(guild, store, roles, entry, channels["verification"], channels["commands"])
+    adjusted, review, unseen = await restrict_visibility(
+        guild, store, roles, entry, channels["verification"], channels["commands"],
+    )
     await store.set(guild.id, VISIBILITY_INSTALLED, True)
     await store.set(guild.id, INSTALLED, True)
-    return role, [channel.mention for channel in channels.values()], adjusted, review
+    return role, [channel.mention for channel in channels.values()], adjusted, review, unseen
 
 
 async def connect_existing_bots(guild, role):

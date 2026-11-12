@@ -106,7 +106,7 @@ class DDHCommands(app_commands.Group):
             return
         async with self.bot.mutation_lock:
             await self.bot.tickets.ready(guild)
-            role, mentions, adjusted, review = await install_onboarding(self.bot, guild)
+            role, mentions, adjusted, review, unseen = await install_onboarding(self.bot, guild)
         note = "\n입퇴장과 신규 봇 연결은 Server Members Intent를 켜고 재시작하면 작동합니다."
         if self.bot.intents.members:
             try:
@@ -116,11 +116,15 @@ class DDHCommands(app_commands.Group):
                     note += f" 역할을 지급하지 못한 봇 {blocked}개는 Dialian 역할 순서를 확인해 주세요."
             except discord.HTTPException:
                 note = "\n기존 봇 목록을 읽지 못했습니다. 기존 봇에게는 외부봇 역할을 직접 지정해 주세요."
-        note += "\n미인증자는 인증 채널만 볼 수 있습니다."
+        note += "\n조회한 채널에는 인증 전 채널 보기 제한을 적용했습니다."
         if adjusted:
             note += f"\n기존 채널 보기 허용 정리 {len(adjusted)}곳 · " + ", ".join(adjusted[:8])
         if review:
             note += f"\n기존 역할 차단을 우선한 채널 {len(review)}곳 · " + ", ".join(review[:8])
+        if unseen:
+            note += (f"\nDiscord에서 조회되지 않은 등록 채널 {len(unseen)}곳 · "
+                     + ", ".join(f"<#{channel_id}>" for channel_id in unseen[:8])
+                     + " · 채널 존재 여부와 Dialian의 보기 권한을 확인해 주세요.")
         await self.audit_change(interaction, "onboarding", "입장·인증·명령어 채널 연결 · " + " · ".join(mentions) + note)
         await reply(interaction, "설치 완료 · " + " · ".join(mentions) + note)
 
