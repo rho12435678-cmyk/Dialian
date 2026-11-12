@@ -295,7 +295,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         await guild.create_text_channel("자유채팅")
         with self.assertRaises(UserError):
             await preflight(guild, self.bot.store)
-        self.assertEqual(len(guild.roles), 2)
+        self.assertEqual(len(guild.roles), 3)  # everyone, existing 운영자, Dialian bot
 
     async def test_missing_role_permission_blocks_creation_only(self):
         role = self.roles["field:gfx"]
