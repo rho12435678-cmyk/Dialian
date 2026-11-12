@@ -13,6 +13,7 @@ from ddh.content import publish_panels, repair_missing_panels, retire_update_ale
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
+from ddh.permissions import operator_migration
 from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
@@ -91,6 +92,19 @@ class DDHCommands(app_commands.Group):
                 confirm=confirm,
             )
         await reply(interaction, summary)
+
+    @app_commands.command(name="operator", description="기존 운영자 역할에 DDH 관리 권한 이전")
+    @app_commands.describe(apply="True: 이전 운영진 역할의 채널 접근을 운영자에게 이전")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def operator(self, interaction: discord.Interaction, apply: bool = False):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.mutation_lock:
+            result = await operator_migration(
+                interaction.guild, self.bot.store, apply=apply
+            )
+        await reply(interaction, result)
 
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
