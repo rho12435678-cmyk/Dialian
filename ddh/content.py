@@ -72,6 +72,7 @@ async def retire_update_alerts_panel(bot, guild):
     return bool(messages)
 
 
+PANELS_VERSION = "2026-11-trade-report-v1"
 GUIDE_VERSION = "2026-11-owner-layout-guide-v2"
 
 
@@ -164,6 +165,10 @@ async def repair_missing_panels(bot, guild):
     """
     if not await bot.store.get(guild.id, "setup_complete", False):
         return False
+    if await bot.store.get(guild.id, "panels:version") != PANELS_VERSION:
+        async with bot.mutation_lock:
+            await publish_panels(bot, guild)
+        return True
     for key, channel_key in (
         ("rules", "rules"),
         ("guide", "guide"),
@@ -209,6 +214,7 @@ async def publish_panels(bot, guild):
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
     await publish_guide(bot, guild)
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
+    await bot.store.set(guild.id, "panels:version", PANELS_VERSION)
     # The old alert opt-in panel is retired. Release posts are automatic.
     await retire_update_alerts_panel(bot, guild)
     # Hiring, looking-for-work, commissions, and portfolio channels are Forums.
