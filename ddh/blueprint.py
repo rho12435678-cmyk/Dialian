@@ -89,6 +89,9 @@ CHANNELS = (
             aliases=("가이드", "이용안내", "guide"),
             topic="DDH 소개 · 규칙 동의 · 개발자 등록 · 협업 안내", news=True),
 
+    Channel("verification", "인증-verify", "info", "readonly",
+            topic="규칙을 읽고 버튼을 눌러 DDH 멤버 인증"),
+
     # Announcement channels with permanent bot buttons, no regular user posts.
     Channel("support_panel", "문의-support", "support", "readonly",
             aliases=("문의·신청",), news=True),
@@ -120,6 +123,8 @@ CHANNELS = (
     Channel("staff_chat", "운영진-chat", "ops", "private",
             aliases=("운영진-대화",)),
     Channel("audit", "로그-logs", "ops", "log", aliases=("운영-로그",)),
+    Channel("member_log", "입퇴장-join-leave", "ops", "log",
+            topic="멤버의 입장·퇴장 기록"),
     Channel("security_log", "보안-security", "ops", "log",
             topic="AutoMod 및 권한·변경량 점검 알림"),
 )

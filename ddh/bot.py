@@ -7,19 +7,21 @@ from discord import app_commands
 from discord.ext import tasks
 
 from ddh.backups import backup
-from ddh.blueprint import LAYOUT_VERSION, layout_summary
+from ddh.blueprint import CATEGORIES, CHANNELS, LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
-from ddh.content import publish_panels
+from ddh.content import publish_panels, publish_verification
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
 from ddh.security import configure_security
-from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
+from ddh.server import (
+    UserError, channel_for, create_text_board, find_resource, is_admin, preflight, provision, require_guild, roles_for,
+)
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
 from ddh.updates import deployed_revision, publish_release
 from ddh.verification import verify_member
-from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, reply, report_error
+from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, VerificationView, reply, report_error
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +77,54 @@ class DDHCommands(app_commands.Group):
         async with self.bot.mutation_lock:
             summary = await cosmetic_layout(interaction.guild, self.bot.store, apply=apply)
         await reply(interaction, summary)
+
+    @app_commands.command(name="onboarding", description="인증 채널과 비공개 입퇴장 채널 준비")
+    @app_commands.describe(apply="True: 두 채널을 생성 또는 연결하고 인증 버튼 게시")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def onboarding(self, interaction: discord.Interaction, apply: bool = False):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        if not apply:
+            await reply(interaction, "안내에 인증-verify, Staff에 비공개 입퇴장-join-leave를 연결합니다. "
+                        "`/ddh onboarding apply:True`로 적용하세요.")
+            return
+        async with self.bot.mutation_lock:
+            await self.bot.tickets.ready(guild)
+            roles = await roles_for(guild, self.bot.store, keys=("staff", "admin", "member"))
+            plans = []
+            for spec in CHANNELS:
+                if spec.key not in ("verification", "member_log"):
+                    continue
+                channel = await find_resource(guild, self.bot.store, f"channel:{spec.key}", spec.name,
+                                              discord.TextChannel, spec.aliases)
+                category = None
+                if channel is None:
+                    parent = next(category for category in CATEGORIES if category.key == spec.category)
+                    category = await find_resource(guild, self.bot.store, f"category:{parent.key}", parent.name,
+                                                   discord.CategoryChannel, parent.aliases)
+                    if category is None:
+                        raise UserError(f"{parent.name} 카테고리를 찾지 못했습니다.")
+                    if len(category.channels) >= 50:
+                        raise UserError(f"{parent.name} 카테고리에 채널 공간을 확보해 주세요.")
+                if spec.key == "member_log" and channel is not None and not private_channel(
+                    channel, guild, {roles["staff"].id, roles["admin"].id, guild.me.id}
+                ):
+                    raise UserError("입퇴장 채널을 Staff 전용으로 제한한 뒤 다시 실행해 주세요.")
+                plans.append((spec, channel, category))
+            mentions = []
+            for spec, channel, category in plans:
+                if channel is None:
+                    channel = await create_text_board(
+                        guild, spec, category, roles, reason="DDH 소유자 요청: 인증·입퇴장 채널")
+                await self.bot.store.set(guild.id, f"channel:{spec.key}", channel.id)
+                mentions.append(channel.mention)
+            await publish_verification(self.bot, guild)
+        note = "" if self.bot.intents.members else (
+            "\n입퇴장 기록을 시작하려면 Developer Portal의 Server Members Intent를 켜고 재시작해 주세요."
+        )
+        await reply(interaction, "설치 완료 · " + " · ".join(mentions) + note)
 
     @app_commands.command(name="cleanup", description="소유자 확인 후 기존 티켓·보관 카테고리 영구 정리")
     @app_commands.describe(confirm="True: 기존 보관/종료 채널을 영구 삭제 (복구 불가능)")
@@ -192,7 +242,8 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), UpdateAlertsView(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), UpdateAlertsView(self),
+                     VerificationView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)

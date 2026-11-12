@@ -144,6 +144,15 @@ async def preflight(guild, store):
     return found
 
 
+async def create_text_board(guild, spec, category, roles, *, reason):
+    return await guild.create_text_channel(
+        name=spec.name, category=category, reason=reason, overwrites=overwrites(guild, roles, spec.policy),
+        topic=spec.topic or "Dial Dev Hub · Roblox 개발자 커뮤니티",
+        slowmode_delay=0 if spec.policy in ("readonly", "log") else 10,
+        news=spec.news and "NEWS" in guild.features,
+    )
+
+
 async def provision(guild, store, settings):
     require_guild(guild, settings)
     found = await preflight(guild, store)
@@ -171,7 +180,6 @@ async def provision(guild, store, settings):
                 reason="DDH 소유자 초기 구성")
         categories[spec.key] = category
         await store.set(guild.id, f"category:{spec.key}", category.id)
-    news_supported = "NEWS" in guild.features
     news_pending = False
     for spec in CHANNELS:
         channel = found[f"channel:{spec.key}"]
@@ -183,14 +191,12 @@ async def provision(guild, store, settings):
                     default_auto_archive_duration=10080, available_tags=forum_tags(spec),
                     overwrites=forum_permissions(guild, roles, spec.policy))
             else:
-                policy = overwrites(guild, roles, spec.policy, voice=spec.voice)
                 if spec.voice:
-                    channel = await guild.create_voice_channel(**params, overwrites=policy)
+                    channel = await guild.create_voice_channel(
+                        **params, overwrites=overwrites(guild, roles, spec.policy, voice=True))
                 else:
-                    channel = await guild.create_text_channel(
-                        **params, overwrites=policy, topic=spec.topic or "Dial Dev Hub · Roblox 개발자 커뮤니티",
-                        slowmode_delay=0 if spec.policy in ("readonly", "log") else 10,
-                        news=spec.news and news_supported)
+                    channel = await create_text_board(
+                        guild, spec, categories[spec.category], roles, reason=params["reason"])
         news_pending |= spec.news and channel.type != discord.ChannelType.news
         await store.set(guild.id, f"channel:{spec.key}", channel.id)
         if (spec.key == "rules" and found["channel:rules"] is None and guild.rules_channel is None

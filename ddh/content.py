@@ -47,6 +47,10 @@ async def guide(guild, store):
         except UserError:
             return "해당 DDH 채널"
 
+    verification = guild.get_channel(await store.get(guild.id, "channel:verification", 0))
+    rules_link = await link("rules")
+    start = (f"{rules_link}을 읽고 {verification.mention}에서 멤버 인증하기" if verification else
+             f"{rules_link}의 버튼을 눌러 멤버 역할 받기")
     card = discord.Embed(
         title="🌐 DDH · Dial Dev Hub | 처음 오셨나요?",
         description=(
@@ -79,7 +83,7 @@ async def guide(guild, store):
     card.add_field(
         name="🚀 처음 들어왔다면 이 순서대로!",
         value=(
-            f"**① 규칙 읽고 참여하기** — {await link('rules')}의 버튼을 눌러 멤버 역할 받기\n"
+            f"**① 규칙 읽고 참여하기** — {start}\n"
             f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
             f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
             f"**④ 함께할 사람 찾기** — {await link('hiring')}·{await link('commissions')}에서 "
@@ -120,9 +124,26 @@ async def publish_guide(bot, guild):
     return message
 
 
+async def publish_verification(bot, guild):
+    from ddh.views import VerificationView
+
+    channel = await channel_for(guild, bot.store, "verification")
+    rules = guild.get_channel(await bot.store.get(guild.id, "channel:rules", 0))
+    rules_label = rules.mention if rules else "서버 규칙"
+    age = bot.settings.verification_min_days
+    requirement = f"\n• Discord 계정을 만든 지 {age}일 이상 지나야 해요." if age else ""
+    panel = embed("DDH 멤버 인증",
+                  f"• 먼저 {rules_label}을 읽고 Discord에서 요구하는 서버 규칙 확인을 마쳐 주세요."
+                  f"{requirement}\n• 아래 버튼으로 규칙에 동의하면 멤버 역할을 받아요.")
+    await upsert_panel(channel, bot.store, "verification", panel, view=VerificationView(bot))
+
+
 async def publish_panels(bot, guild):
     from ddh.views import RulesView, SupportView, UpdateAlertsView
 
+    verification = guild.get_channel(await bot.store.get(guild.id, "channel:verification", 0))
+    instruction = (f"규칙을 읽은 뒤 {verification.mention}에서 인증해 주세요." if verification else
+                   "규칙에 동의하고 아래 버튼을 눌러 멤버 인증을 진행해 주세요.")
     rules = embed("DDH에 오신 것을 환영합니다",
                   "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
                   "**2. 본인 작품만 게시하기** — 도용·사칭을 금지하며 공동작업은 본인의 담당 부분을 밝혀 주세요.\n"
@@ -131,7 +152,7 @@ async def publish_panels(bot, guild):
                   "**5. 거래는 당사자끼리 협의하기** — DDH는 외주 제작팀이나 결제 중개 서비스가 아닙니다. "
                   "개발자 역할은 거래 이행이나 실력을 보증하지 않습니다.\n"
                   "**6. 문제가 생기면 문의하기** — 사기·도용·규칙 위반은 서버 피드백 티켓으로 알려 주세요.\n\n"
-                  "규칙에 동의하고 아래 버튼을 누르면 Discord 계정 조건을 확인해 멤버 역할을 지급합니다.")
+                  + instruction)
     support = embed("DDH 문의·신청",
                     "**파트너 문의**: 서버 소개와 제휴 제안\n"
                     "**서버 피드백**: 개선 제안·오류·규칙 위반 제보\n"
@@ -142,6 +163,8 @@ async def publish_panels(bot, guild):
                     "진행 중인 티켓은 종류별로 1개까지 열 수 있습니다.")
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
     await publish_guide(bot, guild)
+    if await bot.store.get(guild.id, "channel:verification"):
+        await publish_verification(bot, guild)
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
     updates = embed(
         "🔔 DDH 업데이트 알림 센터",

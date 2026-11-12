@@ -51,12 +51,30 @@ class GuardedView(discord.ui.View):
 class RulesView(GuardedView):
     @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
     async def accept(self, interaction, button):
-        await interaction.response.defer(ephemeral=True)
         if interaction.channel_id != await self.bot.store.get(interaction.guild.id, "channel:rules"):
-            raise UserError("규칙 채널의 멤버 인증 버튼을 사용해 주세요.")
-        granted = await verify_member(self.bot, interaction.guild, interaction.user.id)
-        await reply(interaction, "멤버 인증 완료. 채팅·포럼·음성 채널을 이용할 수 있습니다." if granted
-                    else "이미 인증된 멤버입니다.")
+            raise UserError("규칙 채널의 버튼을 사용해 주세요.")
+        verification = interaction.guild.get_channel(
+            await self.bot.store.get(interaction.guild.id, "channel:verification", 0))
+        if isinstance(verification, discord.TextChannel):
+            await reply(interaction, f"{verification.mention}에서 멤버 인증을 완료해 주세요.")
+            return
+        await grant_verification(self.bot, interaction)
+
+
+class VerificationView(GuardedView):
+    @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success,
+                       custom_id="ddh:verification:v1")
+    async def accept(self, interaction, button):
+        if interaction.channel_id != await self.bot.store.get(interaction.guild.id, "channel:verification"):
+            raise UserError("인증 채널의 멤버 인증 버튼을 사용해 주세요.")
+        await grant_verification(self.bot, interaction)
+
+
+async def grant_verification(bot, interaction):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    granted = await verify_member(bot, interaction.guild, interaction.user.id)
+    await reply(interaction, "멤버 인증 완료. 채팅·포럼·음성 채널을 이용할 수 있습니다." if granted
+                else "이미 인증된 멤버입니다.")
 
 
 class SupportView(GuardedView):

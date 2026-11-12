@@ -148,7 +148,8 @@ class Operations:
             if guild.me is None or not state.get("role:staff") or not state.get("role:admin"):
                 return
             permitted = {state["role:staff"], state["role:admin"], guild.me.id}
-            for sink in ("security_log", "audit"):
+            for sink, title in (("member_log", "DDH 입퇴장"), ("security_log", "DDH 보안"),
+                                ("audit", "DDH 운영 기록")):
                 rows = await self.store.pending_events(guild.id, sink, limit=4)
                 if not rows:
                     continue
@@ -158,8 +159,7 @@ class Operations:
                     continue
                 lines = [f"<t:{int(datetime.fromisoformat(row['occurred_at']).timestamp())}:f> · {row['body']}"
                          for row in rows]
-                card = discord.Embed(title="DDH 보안" if sink == "security_log" else "DDH 운영 기록",
-                                     description="\n".join(lines))
+                card = discord.Embed(title=title, description="\n".join(lines))
                 try:
                     await channel.send(embed=card, allowed_mentions=discord.AllowedMentions.none())
                 except discord.HTTPException:
@@ -168,12 +168,15 @@ class Operations:
                 await self.store.mark_delivered(guild.id, rows)
 
     async def membership(self, guild, user, *, joined):
+        if guild.id != self.bot.settings.guild_id:
+            return
         now = datetime.now(timezone.utc)
+        sink = "member_log" if await self.store.get(guild.id, "channel:member_log") else "audit"
         joined_at = getattr(user, "joined_at", None)
         key = f"join:{user.id}:{joined_at.isoformat()}" if joined and joined_at else None
         label = "입장" if joined else "탈퇴·퇴장"
         added = await self.record(guild, f"{label} · {safe_name(user.name)} · ID `{user.id}`",
-                                  key=key, kind="join" if joined else "leave", at=now, immediate=False)
+                                  key=key, kind="join" if joined else "leave", sink=sink, at=now, immediate=False)
         if added and joined:
             await self.burst(guild, "join", 5, "60초 내 입장 5건 이상", now)
         await self.flush(guild)
