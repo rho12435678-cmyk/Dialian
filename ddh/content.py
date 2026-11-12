@@ -150,12 +150,6 @@ async def publish_panels(bot, guild):
         await channel_for(guild, bot.store, "updates"),
         bot.store, "update-alerts", updates, view=UpdateAlertsView(bot),
     )
-    for key, title, text in (
-        ("hiring", "구인 작성 양식", "프로젝트 / 모집 분야 / 업무 범위 / 예산·보상 방식 / 일정 / 지원 조건 / 연락 방법\n"
-         "무급 또는 수익배분이면 명확하게 표시하세요. 협의와 계약은 당사자 DM에서 진행합니다."),
-        ("looking", "구직 작성 양식", "개발 분야 / 경력·도구 / 포트폴리오 / 가능한 업무 / 가능 일정 / 연락 방법"),
-        *[(f"portfolio:{field}", f"{label} 포트폴리오 작성 양식",
-           "작품명 / 이미지·영상·링크 / 본인 담당 부분 / 사용 도구 / 작업 가능한 범위 / 연락 방법\n"
-           "공동작업·AI 활용 여부 등 작품을 이해하는 데 필요한 정보를 함께 밝혀 주세요.") for field, label in FIELDS.items()],
-    ):
-        await upsert_panel(await channel_for(guild, bot.store, key), bot.store, key, embed(title, text))
+    # Hiring, looking-for-work, commissions, and portfolio channels are Forums.
+    # Their channel descriptions act as posting guidelines. Forum channels do
+    # not support sending a standalone text message as an onboarding panel.
