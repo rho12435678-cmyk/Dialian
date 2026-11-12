@@ -13,7 +13,6 @@ class Settings:
     database: Path = Path("data/ddh.db")
     notice_hour: int = 18
     notice_interval_days: int = 2
-    update_ping_mode: str = 'role'
     member_events: bool = True
     verification_min_days: int = 7
 
@@ -30,11 +29,8 @@ class Settings:
         interval = int(os.getenv("DDH_NOTICE_INTERVAL_DAYS", "2"))
         if not 0 <= hour <= 23 or not 1 <= interval <= 30:
             raise ValueError("공지 시각은 0~23시, 주기는 1~30일이어야 합니다.")
-        update_ping_mode = os.getenv("DDH_UPDATE_PING_MODE", "role").lower()
-        if update_ping_mode not in ("role", "everyone", "none"):
-            raise ValueError("DDH_UPDATE_PING_MODE는 role/everyone/none만 허용합니다.")
         min_days = int(os.getenv("DDH_VERIFY_MIN_DAYS", "7"))
         if not 0 <= min_days <= 365:
             raise ValueError("DDH_VERIFY_MIN_DAYS는 0~365일이어야 합니다.")
         return cls(token, int(raw_id), Path(os.getenv("DDH_DATABASE", "data/ddh.db")),
-                   hour, interval, update_ping_mode, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true", min_days)
+                   hour, interval, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true", min_days)
