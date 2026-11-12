@@ -68,10 +68,63 @@ class SupportView(GuardedView):
     async def feedback(self, interaction, button):
         await interaction.response.send_modal(TicketModal(self.bot, "feedback"))
 
+    @discord.ui.button(label="거래·도용 신고", style=discord.ButtonStyle.danger,
+                       custom_id="ddh:report:v1")
+    async def report(self, interaction, button):
+        await interaction.response.send_modal(ReportModal(self.bot))
+
     @discord.ui.button(label="개발자 신청", style=discord.ButtonStyle.success, custom_id="ddh:developer:v1")
     async def developer(self, interaction, button):
         await interaction.response.send_message("지원할 분야를 모두 선택해 주세요.",
                                                 view=FieldView(self.bot, interaction.user.id), ephemeral=True)
+
+
+class ReportModal(discord.ui.Modal):
+    """Private reports use the existing feedback ticket kind and DB schema."""
+
+    def __init__(self, bot):
+        super().__init__(title="DDH 거래·도용 신고", timeout=600)
+        self.bot = bot
+        self.subject = discord.ui.TextInput(
+            label="신고 대상 닉네임·게시글", max_length=100,
+            placeholder="상대방 Discord 표시 이름 또는 게시글 제목",
+        )
+        self.details = discord.ui.TextInput(
+            label="문제 상황·발생일·요청 사항", max_length=900,
+            style=discord.TextStyle.paragraph,
+            placeholder="작업 조건, 실제 상황, 관련 메시지 등 사실을 적어 주세요.",
+        )
+        self.add_item(self.subject)
+        self.add_item(self.details)
+
+    async def on_submit(self, interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        subject, details = self.subject.value.strip(), self.details.value.strip()
+        if not subject or not details:
+            raise UserError("신고 대상과 문제 상황을 모두 입력해 주세요.")
+        current = await self.bot.store.active(interaction.guild.id, interaction.user.id, "feedback")
+        if current:
+            channel = interaction.guild.get_channel(current.get("channel_id", 0))
+            target = channel.mention if channel is not None else "진행 중 피드백 티켓"
+            raise UserError(
+                f"이미 진행 중인 피드백/신고 티켓이 있습니다: {target}. "
+                "그 채널에 새 신고 내용과 증거를 추가해 주세요."
+            )
+        channel = await self.bot.tickets.create(
+            interaction.guild, interaction.user, "feedback",
+            {"제목": "[거래·작품 신고] " + subject, "내용": details},
+        )
+        await reply(
+            interaction,
+            f"비공개 신고 접수: {channel.mention}\n"
+            "해당 채널에 관련 메시지·게시글 증거를 추가할 수 있습니다. "
+            "비밀번호·인증코드·결제 정보는 공유하지 마세요. "
+            "DDH는 DM 거래를 직접 중개하거나 환불을 보증하지 않습니다.",
+        )
+
+    async def on_error(self, interaction, error):
+        await report_error(interaction, error)
 
 
 class FieldSelect(discord.ui.Select):
@@ -135,7 +188,7 @@ class DecisionModal(discord.ui.Modal):
         await interaction.response.defer(ephemeral=True, thinking=True)
         if self.action == "close":
             await self.bot.tickets.close(interaction.guild, interaction.channel, interaction.user, self.reason.value.strip())
-            await reply(interaction, "티켓을 종료하고 운영진 전용 보관함으로 이동했습니다.")
+            await reply(interaction, "처리 결과를 기록하고 티켓 채널을 종료했습니다.")
         else:
             label = await self.bot.tickets.review(interaction.guild, interaction.channel, interaction.user,
                                                   self.action == "approve", self.reason.value.strip())
