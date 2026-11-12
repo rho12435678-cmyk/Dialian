@@ -120,6 +120,9 @@ async def provision(guild, store, settings):
     for index, spec in enumerate(CHANNELS):
         params = dict(name=spec.name, category=categories[spec.category], position=index,
                       overwrites=overwrites(guild, roles, spec.policy, voice=spec.voice), reason="DDH 채널 구성")
+        if spec.key == "updates":
+            # Only Dialian can ping the announcement role; ordinary members cannot.
+            params["overwrites"][guild.me].mention_everyone = True
         if not spec.voice:
             # Discord slowmode is a baseline flood limiter, not a substitute for AutoMod.
             delay = 30 if (spec.category in ("jobs", "portfolios")) else (0 if spec.policy == "readonly" else 10)
