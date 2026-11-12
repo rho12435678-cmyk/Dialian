@@ -16,6 +16,7 @@ class Settings:
     update_ping_mode: str = 'role'
     member_events: bool = True
     verification_min_days: int = 7
+    auto_release: bool = True
 
     @classmethod
     def from_env(cls):
@@ -37,4 +38,5 @@ class Settings:
         if not 0 <= min_days <= 365:
             raise ValueError("DDH_VERIFY_MIN_DAYS는 0~365일이어야 합니다.")
         return cls(token, int(raw_id), Path(os.getenv("DDH_DATABASE", "data/ddh.db")),
-                   hour, interval, update_ping_mode, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true", min_days)
+                   hour, interval, update_ping_mode, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true",
+                   min_days, os.getenv("DDH_AUTO_RELEASE", "true").lower() == "true")

@@ -205,7 +205,7 @@ class UpdateAlertsView(GuardedView):
         role = await self.checked_role(interaction)
         if role not in interaction.user.roles:
             await interaction.user.add_roles(role, reason="DDH 업데이트 알림 신청")
-        await reply(interaction, "업데이트 알림을 신청했어요. 소유자가 업데이트를 공지할 때 알림을 받습니다.")
+        await reply(interaction, "업데이트 알림을 신청했어요. Dialian이 새 배포 버전을 공지할 때 알림을 받습니다.")
 
     @discord.ui.button(label="🔕 업데이트 알림 끄기", style=discord.ButtonStyle.secondary,
                        custom_id="ddh:update-alerts:leave:v1")

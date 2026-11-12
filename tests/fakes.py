@@ -203,6 +203,7 @@ class Guild:
         member = Mock(spec=discord.Member)
         member.id = member_id
         member.name = f"member-{member_id}"
+        member.display_name = member.name
         member.bot = False
         member.pending = False
         member.created_at = datetime.now(timezone.utc) - timedelta(days=90)

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
+from ddh.audit_details import identity
 from ddh.server import UserError, require_guild
 
 
@@ -33,6 +34,6 @@ async def verify_member(bot, guild, member_id, *, reviewer=None):
             await member.add_roles(role, reason="DDH 수동 인증" if reviewer else "DDH 규칙 동의 및 계정 인증")
         if session:
             await bot.store.set(guild.id, session_key, session)
-    action = f"수동 인증 · 처리자 ID `{reviewer.id}`" if reviewer else "멤버 인증"
-    await bot.tickets.audit(guild, f"{action} · 멤버 ID `{member.id}`")
+    action = f"수동 인증 · 처리자 {identity(reviewer)}" if reviewer else "멤버 인증 · 본인 확인"
+    await bot.tickets.audit(guild, f"**{action}**\n대상 · {identity(member)}\n인증 역할 · {identity(role)}")
     return True

@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+from ddh.audit_details import identity
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
@@ -46,6 +47,13 @@ class DDHCommands(app_commands.Group):
         if interaction.user.id != interaction.guild.owner_id:
             raise UserError("이 명령은 Discord 서버 소유자만 실행할 수 있습니다.")
 
+    async def audit_change(self, interaction, command, result, *, sink="audit"):
+        await self.bot.operations.record(
+            interaction.guild, f"**소유자 명령 적용** · `/ddh {command}`\n"
+            f"요청자 · {identity(interaction.user)}\n실행 · Dialian\n결과 · {result}",
+            key=f"owner-command:{interaction.id}", sink=sink,
+        )
+
     @app_commands.command(name="plan", description="DDH 채널·역할·권한 구성 미리보기")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -66,6 +74,7 @@ class DDHCommands(app_commands.Group):
                         f"새로 생성 {sum(v is None for v in found.values())}개.")
             return
         await self.bot.bootstrap(interaction.guild)
+        await self.audit_change(interaction, "setup", "초기 구성 완료 · 누락된 역할과 채널 생성 및 연결")
         await reply(interaction, "초기 구성을 완료했습니다. 기존 항목을 재사용하고 누락된 항목만 생성했습니다.")
 
     @app_commands.command(name="layout", description="소유자가 가이드·질문·아이디어·자료 채널 정리")
@@ -77,6 +86,8 @@ class DDHCommands(app_commands.Group):
         await interaction.response.defer(ephemeral=True, thinking=True)
         async with self.bot.mutation_lock:
             summary = await cosmetic_layout(interaction.guild, self.bot.store, apply=apply)
+        if apply:
+            await self.audit_change(interaction, "layout", summary)
         await reply(interaction, summary)
 
     @app_commands.command(name="onboarding", description="인증·입퇴장·명령어 채널과 외부봇 역할 설정")
@@ -106,6 +117,7 @@ class DDHCommands(app_commands.Group):
                 note = "\n기존 봇 목록을 읽지 못했습니다. 기존 봇에게는 외부봇 역할을 직접 지정해 주세요."
         if exceptions:
             note += "\n기존 개별 활동 허용 권한을 확인할 채널 · " + ", ".join(exceptions[:8])
+        await self.audit_change(interaction, "onboarding", "입장·인증·명령어 채널 연결 · " + " · ".join(mentions) + note)
         await reply(interaction, "설치 완료 · " + " · ".join(mentions) + note)
 
     @app_commands.command(name="cleanup", description="소유자 확인 후 기존 티켓·보관 카테고리 영구 정리")
@@ -131,6 +143,7 @@ class DDHCommands(app_commands.Group):
         self.owner(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
         safeguards = await self.bot.apply_security(interaction.guild)
+        await self.audit_change(interaction, "security", " / ".join(safeguards), sink="security_log")
         await reply(interaction, "보안 설정 적용: " + " / ".join(safeguards))
 
     @app_commands.command(name="panels", description="규칙·안내·문의 패널 복구 또는 갱신")
@@ -195,7 +208,9 @@ class DDHCommands(app_commands.Group):
         news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
-                    f"자동 공지: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
+                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n"
+                    f"배포 공지: {'켜짐' if self.bot.settings.auto_release else '꺼짐'}\n"
+                    f"시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
@@ -264,6 +279,15 @@ class Dialian(discord.Client):
             log.error("Configured DDH guild is unavailable; check DDH_GUILD_ID and bot invitation")
             return
         log.info("Dialian connected to DDH guild %s", guild.id)
+        await self.announce_update(guild)
+
+    async def announce_update(self, guild):
+        if not self.settings.auto_release:
+            return
+        try:
+            await publish_release(self, guild)
+        except Exception:
+            log.exception("DDH release announcement failed; will retry")
 
     async def on_member_join(self, member):
         try:
@@ -317,6 +341,7 @@ class Dialian(discord.Client):
                     log.exception("DDH %s failed; will retry", name)
         now = datetime.now(timezone.utc)
         if guild:
+            await self.announce_update(guild)
             # Gateway events are backed up by a cursor over Discord audit history.
             try:
                 await self.operations.catch_up(guild)

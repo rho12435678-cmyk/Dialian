@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import discord
 
+from ddh.audit_details import describe_audit, identity
 from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, overwrites, role_permissions
 from ddh.security import specifications
 from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
@@ -15,8 +16,11 @@ log = logging.getLogger(__name__)
 RISKY_ACTIONS = {
     "channel_delete", "role_delete", "overwrite_create", "overwrite_update",
     "overwrite_delete", "webhook_create", "webhook_update", "webhook_delete",
-    "guild_update", "automod_rule_delete", "bot_add", "kick", "ban",
+    "guild_update", "automod_rule_create", "automod_rule_update", "automod_rule_delete",
+    "app_command_permission_update", "bot_add", "kick", "ban", "unban", "member_prune",
+    "integration_create", "integration_update", "integration_delete",
 }
+AUTOMOD_ACTIONS = {"automod_block_message", "automod_flag_message", "automod_timeout_member"}
 AUDIT_LABELS = {
     "guild_update": "서버 설정 변경", "channel_create": "채널 생성", "channel_update": "채널 변경",
     "channel_delete": "채널 삭제", "overwrite_create": "채널 권한 추가",
@@ -24,17 +28,18 @@ AUDIT_LABELS = {
     "role_create": "역할 생성", "role_update": "역할 변경", "role_delete": "역할 삭제",
     "member_role_update": "멤버 역할 변경", "member_update": "멤버 관리 변경",
     "bot_add": "봇 추가", "kick": "추방", "ban": "차단", "unban": "차단 해제",
-    "prune": "비활성 멤버 정리", "invite_create": "초대 생성", "invite_delete": "초대 삭제",
+    "member_prune": "비활성 멤버 정리", "invite_create": "초대 생성", "invite_delete": "초대 삭제",
+    "invite_update": "초대 설정 변경", "member_move": "음성 채널 이동", "member_disconnect": "음성 연결 해제",
+    "integration_create": "연동 추가", "integration_update": "연동 변경", "integration_delete": "연동 삭제",
     "webhook_create": "웹훅 생성", "webhook_update": "웹훅 변경", "webhook_delete": "웹훅 삭제",
     "thread_create": "포럼 게시글 생성 감사 기록", "thread_update": "게시글 설정 변경", "thread_delete": "게시글 삭제",
     "automod_rule_create": "AutoMod 규칙 생성", "automod_rule_update": "AutoMod 규칙 변경",
     "automod_rule_delete": "AutoMod 규칙 삭제", "app_command_permission_update": "앱 명령 권한 변경",
+    "automod_block_message": "AutoMod · 메시지 차단", "automod_flag_message": "AutoMod · 메시지 감지",
+    "automod_timeout_member": "AutoMod · 멤버 타임아웃",
     "message_delete": "메시지 삭제 감사 기록", "message_bulk_delete": "메시지 일괄 삭제 감사 기록",
+    "message_pin": "메시지 고정", "message_unpin": "메시지 고정 해제",
 }
-
-
-def safe_name(value):
-    return discord.utils.escape_mentions(discord.utils.escape_markdown(" ".join(str(value).split())[:80]))
 
 
 def private_channel(channel, guild, permitted):
@@ -83,6 +88,15 @@ async def inspect_layout(guild, store):
             findings.append(f"공지 형식 확인 · {spec.name}")
         if spec.forum and not channel.available_tags:
             findings.append(f"포럼 태그 누락 · {spec.name}")
+        if spec.policy in ("private", "log") and isinstance(channel, discord.TextChannel):
+            permitted = {state.get("role:staff"), state.get("role:admin"), guild.me.id}
+            if not private_channel(channel, guild, permitted):
+                outsiders = [identity(target) for target, override in channel.overwrites.items()
+                             if target.id not in permitted and override.view_channel is True]
+                reason = ", ".join(outsiders[:3])
+                if channel.overwrites_for(guild.default_role).view_channel is not False:
+                    reason = "@everyone 채널 보기 차단 없음" + (f" / {reason}" if reason else "")
+                findings.insert(0, f"비공개 채널 접근 확인 · {identity(channel)} · {reason}")
         required = ("member", "external_bots") if spec.policy == "commands" else ()
         if (roles["staff"] and roles["admin"] and all(roles[key] for key in required)
                 and (spec.policy not in roles or roles[spec.policy])):
@@ -150,8 +164,9 @@ class Operations:
             if guild.me is None or not state.get("role:staff") or not state.get("role:admin"):
                 return
             permitted = {state["role:staff"], state["role:admin"], guild.me.id}
-            for sink, title in (("member_log", "DDH 입퇴장"), ("security_log", "DDH 보안"),
-                                ("audit", "DDH 운영 기록")):
+            for sink, title, colour in (("member_log", "DDH 입퇴장", 0x5865F2),
+                                        ("security_log", "DDH 보안 기록", 0xC84242),
+                                        ("audit", "DDH 운영 기록", 0x387BC4)):
                 rows = await self.store.pending_events(guild.id, sink, limit=4)
                 if not rows:
                     continue
@@ -159,9 +174,11 @@ class Operations:
                 if not private_channel(channel, guild, permitted):
                     log.warning("DDH log sink %s unavailable or has unsafe overwrites", sink)
                     continue
-                lines = [f"<t:{int(datetime.fromisoformat(row['occurred_at']).timestamp())}:f> · {row['body']}"
-                         for row in rows]
-                card = discord.Embed(title=title, description="\n".join(lines))
+                lines = []
+                for row in rows:
+                    occurred = int(datetime.fromisoformat(row["occurred_at"]).timestamp())
+                    lines.append(f"<t:{occurred}:d> <t:{occurred}:T> · {row['body']}")
+                card = discord.Embed(title=title, description="\n\n".join(lines), colour=colour)
                 try:
                     await channel.send(embed=card, allowed_mentions=discord.AllowedMentions.none())
                 except discord.HTTPException:
@@ -177,7 +194,7 @@ class Operations:
         joined_at = getattr(user, "joined_at", None)
         key = f"join:{user.id}:{joined_at.isoformat()}" if joined and joined_at else None
         label = "입장" if joined else "탈퇴·퇴장"
-        added = await self.record(guild, f"{label} · {safe_name(user.name)} · ID `{user.id}`",
+        added = await self.record(guild, f"{label} · {identity(user, name=user.name)}",
                                   key=key, kind="join" if joined else "leave", sink=sink, at=now, immediate=False)
         if added and joined:
             await self.burst(guild, "join", 5, "60초 내 입장 5건 이상", now)
@@ -192,25 +209,18 @@ class Operations:
 
     async def audit(self, entry, *, immediate=True):
         guild = entry.guild
-        if guild.id != self.bot.settings.guild_id or entry.user_id == getattr(guild.me, "id", None):
+        if guild.id != self.bot.settings.guild_id or (guild.me is not None and entry.user_id == guild.me.id):
             return
         action = entry.action.name
         label = AUDIT_LABELS.get(action)
         if label is None:
             return
-        target_id = getattr(entry.target, "id", None)
-        actor = str(entry.user_id) if entry.user_id else "확인 불가"
-        details = f"{label} · 실행자 `{actor}` · 대상 `{target_id or '확인 불가'}` · 감사 ID `{entry.id}`"
-        high_risk = action in RISKY_ACTIONS
-        if action == "role_update":
-            before = getattr(entry.before, "permissions", None)
-            after = getattr(entry.after, "permissions", None)
-            if before is not None and after is not None:
-                details += f" · 권한 비트 `{before.value} → {after.value}`"
-                high_risk = True
+        details, sensitive_change = describe_audit(entry, label)
+        high_risk = action in RISKY_ACTIONS or sensitive_change
+        sink = "security_log" if high_risk or action in AUTOMOD_ACTIONS else "audit"
         kind = "audit-risk" if high_risk else "audit"
         added = await self.record(guild, details, key=f"audit:{entry.id}", kind=kind,
-                                  sink="security_log" if high_risk else "audit",
+                                  sink=sink,
                                   at=entry.created_at, immediate=False)
         now = datetime.now(timezone.utc)
         if added and high_risk and entry.created_at >= now - timedelta(seconds=60):
@@ -237,8 +247,12 @@ class Operations:
         findings = await self.findings(guild)
         previous = await self.store.get(guild.id, "ops:drift")
         if findings != previous:
-            if findings or previous:
-                summary = "설정 점검 · " + (" / ".join(findings[:10]) if findings else "권한 불일치 해소")
-                await self.record(guild, summary, sink="security_log", immediate=False)
+            added = [finding for finding in findings if finding not in (previous or ())]
+            resolved = [finding for finding in (previous or ()) if finding not in findings]
+            if added or resolved:
+                lines = [f"**설정 점검** · 현재 {len(findings)}건 · 신규 {len(added)}건 · 해소 {len(resolved)}건"]
+                lines.extend(f"신규 · {finding}" for finding in added[:4])
+                lines.extend(f"해소 · {finding}" for finding in resolved[:2])
+                await self.record(guild, "\n".join(lines), sink="security_log", immediate=False)
             await self.store.set(guild.id, "ops:drift", findings)
         return findings

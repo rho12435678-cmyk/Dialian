@@ -25,7 +25,7 @@ from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
-from ddh.updates import publish_release, release_embed
+from ddh.updates import RECAP_FIELD, RECAP_KEY, publish_release, release_embed
 from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, VerificationView
 from fakes import Guild, Text
 
@@ -72,16 +72,19 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((admin.name, admin.position), ("owner-custom-admin", 230))
         self.assertEqual(channel.id, (await self.channel("general")).id)
 
-    async def test_startup_leaves_legacy_automation_disabled(self):
+    async def test_startup_announces_release_without_reconfiguring_server(self):
         await self.bot.store.set(self.guild.id, "notices_enabled", True)
+        self.bot.release_sha = "1" * 40
         with (patch.object(self.bot, "get_guild", return_value=self.guild),
               patch.object(self.bot, "bootstrap", new_callable=AsyncMock) as setup,
-              patch.object(self.bot, "apply_security", new_callable=AsyncMock) as security,
-              patch("ddh.bot.publish_release", new_callable=AsyncMock) as release):
+              patch.object(self.bot, "apply_security", new_callable=AsyncMock) as security):
+            await self.bot.on_ready()
             await self.bot.on_ready()
         setup.assert_not_awaited()
         security.assert_not_awaited()
-        release.assert_not_awaited()
+        updates = (await self.channel("updates")).messages
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].embeds[0].fields[0].name, RECAP_FIELD)
         self.assertFalse((await self.channel("guide")).messages)
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
@@ -477,23 +480,23 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_release_announces_once_per_deployed_revision(self):
         self.bot.release_sha = "1" * 40
-        self.assertFalse(await publish_release(self.bot, self.guild))
+        await self.bot.store.set(self.guild.id, "release:last_revision", self.bot.release_sha)
+        self.assertTrue(await publish_release(self.bot, self.guild))
         channel = await self.channel("updates")
-        self.assertEqual(len(channel.messages), 0)
+        self.assertEqual(channel.messages[0].embeds[0].fields[0].name, RECAP_FIELD)
         self.bot.release_sha = "2" * 40
         self.assertTrue(await publish_release(self.bot, self.guild))
         self.assertFalse(await publish_release(self.bot, self.guild))
-        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(len(channel.messages), 2)
         self.assertEqual(channel.messages[0].content, self.roles["update_alerts"].mention)
-        self.assertIn("DDH:release:", channel.messages[0].embeds[0].footer.text)
+        self.assertNotIn(RECAP_FIELD, [field.name for field in channel.messages[1].embeds[0].fields])
+        self.assertEqual(channel.messages[1].embeds[0].footer.text, f"DDH:release:{self.bot.release_sha}")
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
         self.bot.release_sha = "3" * 40
-        await publish_release(self.bot, self.guild)
-        self.bot.release_sha = "4" * 40
         real_set = self.bot.store.set
         async def fail_record(guild_id, key, value):
-            if key == "release:last_revision":
+            if key == RECAP_KEY:
                 raise RuntimeError("after-send write failed")
             return await real_set(guild_id, key, value)
         with patch.object(self.bot.store, "set", side_effect=fail_record):
@@ -501,6 +504,13 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
                 await publish_release(self.bot, self.guild)
         self.assertFalse(await publish_release(self.bot, self.guild))
         self.assertEqual(len((await self.channel("updates")).messages), 1)
+        self.assertTrue(await self.bot.store.get(self.guild.id, RECAP_KEY))
+
+    async def test_release_works_without_a_subscription_role(self):
+        self.bot.release_sha = "4" * 40
+        await self.bot.store.set(self.guild.id, "role:update_alerts", None)
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertIsNone((await self.channel("updates")).messages[0].content)
 
     async def test_update_opt_in_and_out_does_not_grant_privileges(self):
         view = UpdateAlertsView(self.bot)
@@ -748,6 +758,63 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         log_channel = await self.channel("security_log")
         self.assertEqual(len(log_channel.messages), 1)
         self.assertIn("채널 삭제", log_channel.messages[0].embeds[0].description)
+
+    async def test_audit_channel_shows_name_change_and_protects_free_text(self):
+        channel = await self.channel("general")
+        actor = SimpleNamespace(id=20, display_name="Dial **운영** @everyone")
+        entry = SimpleNamespace(guild=self.guild, id=903, user_id=actor.id, user=actor,
+                                action=discord.AuditLogAction.channel_update, target=channel,
+                                before=SimpleNamespace(name="이전 채팅", topic="old-secret", slowmode_delay=0),
+                                after=SimpleNamespace(name="새 채팅", topic="new-secret", slowmode_delay=10),
+                                reason="secret-reason", created_at=datetime.now(timezone.utc))
+        await self.bot.operations.audit(entry)
+        body = (await self.channel("audit")).messages[-1].embeds[0].description
+        for detail in (r"Dial \*\*운영\*\*", "ID `20`", f"ID `{channel.id}`", "감사 ID `903`",
+                       "이름 · 이전 채팅 → 새 채팅", "슬로우모드(초) · 0 → 10", "채널 주제 변경"):
+            self.assertIn(detail, body)
+        self.assertNotIn("@everyone", body)
+        self.assertNotIn("secret", body)
+
+    async def test_security_channel_shows_role_and_channel_permission_diffs(self):
+        target = self.roles["member"]
+        common = dict(guild=self.guild, user_id=self.staff.id, user=self.staff, created_at=datetime.now(timezone.utc))
+        await self.bot.operations.audit(SimpleNamespace(
+            id=904, action=discord.AuditLogAction.role_update, target=target,
+            before=SimpleNamespace(permissions=discord.Permissions(send_messages=True)),
+            after=SimpleNamespace(permissions=discord.Permissions(administrator=True)), **common))
+        self.guild._state = Mock()
+        channel = await self.channel("general")
+        view_bit = str(discord.Permissions(view_channel=True).value)
+        await self.bot.operations.audit(discord.AuditLogEntry(
+            guild=self.guild, users={}, integrations={}, app_commands={}, automod_rules={}, webhooks={},
+            data={"id": "905", "action_type": discord.AuditLogAction.overwrite_update.value,
+                  "target_id": str(channel.id), "user_id": str(self.staff.id),
+                  "options": {"id": str(target.id), "type": "0"},
+                  "changes": [{"key": "deny", "old_value": view_bit, "new_value": "0"},
+                              {"key": "allow", "old_value": "0", "new_value": view_bit}]},
+        ))
+        security = await self.channel("security_log")
+        role_body, overwrite_body = [message.embeds[0].description for message in security.messages]
+        self.assertIn("역할 권한 추가: 관리자", role_body)
+        self.assertIn("역할 권한 해제: 메시지 보내기", role_body)
+        self.assertIn(f"권한 적용 대상 · {target.name} (ID `{target.id}`)", overwrite_body)
+        self.assertIn("채널 허용 추가: 채널 보기", overwrite_body)
+        self.assertIn("채널 거부 해제: 채널 보기", overwrite_body)
+        self.assertFalse((await self.channel("audit")).messages)
+
+    async def test_security_audit_records_unknown_actor_and_automod_context(self):
+        channel = await self.channel("general")
+        entry = SimpleNamespace(
+            guild=self.guild, id=906, user_id=None, action=discord.AuditLogAction.automod_block_message,
+            target=self.visitor, created_at=datetime.now(timezone.utc),
+            extra=SimpleNamespace(channel=channel, automod_rule_name="DDH 멘션 도배 방지",
+                                  automod_rule_trigger_type=discord.AutoModRuleTriggerType.mention_spam))
+        await self.bot.operations.audit(entry)
+        body = (await self.channel("security_log")).messages[-1].embeds[0].description
+        self.assertIn("실행자 · Discord 기록 없음", body)
+        self.assertIn(f"대상 · {self.visitor.name} (ID `{self.visitor.id}`)", body)
+        self.assertIn(f"관련 채널 · {channel.name} (ID `{channel.id}`)", body)
+        self.assertIn("감지 규칙 · DDH 멘션 도배 방지", body)
 
     async def test_existing_ticket_blocks_resending_without_overriding_owner_permissions(self):
         payload = self.payload()
