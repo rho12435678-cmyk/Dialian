@@ -26,10 +26,28 @@ async def verify_member(bot, guild, member_id, *, reviewer=None):
         role = guild.get_role(await bot.store.get(guild.id, "role:member", 0))
         if role is None:
             raise UserError("멤버 역할이 누락되었습니다. 서버 운영자에게 확인을 요청해 주세요.")
-        if role.managed or role.permissions.value != 0:
+        if role.managed:
             raise UserError(
-                "멤버 역할에 서버 전체 권한이 설정되어 있어 안전하게 인증할 수 없습니다. "
-                "운영자가 멤버 역할 권한을 점검해야 합니다."
+                "멤버 역할이 Discord 연동 서비스에서 관리하는 역할이어서 "
+                "봇이 직접 지급할 수 없습니다. 운영자에게 확인을 요청해 주세요."
+            )
+        # Existing owner-created Member roles may have harmless guild-level
+        # permissions (e.g. View Channel, Send Messages or Use Commands).
+        # Only administrative powers could make verification a privilege
+        # escalation, so allow basic permissions instead of rejecting any
+        # nonzero permission bit.
+        unsafe = (
+            "administrator", "manage_guild", "manage_roles", "manage_channels",
+            "manage_messages", "manage_webhooks", "manage_threads",
+            "kick_members", "ban_members", "moderate_members",
+            "mention_everyone", "manage_nicknames", "manage_events",
+            "manage_expressions", "view_audit_log",
+        )
+        risky = [name for name in unsafe if getattr(role.permissions, name, False)]
+        if risky:
+            raise UserError(
+                "멤버 역할에 과도한 관리자 권한이 있습니다: "
+                + ", ".join(risky[:5]) + ". 서버 운영자에게 권한 점검을 요청해 주세요."
             )
         if role >= guild.me.top_role or not guild.me.guild_permissions.manage_roles:
             raise UserError(
