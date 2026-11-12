@@ -1,7 +1,8 @@
 """Repeatable provisioning of explicitly managed DDH resources."""
 import discord
 
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, overwrites, role_permissions
+from ddh.blueprint import (CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, overwrites,
+                           role_permissions, strict_readonly_overwrites)
 
 REQUIRED_PERMISSIONS = (
     "manage_roles", "manage_channels", "manage_guild", "view_channel", "send_messages", "read_message_history",
@@ -199,7 +200,13 @@ async def provision(guild, store, settings):
                     default_auto_archive_duration=10080, available_tags=forum_tags(spec),
                     overwrites=forum_permissions(guild, roles, spec.policy))
             else:
-                policy = overwrites(guild, roles, spec.policy, voice=spec.voice)
+                policy = (
+                    strict_readonly_overwrites(
+                        guild, roles, updates=spec.key == "updates",
+                    )
+                    if spec.policy == "readonly"
+                    else overwrites(guild, roles, spec.policy, voice=spec.voice)
+                )
                 if spec.voice:
                     channel = await guild.create_voice_channel(**params, overwrites=policy)
                 else:
