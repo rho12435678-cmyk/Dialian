@@ -12,7 +12,7 @@ import discord
 
 from config import Settings
 from ddh.backups import backup
-from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, ROLES, overwrites, role_permissions
+from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, ROLES, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
