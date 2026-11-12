@@ -586,11 +586,17 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(unrelated, guild.channels)
         self.assertEqual(guide_channel.type, discord.ChannelType.text)
 
-    async def test_owner_onboarding_creates_only_the_two_channels_and_publishes_panel(self):
-        for key in ("verification", "member_log"):
+    async def test_owner_onboarding_creates_the_requested_channels_and_publishes_panel(self):
+        for key in ("verification", "member_log", "commands"):
             await (await self.channel(key)).delete()
             await self.bot.store.set(self.guild.id, f"channel:{key}", None)
         existing_ids = {channel.id for channel in self.guild.channels}
+        pictures = await self.channel("pictures")
+        await self.bot.store.set(self.guild.id, "channel:pictures", None)
+        await pictures.set_permissions(self.guild.default_role,
+                                       overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True))
+        external = self.guild.member(40)
+        external.bot = True
         rules = await self.channel("rules")
         group = DDHCommands(self.bot)
         interaction = AsyncMock()
@@ -602,7 +608,16 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         await group.onboarding.callback(group, interaction, apply=True)
         verification = await self.channel("verification")
         member_log = await self.channel("member_log")
-        self.assertEqual({c.id for c in self.guild.channels} - existing_ids, {verification.id, member_log.id})
+        commands = await self.channel("commands")
+        self.assertEqual({c.id for c in self.guild.channels} - existing_ids, {verification.id, member_log.id, commands.id})
+        role = self.guild.get_role(await self.bot.store.get(self.guild.id, "role:external_bots"))
+        self.assertEqual(role.permissions.value, 0)
+        self.assertIn(role, external.roles)
+        self.assertTrue(commands.permissions_for(external).send_messages)
+        self.assertFalse(member_log.permissions_for(external).view_channel)
+        self.assertFalse(commands.permissions_for(self.visitor).view_channel)
+        self.assertFalse(pictures.permissions_for(self.visitor).send_messages)
+        self.assertTrue(pictures.permissions_for(self.member).send_messages)
         self.assertTrue(verification.permissions_for(self.visitor).view_channel)
         self.assertFalse(verification.permissions_for(self.visitor).send_messages)
         self.assertFalse(member_log.permissions_for(self.visitor).view_channel)
@@ -614,6 +629,28 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         interaction.user = self.visitor
         await verification.messages[0].view.accept.callback(interaction)
         self.assertIn(self.roles["member"], self.visitor.roles)
+
+    async def test_rejoin_rejects_restored_roles_until_current_join_is_verified(self):
+        from ddh.onboarding import INSTALLED
+
+        guild = self.guild
+        await self.bot.store.set(guild.id, INSTALLED, True)
+        member = self.visitor
+        self.assertTrue(await verify_member(self.bot, guild, member.id))
+        role = self.roles["member"]
+        original_join = member.joined_at
+        member.joined_at = original_join + timedelta(days=1)
+        await self.bot.on_member_join(member)
+        self.assertNotIn(role, member.roles)
+
+        before = SimpleNamespace(roles=list(member.roles))
+        await member.add_roles(role)
+        await self.bot.on_member_update(before, member)
+        self.assertNotIn(role, member.roles)
+        self.assertTrue(await verify_member(self.bot, guild, member.id))
+        await self.bot.on_member_join(member)
+        self.assertIn(role, member.roles)
+        self.assertTrue((await self.channel("commands")).permissions_for(member).use_application_commands)
 
     async def test_member_screening_account_age_and_manual_exception(self):
         self.visitor.pending = True

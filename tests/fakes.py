@@ -67,6 +67,11 @@ class ChannelMethods:
         if self in self.guild.channels:
             self.guild.channels.remove(self)
 
+    async def set_permissions(self, target, *, overwrite, **kwargs):
+        current = self.overwrites
+        current[target] = overwrite
+        await self.edit(overwrites=current)
+
     async def edit(self, **kwargs):
         if "name" in kwargs:
             self.name = kwargs["name"]
@@ -204,6 +209,10 @@ class Guild:
 
     def get_channel(self, channel_id):
         return next((c for c in self.channels if c.id == channel_id), None)
+
+    async def fetch_members(self, **kwargs):
+        for member in list(self.members.values()):
+            yield member
 
     async def fetch_channels(self):
         return list(self.channels)

@@ -34,7 +34,9 @@ async def is_staff(member, store):
     return is_admin(member) or any(role.id in (staff_id, admin_id) for role in member.roles)
 
 
-async def roles_for(guild, store, *, keys=ROLES):
+async def roles_for(guild, store, *, keys=None):
+    if keys is None:
+        keys = (key for key in ROLES if key != "external_bots")
     roles = {key: guild.get_role(await store.get(guild.id, f"role:{key}", 0)) for key in keys}
     if any(role is None for role in roles.values()):
         raise UserError("필수 역할이 없습니다. 관리자가 /ddh setup apply:True를 다시 실행해 주세요.")

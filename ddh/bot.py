@@ -7,15 +7,16 @@ from discord import app_commands
 from discord.ext import tasks
 
 from ddh.backups import backup
-from ddh.blueprint import CATEGORIES, CHANNELS, LAYOUT_VERSION, layout_summary
+from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
-from ddh.content import publish_panels, publish_verification
+from ddh.content import publish_panels
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
+from ddh.onboarding import connect_existing_bots, enforce_entry, install_onboarding
 from ddh.security import configure_security
 from ddh.server import (
-    UserError, channel_for, create_text_board, find_resource, is_admin, preflight, provision, require_guild, roles_for,
+    UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for,
 )
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
@@ -78,8 +79,8 @@ class DDHCommands(app_commands.Group):
             summary = await cosmetic_layout(interaction.guild, self.bot.store, apply=apply)
         await reply(interaction, summary)
 
-    @app_commands.command(name="onboarding", description="인증 채널과 비공개 입퇴장 채널 준비")
-    @app_commands.describe(apply="True: 두 채널을 생성 또는 연결하고 인증 버튼 게시")
+    @app_commands.command(name="onboarding", description="인증·입퇴장·명령어 채널과 외부봇 역할 설정")
+    @app_commands.describe(apply="True: 채널과 외부봇 역할 연결 및 인증 전 활동 제한 적용")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def onboarding(self, interaction: discord.Interaction, apply: bool = False):
@@ -87,43 +88,24 @@ class DDHCommands(app_commands.Group):
         await interaction.response.defer(ephemeral=True, thinking=True)
         guild = interaction.guild
         if not apply:
-            await reply(interaction, "안내에 인증-verify, Staff에 비공개 입퇴장-join-leave를 연결합니다. "
+            await reply(interaction, "인증-verify, 비공개 입퇴장-join-leave, 명령어-commands를 연결하고 "
+                        "외부봇 역할을 구성합니다. DDH 활동 채널은 인증 전 활동을 제한합니다. "
                         "`/ddh onboarding apply:True`로 적용하세요.")
             return
         async with self.bot.mutation_lock:
             await self.bot.tickets.ready(guild)
-            roles = await roles_for(guild, self.bot.store, keys=("staff", "admin", "member"))
-            plans = []
-            for spec in CHANNELS:
-                if spec.key not in ("verification", "member_log"):
-                    continue
-                channel = await find_resource(guild, self.bot.store, f"channel:{spec.key}", spec.name,
-                                              discord.TextChannel, spec.aliases)
-                category = None
-                if channel is None:
-                    parent = next(category for category in CATEGORIES if category.key == spec.category)
-                    category = await find_resource(guild, self.bot.store, f"category:{parent.key}", parent.name,
-                                                   discord.CategoryChannel, parent.aliases)
-                    if category is None:
-                        raise UserError(f"{parent.name} 카테고리를 찾지 못했습니다.")
-                    if len(category.channels) >= 50:
-                        raise UserError(f"{parent.name} 카테고리에 채널 공간을 확보해 주세요.")
-                if spec.key == "member_log" and channel is not None and not private_channel(
-                    channel, guild, {roles["staff"].id, roles["admin"].id, guild.me.id}
-                ):
-                    raise UserError("입퇴장 채널을 Staff 전용으로 제한한 뒤 다시 실행해 주세요.")
-                plans.append((spec, channel, category))
-            mentions = []
-            for spec, channel, category in plans:
-                if channel is None:
-                    channel = await create_text_board(
-                        guild, spec, category, roles, reason="DDH 소유자 요청: 인증·입퇴장 채널")
-                await self.bot.store.set(guild.id, f"channel:{spec.key}", channel.id)
-                mentions.append(channel.mention)
-            await publish_verification(self.bot, guild)
-        note = "" if self.bot.intents.members else (
-            "\n입퇴장 기록을 시작하려면 Developer Portal의 Server Members Intent를 켜고 재시작해 주세요."
-        )
+            role, mentions, exceptions = await install_onboarding(self.bot, guild)
+        note = "\n입퇴장과 신규 봇 연결은 Server Members Intent를 켜고 재시작하면 작동합니다."
+        if self.bot.intents.members:
+            try:
+                count, blocked = await connect_existing_bots(guild, role)
+                note = f"\n기존 외부 봇 역할 지급 {count}개."
+                if blocked:
+                    note += f" 역할을 지급하지 못한 봇 {blocked}개는 Dialian 역할 순서를 확인해 주세요."
+            except discord.HTTPException:
+                note = "\n기존 봇 목록을 읽지 못했습니다. 기존 봇에게는 외부봇 역할을 직접 지정해 주세요."
+        if exceptions:
+            note += "\n기존 개별 활동 허용 권한을 확인할 채널 · " + ", ".join(exceptions[:8])
         await reply(interaction, "설치 완료 · " + " · ".join(mentions) + note)
 
     @app_commands.command(name="cleanup", description="소유자 확인 후 기존 티켓·보관 카테고리 영구 정리")
@@ -223,7 +205,7 @@ class Dialian(discord.Client):
         intents.guilds = True
         intents.members = settings.member_events
         intents.moderation = True
-        super().__init__(intents=intents, member_cache_flags=discord.MemberCacheFlags.none(),
+        super().__init__(intents=intents, member_cache_flags=discord.MemberCacheFlags(voice=False, joined=settings.member_events),
                          chunk_guilds_at_startup=False, allowed_mentions=discord.AllowedMentions.none())
         self.settings = settings
         self.store = Store(settings.database)
@@ -284,7 +266,18 @@ class Dialian(discord.Client):
         log.info("Dialian connected to DDH guild %s", guild.id)
 
     async def on_member_join(self, member):
+        try:
+            await enforce_entry(self, member, joined=True)
+        except (discord.HTTPException, UserError):
+            log.exception("DDH 입장 역할 처리 실패 · 회원 ID %s", member.id)
         await self.operations.membership(member.guild, member, joined=True)
+
+    async def on_member_update(self, before, after):
+        if before.roles != after.roles and not after.bot:
+            try:
+                await enforce_entry(self, after)
+            except (discord.HTTPException, UserError):
+                log.exception("DDH 입장 역할 복원 검사 실패 · 회원 ID %s", after.id)
 
     async def on_raw_member_remove(self, payload):
         guild = self.get_guild(payload.guild_id)

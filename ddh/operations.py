@@ -83,7 +83,9 @@ async def inspect_layout(guild, store):
             findings.append(f"공지 형식 확인 · {spec.name}")
         if spec.forum and not channel.available_tags:
             findings.append(f"포럼 태그 누락 · {spec.name}")
-        if roles["staff"] and roles["admin"] and (spec.policy not in roles or roles[spec.policy]):
+        required = ("member", "external_bots") if spec.policy == "commands" else ()
+        if (roles["staff"] and roles["admin"] and all(roles[key] for key in required)
+                and (spec.policy not in roles or roles[spec.policy])):
             policy = forum_permissions(guild, roles, spec.policy) if spec.forum else overwrites(
                 guild, roles, spec.policy, voice=spec.voice)
             if spec.key == "updates":

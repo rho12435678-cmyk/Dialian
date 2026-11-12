@@ -28,6 +28,7 @@ ROLES = {
     "developer": ("개발자・Developer", 0x3498DB),
     "partner": ("파트너・Partner", 0x9B59B6),
     "member": ("멤버・Member", 0x95A5A6),
+    "external_bots": ("외부봇・Bots", 0x7289DA),
     "update_alerts": ("알림・Updates", 0x2ECC71),
     **{f"field:{key}": (FIELD_ROLE_NAMES[key], 0xF1C40F) for key in FIELDS},
 }
@@ -100,6 +101,8 @@ CHANNELS = (
 
     Channel("general", "채팅-chat", "community",
             aliases=("자유채팅", "general")),
+    Channel("commands", "명령어-commands", "community", "commands",
+            topic="인증 멤버와 외부 봇의 명령어 사용 공간"),
     Channel("pictures", "사진-pics", "community", topic="Roblox 작업 이미지·스크린샷 공유"),
     Channel("questions", "질문-question", "community", forum=True,
             aliases=("개발질문", "질문-help"),
@@ -156,7 +159,7 @@ def access(*, write=True, voice=False):
 
 
 def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed=False):
-    private = policy in ("private", "log")
+    private = policy in ("private", "log", "commands")
     result = {
         guild.default_role: discord.PermissionOverwrite(
             view_channel=not private, read_message_history=not private,
@@ -179,6 +182,13 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
             result[roles[key]].manage_threads = False
             result[roles[key]].manage_channels = False
             result[roles[key]].manage_webhooks = False
+    if policy in ("member", "developer", "commands"):
+        result[guild.default_role].use_application_commands = False
+    if policy == "commands":
+        for key in ("staff", "admin", "member"):
+            result[roles[key]] = access()
+            result[roles[key]].use_application_commands = True
+        result[roles["external_bots"]] = access()
     writer = roles.get(policy)
     if writer:
         result[writer] = access(voice=voice)
