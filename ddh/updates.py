@@ -54,12 +54,12 @@ def summarize_release(previous, revision):
 
 def release_embed(previous, revision, member_role=None):
     """Beautiful release card. An embed mention renders but cannot notify."""
-    audience = f"🔔 **업데이트 안내 · {member_role.mention}**\\n\\n" if member_role else ""
+    audience = f"🔔 **업데이트 안내 · {member_role.mention}**\n\n" if member_role else ""
     card = discord.Embed(
         title="🚀 DDH · 새로운 업데이트",
         description=(
             audience
-            + "**Dial Dev Hub에 새로운 업데이트가 적용되었습니다.**\\n"
+            + "**Dial Dev Hub에 새로운 업데이트가 적용되었습니다.**\n"
             + "개발자와 이용자 모두를 위한 개선 사항을 확인해 주세요."
         ),
         colour=0x5865F2,
