@@ -3,7 +3,8 @@ import logging
 
 import discord
 
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, everyone_permissions, overwrites, role_permissions
+from ddh.blueprint import (CATEGORIES, CHANNELS, OBSOLETE_CHANNEL_KEYS, OBSOLETE_CHANNEL_NAMES,
+                           ROLE_ALIASES, ROLES, everyone_permissions, overwrites, role_permissions)
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +94,8 @@ def forum_tags(spec):
         names = ("구직중", "외주가능", "협업가능", "마감")
     elif spec.key == "commissions":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "모집완료")
+    elif spec.key == "portfolio":
+        names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "의뢰가능")
     else:
         names = ("포트폴리오", "의뢰가능", "작업중", "의뢰마감")
     return [discord.ForumTag(name=name) for name in names]
@@ -120,7 +123,7 @@ async def preserve_legacy_board(guild, store, spec, category, roles, chosen_foru
     candidates = [
         c for c in guild.channels
         if isinstance(c, discord.TextChannel)
-        and c.id != chosen_forum.id and c.name == spec.name
+        and c.id != chosen_forum.id and c.name in (spec.name, *spec.aliases)
     ]
     if isinstance(saved, discord.TextChannel) and saved.id != chosen_forum.id:
         candidates.append(saved)
@@ -136,6 +139,68 @@ async def preserve_legacy_board(guild, store, spec, category, roles, chosen_foru
         await store.set(guild.id, f"legacy:channel:{spec.key}", channel.id)
 
 
+async def archive_obsolete(guild, store, categories, roles):
+    """Hide old managed channels, preserving their messages and forum posts.
+
+    Only channels previously tracked by DDH (or uniquely named former DDH
+    channels) are moved. Existing user-created channels are never deleted.
+    """
+    active = {
+        await store.get(guild.id, f"channel:{spec.key}", 0)
+        for spec in CHANNELS
+    }
+    archive_cat = categories["archive"]
+    moved = set()
+    for key in OBSOLETE_CHANNEL_KEYS:
+        saved_id = await store.get(guild.id, f"channel:{key}", 0)
+        candidates = []
+        if saved_id:
+            saved = guild.get_channel(saved_id)
+            if saved:
+                candidates.append(saved)
+        # Support pre-existing DDH layouts whose database mapping was lost,
+        # but only adopt a single unambiguous legacy name.
+        old_names = OBSOLETE_CHANNEL_NAMES.get(key, ())
+        matches = [
+            item for item in guild.channels
+            if item.name in old_names and isinstance(
+                item, (discord.TextChannel, discord.VoiceChannel, discord.ForumChannel)
+            )
+        ]
+        if len(matches) == 1:
+            candidates.extend(matches)
+        legacy_id = await store.get(guild.id, f"legacy:channel:{key}", 0)
+        legacy = guild.get_channel(legacy_id)
+        if legacy:
+            candidates.append(legacy)
+
+        for channel in candidates:
+            if channel.id in active or channel.id in moved:
+                continue
+            moved.add(channel.id)
+            name = (channel.name + "-보관")[:100]
+            if not channel.name.endswith("-보관"):
+                name = ("보관-" + channel.name)[:100]
+            params = {
+                "category": archive_cat, "name": name,
+                "overwrites": overwrites(guild, roles, "private"),
+                "reason": "DDH 미니멀 구성: 기존 데이터 삭제 없이 보관",
+            }
+            if isinstance(channel, discord.TextChannel):
+                params["topic"] = "이전 DDH 채널의 기록입니다. 메시지는 삭제하지 않았습니다."
+            await channel.edit(**params)
+            log.info("Archived former DDH channel %s (%s)", key, channel.id)
+
+    # Remove only an empty, formerly managed category. Non-empty or unfamiliar
+    # categories are never deleted.
+    legacy_category_id = await store.get(guild.id, "category:portfolios", 0)
+    old_category = guild.get_channel(legacy_category_id)
+    if isinstance(old_category, discord.CategoryChannel) and not old_category.channels:
+        await old_category.delete(reason="DDH 통합 포트폴리오로 이동 후 빈 카테고리 정리")
+        log.info("Deleted empty legacy portfolio category %s", legacy_category_id)
+
+
+
 async def preflight(guild, store):
     missing = [name for name in REQUIRED_PERMISSIONS if not getattr(guild.me.guild_permissions, name)]
     if missing:
@@ -148,7 +213,7 @@ async def preflight(guild, store):
         raise UserError("기본 역할을 제한한 뒤에도 동작하도록 봇 자체 역할에 필요한 권한을 부여해 주세요.")
     found = {}
     for key, (name, _) in ROLES.items():
-        role = await find_resource(guild, store, f"role:{key}", name, discord.Role)
+        role = await find_resource(guild, store, f"role:{key}", name, discord.Role, ROLE_ALIASES.get(key, ()))
         if role and (role.managed or role >= guild.me.top_role):
             raise UserError(f"봇 역할을 '{name}'보다 위에 놓아 주세요. 연동 관리 역할은 사용할 수 없습니다.")
         found[f"role:{key}"] = role
@@ -289,6 +354,7 @@ async def provision(guild, store, settings):
                 )
                 channel = await create(**params)
         await store.set(guild.id, f"channel:{spec.key}", channel.id)
+    await archive_obsolete(guild, store, categories, roles)
     return len(ROLES), len(CATEGORIES), len(CHANNELS)
 
 
