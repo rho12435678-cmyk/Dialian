@@ -9,7 +9,7 @@ from discord.ext import tasks
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
-from ddh.content import publish_panels, retire_update_alerts_panel
+from ddh.content import publish_panels, repair_missing_panels, retire_update_alerts_panel
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
@@ -175,6 +175,7 @@ class Dialian(discord.Client):
         self.tree.on_error = self.command_error
         self.started_at = utcnow()
         self.last_backup_day = None
+        self.last_panel_check = None
         self.release_sha = deployed_revision()
         self.update_lock = asyncio.Lock()
         self.last_policy_check = None
@@ -224,6 +225,7 @@ class Dialian(discord.Client):
         log.info("Dialian connected to DDH guild %s", guild.id)
         if await self.store.get(guild.id, "setup_complete", False):
             for name, action in (
+                ("repair deleted onboarding panels", repair_missing_panels),
                 ("outdated update signup removal", retire_update_alerts_panel),
                 ("redact old release source links", redact_legacy_release_links),
                 ("automatic deployment announcement", publish_release),
@@ -278,6 +280,14 @@ class Dialian(discord.Client):
                 except Exception:
                     log.exception("DDH %s failed; will retry", name)
         now = datetime.now(timezone.utc)
+        if (guild and await self.store.get(guild.id, "setup_complete", False)
+                and (self.last_panel_check is None
+                     or (now - self.last_panel_check).total_seconds() >= 1800)):
+            try:
+                await repair_missing_panels(self, guild)
+                self.last_panel_check = now
+            except Exception:
+                log.exception("DDH safe panel repair failed; will retry")
         if guild:
             # Gateway events are backed up by a cursor over Discord audit history.
             try:
