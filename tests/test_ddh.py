@@ -91,7 +91,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
                 await provision(self.guild, self.bot.store, self.settings)
 
     async def test_job_and_portfolio_channels_use_forum_types_and_tags(self):
-        for key in ("hiring", "looking", "commissions", "portfolio:gfx", "portfolio:ui"):
+        for key in ("hiring", "commissions", "portfolio"):
             channel = await self.channel(key)
             self.assertIsInstance(channel, discord.ForumChannel)
             self.assertGreaterEqual(len(channel.available_tags), 3)
@@ -99,9 +99,9 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.channel("updates")).type, discord.ChannelType.news)
 
     async def test_forum_permissions_support_member_comments_not_fake_portfolios(self):
-        forum = await self.channel("portfolio:gfx")
+        forum = await self.channel("portfolio")
         viewer = self.guild.member(120, [self.roles["member"]])
-        gfx = self.guild.member(121, [self.roles["member"], self.roles["field:gfx"]])
+        gfx = self.guild.member(121, [self.roles["member"], self.roles["developer"], self.roles["field:gfx"]])
         self.assertTrue(forum.permissions_for(viewer).view_channel)
         self.assertTrue(forum.permissions_for(viewer).send_messages_in_threads)
         self.assertFalse(forum.permissions_for(viewer).send_messages)
@@ -109,8 +109,6 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(forum.permissions_for(self.visitor).send_messages)
         commission = await self.channel("commissions")
         self.assertTrue(commission.permissions_for(viewer).send_messages)
-        looking = await self.channel("looking")
-        self.assertFalse(looking.permissions_for(viewer).send_messages)
 
     async def test_converts_text_boards_to_new_forums_without_deleting_old_posts(self):
         guild = Guild(self.guild.id + 321)
@@ -120,7 +118,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         new = guild.get_channel(await self.bot.store.get(guild.id, "channel:hiring"))
         self.assertIsInstance(new, discord.ForumChannel)
         self.assertNotEqual(old.id, new.id)
-        self.assertEqual(old.name, "구인-기존글")
+        self.assertTrue(old.name.startswith("보관-"))
         self.assertEqual(len(old.messages), 1)
         self.assertFalse(old.permissions_for(guild.member(500)).send_messages)
         count = len(guild.channels)
@@ -143,8 +141,41 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new.type, discord.ChannelType.news)
         self.assertFalse(await self.bot.store.get(guild.id, "news_format_pending"))
 
+    async def test_compact_bilingual_layout_and_announce_support(self):
+        self.assertEqual(len(CATEGORIES), 8)
+        names = {ch.name for ch in CHANNELS}
+        self.assertIn("포트폴리오-portfolio", names)
+        self.assertIn("문의-support", names)
+        self.assertNotIn("english-chat", names)
+        self.assertEqual(len([ch for ch in CHANNELS if ch.forum]), 3)
+        self.assertEqual((await self.channel("support_panel")).type, discord.ChannelType.news)
+        self.assertEqual((await self.channel("partners")).type, discord.ChannelType.news)
+        self.assertEqual((await self.channel("portfolio")).type, discord.ChannelType.forum)
+        self.assertFalse((await self.channel("portfolio")).permissions_for(self.member).send_messages)
+
+    async def test_obsolete_channels_archive_without_data_loss(self):
+        guild = Guild(self.guild.id + 987)
+        old_category = await guild.create_category("🎨 포트폴리오")
+        await self.bot.store.set(guild.id, "category:portfolios", old_category.id)
+        old_forum = await guild.create_forum("gfx-포트폴리오", category=old_category)
+        old_chat = await guild.create_text_channel("잡담")
+        await old_chat.send(embed=discord.Embed(title="기록 보존"))
+        await self.bot.store.set(guild.id, "channel:portfolio:gfx", old_forum.id)
+        await self.bot.store.set(guild.id, "channel:offtopic", old_chat.id)
+        await provision(guild, self.bot.store, Settings("test", guild.id))
+        archival = guild.get_channel(await self.bot.store.get(guild.id, "category:archive"))
+        self.assertEqual(old_forum.category_id, archival.id)
+        self.assertEqual(old_chat.category_id, archival.id)
+        self.assertTrue(old_forum.name.startswith("보관-"))
+        self.assertEqual(len(old_chat.messages), 1)
+        self.assertFalse(old_chat.permissions_for(guild.member(765)).view_channel)
+        total_channels = len(guild.channels)
+        await provision(guild, self.bot.store, Settings("test", guild.id))
+        self.assertEqual(total_channels, len(guild.channels))
+        self.assertEqual(len(old_chat.messages), 1)
+
     async def test_support_categories_follow_notice_categories(self):
-        expected = ["info", "support", "tickets", "archive"]
+        expected = ["info", "support", "community", "jobs"]
         self.assertEqual([category.key for category in CATEGORIES][:4], expected)
 
     async def test_adopts_original_screenshot_channels(self):
@@ -176,7 +207,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_public_permission_matrix_uses_discord_resolution(self):
         general = await self.channel("general")
         rules = await self.channel("rules")
-        portfolio = await self.channel("portfolio:gfx")
+        portfolio = await self.channel("portfolio")
         voice = await self.channel("lounge")
         gfx = self.guild.member(6, [self.roles["member"], self.roles["developer"], self.roles["field:gfx"]])
         vfx = self.guild.member(7, [self.roles["member"], self.roles["developer"], self.roles["field:vfx"]])
@@ -184,7 +215,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(general.permissions_for(self.visitor).send_messages)
         self.assertTrue(general.permissions_for(self.member).send_messages)
         self.assertFalse(rules.permissions_for(self.member).send_messages)
-        self.assertFalse(portfolio.permissions_for(vfx).send_messages)
+        self.assertTrue(portfolio.permissions_for(vfx).send_messages)
         self.assertTrue(portfolio.permissions_for(gfx).send_messages)
         self.assertFalse(voice.permissions_for(self.visitor).connect)
         self.assertTrue(voice.permissions_for(self.member).connect)
@@ -365,7 +396,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         old_channel = await guild.create_text_channel('이용안내')
         await provision(guild, self.bot.store, Settings('test', guild.id))
         self.assertEqual(await self.bot.store.get(guild.id, 'channel:guide'), old_channel.id)
-        self.assertEqual(old_channel.name, '가이드')
+        self.assertEqual(old_channel.name, '가이드-guide')
     async def test_panels_are_persistent_and_repair_without_duplicates(self):
         for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView):
             self.assertTrue(view_type(self.bot).is_persistent())
