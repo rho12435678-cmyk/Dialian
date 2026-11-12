@@ -130,10 +130,10 @@ async def preserve_legacy_board(guild, store, spec, category, roles, chosen_foru
         candidates.append(saved)
     unique = {c.id: c for c in candidates}
     for channel in unique.values():
-        old_label = (spec.name + "-기존글")[:100]
+        old_label = ("보관-" + spec.name + "-기존글")[:100]
         await channel.edit(
             name=old_label, category=category,
-            overwrites=overwrites(guild, roles, "readonly"),
+            overwrites=overwrites(guild, roles, "private"),
             topic="📁 기존 일반 채널의 글을 보존한 읽기 전용 기록입니다. 새 게시물은 같은 이름의 포럼에서 작성하세요.",
             reason="DDH 포럼 이전: 기존 메시지 보존",
         )
@@ -326,7 +326,7 @@ async def provision(guild, store, settings):
                 await store.set(guild.id, f"channel:{spec.key}", forum.id)
                 channel = forum
             await preserve_legacy_board(
-                guild, store, spec, categories[spec.category], roles, channel,
+                guild, store, spec, categories["ops"], roles, channel,
             )
         else:
             params["overwrites"] = overwrites(
