@@ -692,7 +692,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 class PureTests(unittest.TestCase):
     def test_release_embed_has_no_source_account_link_or_commit_hash(self):
         revision = "2" * 40
-        with patch("ddh.updates._git", return_value="ddh/updates.py\\nREADME.md"):
+        with patch("ddh.updates._git", return_value="ddh/updates.py"):
             card = release_embed("1" * 40, revision)
         visible = json.dumps(card.to_dict(), ensure_ascii=False).lower()
         self.assertNotIn("github", visible)
