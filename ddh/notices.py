@@ -8,6 +8,7 @@ from ddh.content import guide
 from ddh.server import channel_for, require_guild
 
 KST = ZoneInfo("Asia/Seoul")
+OWNER_NOTICES_KEY = "owner:notices_enabled"
 
 
 def due_date(now, setup_date, hour, interval):
@@ -22,7 +23,7 @@ async def publish_due(bot, guild, now=None):
     require_guild(guild, bot.settings)
     if not await bot.store.get(guild.id, "setup_complete", False):
         return False
-    if not await bot.store.get(guild.id, "notices_enabled", bot.settings.notices_enabled):
+    if not await bot.store.get(guild.id, OWNER_NOTICES_KEY, False):
         return False
     started = await bot.store.get(guild.id, "setup_at")
     if not started:

@@ -13,8 +13,6 @@ class Settings:
     database: Path = Path("data/ddh.db")
     notice_hour: int = 18
     notice_interval_days: int = 2
-    notices_enabled: bool = True
-    auto_setup: bool = False
     update_ping_mode: str = 'role'
     member_events: bool = True
     verification_min_days: int = 7
@@ -39,6 +37,4 @@ class Settings:
         if not 0 <= min_days <= 365:
             raise ValueError("DDH_VERIFY_MIN_DAYS는 0~365일이어야 합니다.")
         return cls(token, int(raw_id), Path(os.getenv("DDH_DATABASE", "data/ddh.db")),
-                   hour, interval, os.getenv("DDH_NOTICES_ENABLED", "true").lower() == "true",
-                   os.getenv("DDH_AUTO_SETUP", "false").lower() == "true",
-                   update_ping_mode, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true", min_days)
+                   hour, interval, update_ping_mode, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true", min_days)

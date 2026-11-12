@@ -2,7 +2,7 @@
 import discord
 
 from ddh.blueprint import FIELDS
-from ddh.server import channel_for
+from ddh.server import UserError, channel_for
 
 ORANGE = 0xF39C12
 
@@ -36,13 +36,16 @@ async def upsert_panel(channel, store, key, card, *, view=None):
     return message
 
 
-GUIDE_VERSION = "2026-11-minimal-layout-guide-v1"
+GUIDE_VERSION = "2026-11-owner-layout-guide-v2"
 
 
 async def guide(guild, store):
     """Render the public first-visit guide with live links to DDH channels."""
     async def link(key):
-        return (await channel_for(guild, store, key)).mention
+        try:
+            return (await channel_for(guild, store, key)).mention
+        except UserError:
+            return "해당 DDH 채널"
 
     card = discord.Embed(
         title="🌐 DDH · Dial Dev Hub | 처음 오셨나요?",
@@ -68,7 +71,7 @@ async def guide(guild, store):
             "• **포트폴리오 공유** — GFX · UI · 복장 · VFX · 모델링 · 빌딩 · 애니메이션 · 스크립팅\n"
             "• **구인·구직** — 프로젝트 팀원 모집, 개발 참여 기회 탐색\n"
             "• **제작의뢰** — 예산과 작업 범위를 적어 주문제작 개발자 찾기\n"
-            "• **커뮤니티** — 개발 질문, 자료 공유, 작품 피드백, 공동 작업\n"
+            "• **커뮤니티** — 개발 질문, 아이디어 공유, 작품 피드백, 공동 작업\n"
             "• **문의·신청** — 개발자 등록, 파트너 제안, 서버 개선 의견 제출"
         ),
         inline=False,
@@ -88,7 +91,7 @@ async def guide(guild, store):
         name="📂 도움이 되는 채널",
         value=(
             f"**포트폴리오** {await link('portfolio')}  |  "
-            f"**개발 자료** {await link('resources')}\n"
+            f"**개발 질문** {await link('questions')}\n"
             f"**업데이트 공지** {await link('updates')}  |  "
             f"**문의·신청** {await link('support_panel')}"
         ),
@@ -143,7 +146,7 @@ async def publish_panels(bot, guild):
     updates = embed(
         "🔔 DDH 업데이트 알림 센터",
         "새 기능, 개선 사항 및 운영 시스템 변경 내역을 이 채널에 안내합니다.\\n\\n"
-        "**알림 받기**를 누르면 업데이트가 실제 배포될 때 멘션 알림을 받을 수 있습니다.\\n"
+        "**알림 받기**를 누르면 소유자가 업데이트 공지를 게시할 때 멘션 알림을 받을 수 있습니다.\\n"
         "원치 않으면 언제든지 **알림 끄기**를 눌러 해제하세요.\\n"
         "같은 버전의 봇 재시작으로 알림이 중복 발송되지 않습니다.",
     )

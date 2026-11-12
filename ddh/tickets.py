@@ -94,8 +94,6 @@ class Tickets:
             raise UserError("이전 티켓 채널이 삭제되었습니다. 문의를 다시 신청해 주세요.")
         permitted = {roles["staff"].id, roles["admin"].id, guild.me.id, member.id}
         expected = overwrites(guild, roles, "private", owner=member)
-        if channel is not None and not private_channel(channel, guild, permitted):
-            channel = await channel.edit(overwrites=expected, reason="DDH 티켓 비공개 권한 복구")
         if channel is None:
             category = await ticket_category(guild, self.store)
             channel = await guild.create_text_channel(
@@ -104,7 +102,7 @@ class Tickets:
                 reason=f"DDH {KINDS[ticket['kind']]} #{ticket['id']}",
             )
         if not private_channel(channel, guild, permitted):
-            raise UserError("티켓 비공개 권한을 확인할 수 없습니다. 운영진에게 알려 주세요.")
+            raise UserError("티켓 채널의 비공개 권한을 확인해 주세요. 운영진이 권한을 직접 수정한 뒤 다시 시도할 수 있습니다.")
         await self.store.update_ticket(ticket["id"], guild.id, channel_id=channel.id)
         card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
                      f"신청자: <@{ticket['owner_id']}>\n운영진이 확인 후 답변합니다. "

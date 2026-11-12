@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import discord
 
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, everyone_permissions, overwrites, role_permissions
+from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, overwrites, role_permissions
 from ddh.security import specifications
 from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
 
@@ -55,16 +55,16 @@ async def inspect_layout(guild, store):
             findings.append(f"역할 누락 · {ROLES[key][0]}")
         elif role.permissions != role_permissions(key):
             findings.append(f"역할 권한 불일치 · {ROLES[key][0]}")
-    if guild.default_role.permissions != everyone_permissions():
-        findings.append("기본 역할 권한 불일치 · @everyone")
     if guild.me is None:
         return findings + ["봇 서버 멤버 정보 확인 불가"]
     for permission in REQUIRED_PERMISSIONS:
         if not getattr(guild.me.guild_permissions, permission):
             findings.append(f"봇 권한 누락 · {permission}")
     if all(roles[key] for key in ("staff", "admin", "developer")):
-        if not guild.me.top_role > roles["staff"] > roles["admin"] > roles["developer"]:
-            findings.append("역할 순서 확인 · Dialian > Staff > Admin > Developer")
+        if not roles["staff"] > roles["admin"] > roles["developer"]:
+            findings.append("역할 순서 확인 · Staff > Admin > Developer")
+    if any(role and role >= guild.me.top_role for key, role in roles.items() if key not in ("staff", "admin")):
+        findings.append("봇 역할 순서 확인 · 인증·신청 지급 대상 역할보다 Dialian을 위로 이동")
     for spec in CATEGORIES:
         channel = guild.get_channel(state.get(f"category:{spec.key}", 0))
         if not isinstance(channel, discord.CategoryChannel):
@@ -79,8 +79,6 @@ async def inspect_layout(guild, store):
         if not isinstance(channel, expected):
             findings.append(f"채널 누락 또는 형식 불일치 · {spec.name}")
             continue
-        if channel.category_id != state.get(f"category:{spec.category}"):
-            findings.append(f"채널 위치 불일치 · {spec.name}")
         if spec.news and channel.type != discord.ChannelType.news:
             findings.append(f"공지 형식 확인 · {spec.name}")
         if spec.forum and not channel.available_tags:
