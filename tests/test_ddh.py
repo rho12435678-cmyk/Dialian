@@ -489,7 +489,8 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(channel.messages[1].embeds[0].description.startswith(
             f"🔔 **업데이트 안내 · {self.roles['member'].mention}**"
         ))
-        self.assertIn("DDH:release:", channel.messages[1].embeds[0].footer.text)
+        self.assertTrue(channel.messages[1].embeds[0].footer.text.startswith("Dial Dev Hub · #"))
+        self.assertNotIn(self.bot.release_sha, channel.messages[1].embeds[0].footer.text)
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
         self.bot.release_sha = "3" * 40
@@ -689,11 +690,25 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PureTests(unittest.TestCase):
-    def test_release_embed_never_mentions_everyone_in_git_subject(self):
-        with patch("ddh.updates._git", return_value="@everyone : critical fix"):
-            card = release_embed("1" * 40, "2" * 40)
+    def test_release_embed_has_no_source_account_link_or_commit_hash(self):
+        revision = "2" * 40
+        with patch("ddh.updates._git", return_value="ddh/updates.py\\nREADME.md"):
+            card = release_embed("1" * 40, revision)
+        visible = json.dumps(card.to_dict(), ensure_ascii=False).lower()
+        self.assertNotIn("github", visible)
+        self.assertNotIn("rho12435678", visible)
+        self.assertNotIn("https://", visible)
+        self.assertNotIn(revision, visible)
+        self.assertIn("업데이트 공지 자동화", visible)
+
+    def test_release_notes_never_repeat_untrusted_commit_messages(self):
+        revision = "4" * 40
+        source = "account-name : @everyone https://github.com/example"
+        with patch("ddh.updates._git", return_value=source):
+            card = release_embed("3" * 40, revision)
+        self.assertNotIn("account-name", card.fields[0].value)
         self.assertNotIn("@everyone", card.fields[0].value)
-        self.assertEqual(card.footer.text, f"DDH:release:{'2' * 40}")
+        self.assertNotIn("github", card.fields[0].value.lower())
 
     def test_security_rules_are_scoped_and_non_destructive(self):
         rules = specifications()
