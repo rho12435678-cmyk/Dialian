@@ -52,25 +52,28 @@ def summarize_release(previous, revision):
     return "\n".join(lines)[:1000] or "서버 안정성 및 기능 개선"
 
 
-def release_embed(previous, revision):
+def release_embed(previous, revision, member_role=None):
+    """Beautiful release card. An embed mention renders but cannot notify."""
+    audience = f"🔔 **업데이트 안내 · {member_role.mention}**\\n\\n" if member_role else ""
     card = discord.Embed(
         title="🚀 DDH · 새로운 업데이트",
         description=(
-            "**Dial Dev Hub에 새 버전이 적용되었습니다.**\n"
-            "더 편리한 개발자 커뮤니티를 위해 기능을 개선하고 있습니다."
+            audience
+            + "**Dial Dev Hub에 새로운 업데이트가 적용되었습니다.**\\n"
+            + "개발자와 이용자 모두를 위한 개선 사항을 확인해 주세요."
         ),
         colour=0x5865F2,
         timestamp=datetime.now(timezone.utc),
     )
     card.add_field(name="✨ 이번 변경사항", value=summarize_release(previous, revision), inline=False)
-    card.add_field(name="🔖 배포 버전", value=f"`{revision[:9]}`", inline=True)
+    card.add_field(name="📦 적용 버전", value=f"`{revision[:9]}`", inline=True)
     card.add_field(name="📋 상세 변경 내역", value=f"[GitHub에서 보기]({GITHUB_COMMITS}{revision})", inline=True)
     card.set_footer(text=f"DDH:release:{revision}")
     return card
 
 
 async def publish_release(bot, guild):
-    """Announce once per real deployed revision; the first observed SHA is baseline."""
+    """Automatically announce each deployed Git SHA once, including the first."""
     require_guild(guild, bot.settings)
     revision = bot.release_sha
     if not revision or not SHA.fullmatch(revision):
@@ -82,11 +85,6 @@ async def publish_release(bot, guild):
         previous = await bot.store.get(guild.id, "release:last_revision")
         if previous == revision:
             return False
-        if not previous:
-            await bot.store.set(guild.id, "release:last_revision", revision)
-            log.info("DDH release notification baseline registered: %s", revision[:9])
-            return False
-
         channel = await channel_for(guild, bot.store, "updates")
         marker = f"DDH:release:{revision}"
         # A message may have been delivered before recording its revision.
@@ -97,21 +95,27 @@ async def publish_release(bot, guild):
                 await bot.store.set(guild.id, "release:last_revision", revision)
                 return False
 
-        roles = await roles_for(guild, bot.store)
-        mode = bot.settings.update_ping_mode
-        if mode == "everyone":
-            content = "@everyone"
-            allowed = discord.AllowedMentions(everyone=True, users=False, roles=False)
-        elif mode == "role":
-            role = roles["update_alerts"]
-            content = role.mention
-            allowed = discord.AllowedMentions(everyone=False, users=False, roles=[role])
-        else:
-            content = None
-            allowed = discord.AllowedMentions.none()
+        member = (await roles_for(guild, bot.store, keys=("member",)))["member"]
+        # Discord does NOT notify from an embed-only mention. The small first
+        # message line is necessary to ping; the embed also displays the role
+        # at its very top, exactly where community members expect it.
+        if not channel.permissions_for(guild.me).mention_everyone:
+            if not guild.me.guild_permissions.manage_channels:
+                raise PermissionError(
+                    "Dialian needs Mention Everyone/Roles in the updates channel"
+                )
+            overwrite = channel.overwrites_for(guild.me)
+            overwrite.mention_everyone = True
+            await channel.set_permissions(
+                guild.me, overwrite=overwrite,
+                reason="DDH 공식 업데이트: 봇에게만 멤버 역할 멘션 허용",
+            )
         message = await channel.send(
-            content=content, embed=release_embed(previous, revision),
-            allowed_mentions=allowed,
+            content=member.mention,
+            embed=release_embed(previous, revision, member_role=member),
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, users=False, roles=[member],
+            ),
         )
         await bot.store.set(guild.id, "release:last_revision", revision)
         await bot.store.set(guild.id, "release:last_message", message.id)
