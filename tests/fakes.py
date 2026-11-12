@@ -24,6 +24,8 @@ class Role(discord.Role):
 
 def model_data(guild, name, kind, **kwargs):
     category = kwargs.get("category")
+    if kind == 0 and kwargs.get("news"):
+        kind = 5
     data = dict(id=guild.next_id(), name=name, type=kind, position=kwargs.get("position", 0),
                 parent_id=category.id if category else None, topic=kwargs.get("topic"),
                 nsfw=False, rate_limit_per_user=kwargs.get("slowmode_delay", 0),
@@ -59,6 +61,8 @@ class ChannelMethods:
             self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=kwargs["overwrites"]))
         if "topic" in kwargs:
             self.topic = kwargs["topic"]
+        if "type" in kwargs:
+            self._type = kwargs["type"].value
         return self
 
 
@@ -92,6 +96,13 @@ class Text(ChannelMethods, discord.TextChannel):
             yield message
 
 
+class Forum(ChannelMethods, discord.ForumChannel):
+    def __init__(self, guild, name, **kwargs):
+        super().__init__(
+            state=Mock(), guild=guild, data=model_data(guild, name, 15, **kwargs),
+        )
+
+
 class Category(ChannelMethods, discord.CategoryChannel):
     def __init__(self, guild, name, **kwargs):
         super().__init__(state=Mock(), guild=guild, data=model_data(guild, name, 4, **kwargs))
@@ -110,6 +121,7 @@ class Guild:
         self.roles = []
         self.channels = []
         self.members = {}
+        self.features = ["COMMUNITY", "NEWS"]
         self.default_role = self.make_role("@everyone", role_id=guild_id, position=0)
         bot_role = self.make_role("Dialian", position=200, permissions=discord.Permissions.all())
         self.me = self.member(2, [bot_role])
@@ -191,5 +203,10 @@ class Guild:
 
     async def create_voice_channel(self, name, **kwargs):
         obj = Voice(self, name, **kwargs)
+        self.channels.append(obj)
+        return obj
+
+    async def create_forum(self, name, **kwargs):
+        obj = Forum(self, name, **kwargs)
         self.channels.append(obj)
         return obj
