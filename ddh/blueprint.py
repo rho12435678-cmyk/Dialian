@@ -80,7 +80,7 @@ CHANNELS = (
             aliases=("공지사항", "announcements"), news=True),
     Channel("updates", "업데이트-updates", "info", "readonly",
             aliases=("업데이트-공지", "업데이트 공지", "update-announcements", "updates"),
-            topic="DDH 새 버전 배포 시 자동 공지 · 멤버 역할 멘션", news=True,
+            topic="DDH 새 버전 배포 시 자동 공지 · 멤버 역할 멘션", news=True),
     Channel("rules", "규칙-rules", "info", "readonly",
             aliases=("시작·규칙", "welcome-and-rules")),
     Channel("guide", "가이드-guide", "info", "readonly",
