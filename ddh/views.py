@@ -6,6 +6,8 @@ import discord
 from ddh.blueprint import FIELDS, KINDS
 from ddh.server import UserError, is_staff, require_guild, roles_for
 
+from ddh.verification import verify_member
+
 log = logging.getLogger(__name__)
 
 
@@ -47,15 +49,14 @@ class GuardedView(discord.ui.View):
 
 
 class RulesView(GuardedView):
-    @discord.ui.button(label="규칙 동의 · 참여하기", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
+    @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
     async def accept(self, interaction, button):
         await interaction.response.defer(ephemeral=True)
-        roles = await roles_for(interaction.guild, self.bot.store)
-        role = roles["member"]
-        if role.managed or role >= interaction.guild.me.top_role or role.permissions.value != 0:
-            raise UserError("멤버 역할의 권한·순서를 점검해 주세요. 관리자에게 문의해 주세요.")
-        await interaction.user.add_roles(role, reason="DDH 규칙 동의")
-        await reply(interaction, "멤버 역할이 지급되었습니다. 채팅·구인·음성 채널을 이용할 수 있습니다.")
+        if interaction.channel_id != await self.bot.store.get(interaction.guild.id, "channel:rules"):
+            raise UserError("규칙 채널의 멤버 인증 버튼을 사용해 주세요.")
+        granted = await verify_member(self.bot, interaction.guild, interaction.user.id)
+        await reply(interaction, "멤버 인증 완료. 채팅·포럼·음성 채널을 이용할 수 있습니다." if granted
+                    else "이미 인증된 멤버입니다.")
 
 
 class SupportView(GuardedView):

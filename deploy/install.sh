@@ -55,7 +55,7 @@ sleep 5
 systemctl is-active --quiet dialian.service
 # Poll the service's readiness marker; merely having a live process is insufficient.
 for attempt in $(seq 1 12); do
-    if journalctl -u dialian.service --since "$DDH_STARTED_AT" --no-pager | grep -q "Dialian connected to DDH guild $DDH_GUILD_ID;"; then
+    if journalctl -u dialian.service --since "$DDH_STARTED_AT" --no-pager | grep -q "Dialian connected to DDH guild $DDH_GUILD_ID"; then
         exit 0
     fi
     sleep 3

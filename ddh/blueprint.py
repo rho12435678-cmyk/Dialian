@@ -8,7 +8,7 @@ FIELDS = {
     "vfx": "VFX", "building": "빌더", "modeling": "모델러", "animation": "애니메이터",
 }
 KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청"}
-LAYOUT_VERSION = "2026-11-clean-top-rules-admin-v1"
+LAYOUT_VERSION = "2026-11-operations-v2"
 
 # Preserve field-specific verification and ticket approvals, but expose just
 # one portfolio board with field tags to reduce the visible channel list.
@@ -54,12 +54,12 @@ class Category:
 
 # Five public sections; ticket and staff areas remain private.
 CATEGORIES = (
-    Category("info", "📌 안내・Info", aliases=("📌 안내", "Information")),
-    Category("support", "📨 문의・Support", aliases=("📨 문의",)),
-    Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels")),
-    Category("jobs", "💼 거래・Market", aliases=("🤝 구인·구직",)),
-    Category("voice", "🔊 음성・Voice", aliases=("🔊 음성 채널", "Voice Channels")),
-    Category("ops", "🔒 운영・Staff", True, aliases=("🛠 운영",)),
+    Category("info", "📌 안내・Info", aliases=("📌 안내", "Information", "📌 안내 • Info")),
+    Category("support", "📨 문의・Support", aliases=("📨 문의", "📨 문의 • Support")),
+    Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels", "💬 커뮤니티 • Chat")),
+    Category("jobs", "💼 거래・Market", aliases=("🤝 구인·구직", "💼 거래 • Market")),
+    Category("voice", "🔊 음성・Voice", aliases=("🔊 음성 채널", "Voice Channels", "🔊 음성 • Voice")),
+    Category("ops", "🔒 운영・Staff", True, aliases=("🛠 운영", "🔒 운영 • Staff")),
 )
 
 
@@ -97,10 +97,15 @@ CHANNELS = (
 
     Channel("general", "채팅-chat", "community",
             aliases=("자유채팅", "general")),
-    Channel("questions", "질문-help", "community",
-            aliases=("개발질문",)),
-    Channel("resources", "자료-resources", "community",
-            aliases=("개발자료", "resources")),
+    Channel("pictures", "사진-pics", "community", topic="Roblox 작업 이미지·스크린샷 공유"),
+    Channel("questions", "질문-question", "community", forum=True,
+            aliases=("개발질문", "질문-help"),
+            topic="개발 질문: 환경 / 기대 동작 / 오류 / 시도한 방법. 토큰과 개인정보는 지워 주세요."),
+    Channel("ideas", "아이디어-ideas", "community", forum=True,
+            topic="게임과 커뮤니티 아이디어: 제안 / 기대 효과 / 필요한 작업"),
+    Channel("resources", "자료-resources", "community", forum=True,
+            aliases=("개발자료", "resources"),
+            topic="개발 자료: 설명 / 출처 / 라이선스 / 사용 방법"),
 
     Channel("hiring", "구인-hiring", "jobs", forum=True,
             aliases=("구인",),
@@ -117,14 +122,15 @@ CHANNELS = (
 
     Channel("staff_chat", "운영진-chat", "ops", "private",
             aliases=("운영진-대화",)),
-    Channel("audit", "로그-logs", "ops", "private",
-            aliases=("운영-로그",)),
+    Channel("audit", "로그-logs", "ops", "log", aliases=("운영-로그",)),
+    Channel("security_log", "보안-security", "ops", "log",
+            topic="AutoMod 및 권한·변경량 점검 알림"),
 )
 
 # Resources removed from the public layout are archived instead of deleted.
 OBSOLETE_CHANNEL_KEYS = (
     "hiring", "commissions", "english", "showcase", "meetings", "offtopic", "looking",
-    "meeting_voice", "staff_voice",
+    "meeting_voice", "staff_voice", "disputes",
     *(f"portfolio:{key}" for key in FIELDS),
 )
 OBSOLETE_CHANNEL_NAMES = {
@@ -137,6 +143,7 @@ OBSOLETE_CHANNEL_NAMES = {
     "looking": ("구직",),
     "meeting_voice": ("미팅룸", "Meeting Room"),
     "staff_voice": ("운영진-회의",),
+    "disputes": ("분쟁-fight",),
     **{f"portfolio:{key}": (f"{key}-포트폴리오",) for key in FIELDS},
 }
 
@@ -172,7 +179,7 @@ def access(*, write=True, voice=False):
 
 
 def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed=False):
-    private = policy == "private"
+    private = policy in ("private", "log")
     result = {
         guild.default_role: discord.PermissionOverwrite(
             view_channel=not private, read_message_history=not private,
@@ -188,6 +195,13 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
         roles["staff"]: access(voice=voice),
         roles["admin"]: access(voice=voice),
     }
+    if policy == "log":
+        for key in ("staff", "admin"):
+            result[roles[key]] = access(write=False)
+            result[roles[key]].manage_messages = False
+            result[roles[key]].manage_threads = False
+            result[roles[key]].manage_channels = False
+            result[roles[key]].manage_webhooks = False
     writer = roles.get(policy)
     if writer:
         result[writer] = access(voice=voice)

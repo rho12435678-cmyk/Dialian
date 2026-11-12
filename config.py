@@ -16,6 +16,8 @@ class Settings:
     notices_enabled: bool = True
     auto_setup: bool = False
     update_ping_mode: str = 'role'
+    member_events: bool = True
+    verification_min_days: int = 7
 
     @classmethod
     def from_env(cls):
@@ -33,7 +35,10 @@ class Settings:
         update_ping_mode = os.getenv("DDH_UPDATE_PING_MODE", "role").lower()
         if update_ping_mode not in ("role", "everyone", "none"):
             raise ValueError("DDH_UPDATE_PING_MODE는 role/everyone/none만 허용합니다.")
+        min_days = int(os.getenv("DDH_VERIFY_MIN_DAYS", "7"))
+        if not 0 <= min_days <= 365:
+            raise ValueError("DDH_VERIFY_MIN_DAYS는 0~365일이어야 합니다.")
         return cls(token, int(raw_id), Path(os.getenv("DDH_DATABASE", "data/ddh.db")),
                    hour, interval, os.getenv("DDH_NOTICES_ENABLED", "true").lower() == "true",
                    os.getenv("DDH_AUTO_SETUP", "false").lower() == "true",
-                   update_ping_mode)
+                   update_ping_mode, os.getenv("DDH_MEMBER_EVENTS", "true").lower() == "true", min_days)

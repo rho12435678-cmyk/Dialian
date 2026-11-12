@@ -8,7 +8,8 @@ import discord
 
 from ddh.blueprint import FIELDS, KINDS, overwrites
 from ddh.content import embed, upsert_panel
-from ddh.server import UserError, channel_for, is_staff, require_guild, roles_for, ticket_category
+from ddh.operations import private_channel
+from ddh.server import UserError, is_staff, require_guild, roles_for, ticket_category
 
 log = logging.getLogger(__name__)
 
@@ -50,18 +51,23 @@ class Tickets:
         if not await self.store.get(guild.id, "setup_complete", False):
             raise UserError("관리자의 DDH 서버 구성이 아직 완료되지 않았습니다.")
 
-    async def audit(self, guild, text):
-        # Failure to write an audit message must not undo a completed action.
+    async def audit(self, guild, text, *, key=None):
         try:
-            channel = await channel_for(guild, self.store, "audit")
-            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
-        except (discord.HTTPException, UserError):
-            log.exception("DDH audit delivery failed for guild %s", guild.id)
+            await self.bot.operations.record(guild, text, key=key)
+        except Exception:
+            log.exception("DDH ticket audit recording failed for guild %s", guild.id)
 
     async def create(self, guild, member, kind, fields):
         await self.ready(guild)
         validate_payload(kind, fields)
         async with self.bot.mutation_lock:
+            await self.ready(guild)
+            try:
+                member = await guild.fetch_member(member.id)
+            except discord.NotFound:
+                raise UserError("현재 DDH 멤버만 문의를 열 수 있습니다.") from None
+            if member.pending or member.is_timed_out():
+                raise UserError("Discord 규칙 확인과 멤버 인증을 완료한 뒤 문의를 열어 주세요.")
             roles = await roles_for(guild, self.store)
             if roles["member"] not in member.roles and not await is_staff(member, self.store):
                 raise UserError("먼저 시작·규칙 채널에서 규칙에 동의해 주세요.")
@@ -86,13 +92,19 @@ class Tickets:
         if channel is None and ticket["state"] == "open":
             await self.store.update_ticket(ticket["id"], guild.id, state="deleted")
             raise UserError("이전 티켓 채널이 삭제되었습니다. 문의를 다시 신청해 주세요.")
+        permitted = {roles["staff"].id, roles["admin"].id, guild.me.id, member.id}
+        expected = overwrites(guild, roles, "private", owner=member)
+        if channel is not None and not private_channel(channel, guild, permitted):
+            channel = await channel.edit(overwrites=expected, reason="DDH 티켓 비공개 권한 복구")
         if channel is None:
-            category = await ticket_category(guild, self.store, roles)
+            category = await ticket_category(guild, self.store)
             channel = await guild.create_text_channel(
                 f"{ticket['kind']}-{ticket['id']:04d}", category=category, topic=marker,
-                overwrites=overwrites(guild, roles, "private", owner=member),
+                overwrites=expected,
                 reason=f"DDH {KINDS[ticket['kind']]} #{ticket['id']}",
             )
+        if not private_channel(channel, guild, permitted):
+            raise UserError("티켓 비공개 권한을 확인할 수 없습니다. 운영진에게 알려 주세요.")
         await self.store.update_ticket(ticket["id"], guild.id, channel_id=channel.id)
         card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
                      f"신청자: <@{ticket['owner_id']}>\n운영진이 확인 후 답변합니다. "
@@ -158,6 +170,8 @@ class Tickets:
             await self.store.update_ticket(ticket["id"], guild.id, decision="rejected", reason=reason)
             await self.review_notice(guild, channel, ticket, "반려", reason, ticket["reviewer_id"])
             return "반려"
+        if member.pending or member.is_timed_out() or roles["member"] not in member.roles:
+            raise UserError("신청자의 멤버 인증과 이용 상태를 확인한 뒤 승인을 다시 시도해 주세요.")
         keys = ["member", "partner"] if ticket["kind"] == "partner" else [
             "member", "developer", *[f"field:{f}" for f in json.loads(ticket["fields"])["_fields"]]]
         grants = [roles[key] for key in keys]
@@ -178,20 +192,24 @@ class Tickets:
             if ticket["decision"] == "approving":
                 raise UserError("역할 지급이 진행 중입니다. 운영진이 역할 권한을 확인하고 승인을 완료한 뒤 종료해 주세요.")
             roles = await roles_for(guild, self.store)
-            category = await ticket_category(guild, self.store, roles, archive=True)
-            # Journal before moving: an interrupted close is completed on restart.
+            # Journal before deleting: an interrupted close is completed on restart.
             await self.store.update_ticket(ticket["id"], guild.id, state="closing", close_reason=reason, closed_by=actor.id)
-            await self.finish_close(guild, channel, ticket, roles, category)
-            await self.audit(guild, f"문의 #{ticket['id']} 종료 · 처리자 ID {actor.id} · {channel.mention}")
+            ticket["closed_by"] = actor.id
+            await self.finish_close(guild, channel, ticket, roles)
 
-    async def finish_close(self, guild, channel, ticket, roles, category):
+    async def finish_close(self, guild, channel, ticket, roles):
         await channel.edit(
-            name=f"closed-{ticket['kind']}-{ticket['id']:04d}", category=category,
+            name=f"closed-{ticket['kind']}-{ticket['id']:04d}",
             overwrites=overwrites(guild, roles, "private"),
             reason="DDH 문의 종료 및 비공개 처리",
         )
         # Closing was recorded first, so an interrupted deletion is retryable.
         await channel.delete(reason="DDH 문의 종료: 티켓 카테고리 없이 정리")
+        await self.complete_close(guild, ticket)
+
+    async def complete_close(self, guild, ticket):
+        await self.audit(guild, f"문의 #{ticket['id']} 종료 · 처리자 ID {ticket['closed_by'] or '자동 복구'} · 채널 ID {ticket['channel_id']}",
+                         key=f"ticket:closed:{ticket['id']}")
         await self.store.update_ticket(ticket["id"], guild.id, state="closed")
 
     async def recover(self, guild):
@@ -211,16 +229,20 @@ class Tickets:
                         await self.store.update_ticket(ticket["id"], guild.id, channel_id=channel.id, state="closing")
                     else:
                         await self.store.update_ticket(ticket["id"], guild.id, state="deleted")
+                except (discord.HTTPException, UserError):
+                    log.exception("Ticket creation recovery deferred for %s", ticket["id"])
             for ticket in await self.store.tickets(guild.id, "closing"):
                 try:
                     channel = await guild.fetch_channel(ticket["channel_id"])
                 except discord.NotFound:
                     # The channel may have been deleted after a completed close,
                     # but before the final database update.
-                    await self.store.update_ticket(ticket["id"], guild.id, state="closed")
+                    await self.complete_close(guild, ticket)
                     continue
-                category = await ticket_category(guild, self.store, roles, archive=True)
-                await self.finish_close(guild, channel, ticket, roles, category)
+                try:
+                    await self.finish_close(guild, channel, ticket, roles)
+                except (discord.HTTPException, UserError):
+                    log.exception("Ticket close recovery deferred for %s", ticket["id"])
             for ticket in await self.store.approvals(guild.id):
                 try:
                     channel = await guild.fetch_channel(ticket["channel_id"])

@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 REQUIRED_PERMISSIONS = (
     "manage_roles", "manage_channels", "manage_guild", "view_channel", "send_messages", "read_message_history",
     "embed_links", "attach_files", "manage_messages", "moderate_members",
+    "view_audit_log", "manage_threads", "kick_members", "ban_members",
     "mute_members", "deafen_members", "move_members", "connect", "speak",
 )
 
@@ -52,6 +53,10 @@ async def channel_for(guild, store, key):
     return channel
 
 
+def normalize_name(value):
+    return " ".join(value.replace("•", "・").replace("·", "・").split()).replace(" ・ ", "・")
+
+
 async def find_resource(guild, store, key, name, expected, aliases=()):
     saved = await store.get(guild.id, key)
     pool = guild.roles if expected is discord.Role else guild.channels
@@ -60,7 +65,8 @@ async def find_resource(guild, store, key, name, expected, aliases=()):
         if not isinstance(item, expected):
             raise UserError(f"등록된 {name}의 종류가 다릅니다. 설정을 점검해 주세요.")
         return item
-    matches = [obj for obj in pool if obj.name in (name, *aliases)]
+    names = {normalize_name(value) for value in (name, *aliases)}
+    matches = [obj for obj in pool if normalize_name(obj.name) in names]
     if len(matches) > 1 or any(not isinstance(obj, expected) for obj in matches):
         raise UserError(f"'{name}' 이름이 중복되거나 채널 종류가 다릅니다. 중복 이름을 먼저 변경해 주세요.")
     return matches[0] if matches else None
@@ -69,7 +75,8 @@ async def find_resource(guild, store, key, name, expected, aliases=()):
 async def find_forum_resource(guild, store, spec):
     """Select an existing forum or one legacy text board without data deletion."""
     saved = guild.get_channel(await store.get(guild.id, f"channel:{spec.key}", 0))
-    matches = [c for c in guild.channels if c.name in (spec.name, *spec.aliases)]
+    names = {normalize_name(value) for value in (spec.name, *spec.aliases)}
+    matches = [c for c in guild.channels if normalize_name(c.name) in names]
     forums = [c for c in matches if isinstance(c, discord.ForumChannel)]
     texts = [c for c in matches if isinstance(c, discord.TextChannel)]
     other = [c for c in matches if c not in (*forums, *texts)]
@@ -91,8 +98,12 @@ async def find_forum_resource(guild, store, spec):
 def forum_tags(spec):
     if spec.key == "hiring":
         names = ("유급", "협의", "팀원모집", "모집완료")
-    elif spec.key == "looking":
-        names = ("구직중", "외주가능", "협업가능", "마감")
+    elif spec.key == "questions":
+        names = ("Studio", "스크립팅", "아트·디자인", "기타", "해결")
+    elif spec.key == "ideas":
+        names = ("게임", "커뮤니티", "협업", "기타")
+    elif spec.key == "resources":
+        names = ("튜토리얼", "도구", "에셋", "문서")
     elif spec.key == "commissions":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "모집완료")
     elif spec.key == "portfolio":
@@ -146,14 +157,12 @@ async def archive_obsolete(guild, store, categories, roles):
     Only channels previously tracked by DDH (or uniquely named former DDH
     channels) are moved. Existing user-created channels are never deleted.
     """
-    active = {
-        await store.get(guild.id, f"channel:{spec.key}", 0)
-        for spec in CHANNELS
-    }
-    archive_cat = categories["archive"]
+    state = await store.settings(guild.id)
+    active = {state.get(f"channel:{spec.key}", 0) for spec in CHANNELS}
+    archive_cat = categories["ops"]
     moved = set()
     for key in OBSOLETE_CHANNEL_KEYS:
-        saved_id = await store.get(guild.id, f"channel:{key}", 0)
+        saved_id = state.get(f"channel:{key}", 0)
         candidates = []
         if saved_id:
             saved = guild.get_channel(saved_id)
@@ -170,7 +179,7 @@ async def archive_obsolete(guild, store, categories, roles):
         ]
         if len(matches) == 1:
             candidates.extend(matches)
-        legacy_id = await store.get(guild.id, f"legacy:channel:{key}", 0)
+        legacy_id = state.get(f"legacy:channel:{key}", 0)
         legacy = guild.get_channel(legacy_id)
         if legacy:
             candidates.append(legacy)
@@ -193,7 +202,7 @@ async def archive_obsolete(guild, store, categories, roles):
 
     # Remove only an empty, formerly managed category. Non-empty or unfamiliar
     # categories are never deleted.
-    legacy_category_id = await store.get(guild.id, "category:portfolios", 0)
+    legacy_category_id = state.get("category:portfolios", 0)
     old_category = guild.get_channel(legacy_category_id)
     if isinstance(old_category, discord.CategoryChannel) and not old_category.channels:
         await old_category.delete(reason="DDH 통합 포트폴리오로 이동 후 빈 카테고리 정리")
@@ -308,7 +317,7 @@ async def provision(guild, store, settings):
                 default_thread_slowmode_delay=5,
                 default_auto_archive_duration=10080,
                 default_layout=(discord.ForumLayoutType.gallery_view
-                                if spec.category == "portfolios"
+                                if spec.key == "portfolio"
                                 else discord.ForumLayoutType.list_view),
                 default_sort_order=discord.ForumOrderType.latest_activity,
                 overwrites=forum_permissions(guild, roles, spec.policy),
@@ -354,6 +363,7 @@ async def provision(guild, store, settings):
                 )
                 channel = await create(**params)
         await store.set(guild.id, f"channel:{spec.key}", channel.id)
+    await archive_obsolete(guild, store, categories, roles)
     # The old archive/ticket categories are intentionally not re-created.
     # Destructive cleanup must only run after an explicit owner confirmation.
     if "COMMUNITY" in getattr(guild, "features", ()):
@@ -363,7 +373,7 @@ async def provision(guild, store, settings):
     return len(ROLES), len(CATEGORIES), len(CHANNELS)
 
 
-async def ticket_category(guild, store, roles, *, archive=False):
+async def ticket_category(guild, store):
     """Use the existing private Staff area: no ticket/archive category created."""
     category = guild.get_channel(await store.get(guild.id, "category:ops", 0))
     if not isinstance(category, discord.CategoryChannel):

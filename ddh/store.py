@@ -46,6 +46,15 @@ class Store:
                     reason TEXT, close_reason TEXT, closed_by INTEGER,
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS operations_log (
+                    guild_id INTEGER NOT NULL, event_key TEXT NOT NULL, sink TEXT NOT NULL,
+                    kind TEXT NOT NULL, body TEXT NOT NULL, occurred_at TEXT NOT NULL, delivered_at TEXT,
+                    PRIMARY KEY(guild_id, event_key)
+                );
+                CREATE INDEX IF NOT EXISTS operations_pending
+                    ON operations_log(guild_id, sink, delivered_at);
+                CREATE INDEX IF NOT EXISTS operations_recent
+                    ON operations_log(guild_id, kind, occurred_at);
                 CREATE UNIQUE INDEX IF NOT EXISTS one_active_kind
                     ON tickets(guild_id, owner_id, kind) WHERE state IN ('creating','open');
             """)
@@ -113,4 +122,45 @@ class Store:
         async with self.connect() as db:
             await db.execute(f"UPDATE tickets SET {columns} WHERE id=? AND guild_id=?",
                              (*values.values(), ticket_id, guild_id))
+            await db.commit()
+
+    async def settings(self, guild_id):
+        async with self.connect() as db:
+            rows = await (await db.execute(
+                "SELECT key,value FROM settings WHERE guild_id=?", (guild_id,))).fetchall()
+        return {row["key"]: json.loads(row["value"]) for row in rows}
+
+    async def record_event(self, guild_id, key, sink, kind, body, when):
+        async with self.connect() as db:
+            result = await db.execute(
+                "INSERT OR IGNORE INTO operations_log(guild_id,event_key,sink,kind,body,occurred_at) "
+                "VALUES (?,?,?,?,?,?)", (guild_id, key, sink, kind, body, when))
+            await db.commit()
+            return result.rowcount == 1
+
+    async def pending_events(self, guild_id, sink, limit=10):
+        async with self.connect() as db:
+            rows = await (await db.execute(
+                "SELECT event_key,body,occurred_at FROM operations_log "
+                "WHERE guild_id=? AND sink=? AND delivered_at IS NULL ORDER BY rowid LIMIT ?",
+                (guild_id, sink, limit))).fetchall()
+        return [dict(row) for row in rows]
+
+    async def mark_delivered(self, guild_id, events):
+        async with self.connect() as db:
+            await db.executemany(
+                "UPDATE operations_log SET delivered_at=? WHERE guild_id=? AND event_key=?",
+                [(utcnow(), guild_id, event["event_key"]) for event in events])
+            await db.commit()
+
+    async def count_events(self, guild_id, kind, since):
+        async with self.connect() as db:
+            row = await (await db.execute(
+                "SELECT COUNT(*) FROM operations_log WHERE guild_id=? AND kind=? AND occurred_at>=?",
+                (guild_id, kind, since))).fetchone()
+            return row[0]
+
+    async def purge_delivered_events(self, guild_id, cutoff):
+        async with self.connect() as db:
+            await db.execute("DELETE FROM operations_log WHERE guild_id=? AND delivered_at<?", (guild_id, cutoff))
             await db.commit()

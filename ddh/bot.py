@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -11,11 +11,13 @@ from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, publish_guide, publish_panels
 from ddh.notices import publish_due
+from ddh.operations import Operations, private_channel
 from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
 from ddh.updates import deployed_revision, publish_release
+from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, reply, report_error
 
 log = logging.getLogger(__name__)
@@ -118,6 +120,29 @@ class DDHCommands(app_commands.Group):
             await publish_panels(self.bot, interaction.guild)
         await reply(interaction, "DDH 안내 패널을 갱신했습니다.")
 
+    @app_commands.command(name="check", description="역할·포럼·비공개 권한과 입퇴장 기록 설정 점검")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def check(self, interaction: discord.Interaction):
+        await self.admin(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        findings = await self.bot.operations.findings(interaction.guild)
+        if not self.bot.intents.members:
+            findings.insert(0, "입퇴장 로그 꺼짐 · Developer Portal에서 Server Members Intent 활성화 후 재시작")
+        state = "점검 완료 · 불일치 없음" if not findings else (
+            f"점검 항목 {len(findings)}건\n" + "\n".join(f"• {item}" for item in findings[:12])
+        )
+        await reply(interaction, state)
+
+    @app_commands.command(name="verify", description="관리자가 계정 연령 예외를 확인한 멤버를 수동 인증")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def verify(self, interaction: discord.Interaction, member: discord.Member):
+        await self.admin(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        granted = await verify_member(self.bot, interaction.guild, member.id, reviewer=interaction.user)
+        await reply(interaction, "멤버 인증을 완료했습니다." if granted else "이미 인증된 멤버입니다.")
+
     @app_commands.command(name="notices", description="정기 DDH 안내 공지 켜기/끄기")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -147,11 +172,14 @@ class Dialian(discord.Client):
     def __init__(self, settings):
         intents = discord.Intents.none()
         intents.guilds = True
-        # Slash commands and REST member lookups need no privileged intents.
-        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
+        intents.members = settings.member_events
+        intents.moderation = True
+        super().__init__(intents=intents, member_cache_flags=discord.MemberCacheFlags.none(),
+                         chunk_guilds_at_startup=False, allowed_mentions=discord.AllowedMentions.none())
         self.settings = settings
         self.store = Store(settings.database)
         self.mutation_lock = asyncio.Lock()
+        self.operations = Operations(self)
         self.tickets = Tickets(self)
         self.tree = app_commands.CommandTree(self)
         self.tree.on_error = self.command_error
@@ -159,6 +187,7 @@ class Dialian(discord.Client):
         self.last_backup_day = None
         self.release_sha = deployed_revision()
         self.update_lock = asyncio.Lock()
+        self.last_policy_check = None
 
     async def setup_hook(self):
         await self.store.initialize()
@@ -185,12 +214,16 @@ class Dialian(discord.Client):
                     raise UserError("먼저 /ddh setup apply:True로 서버 구성을 완료해 주세요.")
                 counts = (0, 0, 0)
             roles = await roles_for(guild, self.store)
-            audit = await channel_for(guild, self.store, "audit")
-            safeguards = await configure_security(guild, staff_role=roles["staff"], audit_channel=audit)
+            await self.store.set(guild.id, "setup_complete", True)
+            await self.store.set(guild.id, "security_complete", False)
+            audit = await channel_for(guild, self.store, "security_log")
+            if not private_channel(audit, guild, {roles["staff"].id, roles["admin"].id, guild.me.id}):
+                raise UserError("보안 로그 채널의 비공개 권한을 복구한 뒤 보안 설정을 적용해 주세요.")
+            safeguards = await configure_security(guild, staff_role=roles["staff"], admin_role=roles["admin"],
+                                                   audit_channel=audit)
             await self.store.set(guild.id, "security_complete", True)
             if not await self.store.get(guild.id, "setup_at"):
                 await self.store.set(guild.id, "setup_at", utcnow())
-            await self.store.set(guild.id, "setup_complete", True)
             return counts, safeguards
 
     async def on_ready(self):
@@ -230,12 +263,23 @@ class Dialian(discord.Client):
         except Exception:
             log.exception("DDH release announcement failed; maintenance will retry")
 
+    async def on_member_join(self, member):
+        await self.operations.membership(member.guild, member, joined=True)
+
+    async def on_raw_member_remove(self, payload):
+        guild = self.get_guild(payload.guild_id)
+        if guild is not None:
+            await self.operations.membership(guild, payload.user, joined=False)
+
+    async def on_audit_log_entry_create(self, entry):
+        await self.operations.audit(entry)
+
     async def on_guild_channel_delete(self, channel):
         if channel.guild.id != self.settings.guild_id:
             return
         async with self.mutation_lock:
             ticket = await self.store.channel_ticket(channel.guild.id, channel.id)
-            if ticket:
+            if ticket and ticket["state"] in ("creating", "open"):
                 await self.store.update_ticket(ticket["id"], channel.guild.id, state="deleted")
 
     async def command_error(self, interaction, error):
@@ -259,10 +303,26 @@ class Dialian(discord.Client):
                     await action(guild)
                 except Exception:
                     log.exception("DDH %s failed; will retry", name)
-        today = datetime.now(timezone.utc).date()
+        now = datetime.now(timezone.utc)
+        if guild:
+            # Gateway events are backed up by a cursor over Discord audit history.
+            try:
+                await self.operations.catch_up(guild)
+            except Exception:
+                log.exception("DDH Discord audit catch-up failed; will retry")
+            if (await self.store.get(guild.id, "layout:version") == LAYOUT_VERSION
+                    and (self.last_policy_check is None
+                         or (now - self.last_policy_check).total_seconds() >= 300)
+                    and not self.mutation_lock.locked()):
+                await self.operations.check(guild)
+                self.last_policy_check = now
+            await self.operations.flush(guild)
+        today = now.date()
         if self.last_backup_day != today:
             try:
                 await backup(self.settings.database)
+                if guild:
+                    await self.store.purge_delivered_events(guild.id, (now - timedelta(days=30)).isoformat())
                 self.last_backup_day = today
             except Exception:
                 log.exception("DDH backup failed; will retry")

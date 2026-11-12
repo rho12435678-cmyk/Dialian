@@ -22,8 +22,8 @@ def specifications():
             discord.AutoModTrigger(
                 type=discord.AutoModRuleTriggerType.keyword,
                 keyword_filter=(
-                    "discord.gg/", "discord.com/invite/",
-                    "discord.com/invites/", "discordapp.com/invite/",
+                    "*discord.gg/*", "*discord.com/invite/*",
+                    "*discord.com/invites/*", "*discordapp.com/invite/*",
                 ),
             ),
             True,  # Moderators can post approved partner announcements.
@@ -45,14 +45,15 @@ def specifications():
     )
 
 
-async def configure_security(guild, *, staff_role, audit_channel):
+async def configure_security(guild, *, staff_role, audit_channel, admin_role=None):
     """Enable server protections and upsert DDH rules without deleting others.
 
     Requires Manage Server on the bot itself. Existing Discord spam / mention
     spam rules created by human moderators are left alone.
     """
     await guild.edit(
-        verification_level=discord.VerificationLevel.medium,
+        verification_level=max(getattr(guild, "verification_level", discord.VerificationLevel.medium),
+                               discord.VerificationLevel.medium, key=lambda level: level.value),
         default_notifications=discord.NotificationLevel.only_mentions,
         explicit_content_filter=discord.ContentFilter.all_members,
         reason="DDH 신규 사용자·알림·콘텐츠 보안 설정",
@@ -82,7 +83,7 @@ async def configure_security(guild, *, staff_role, audit_channel):
             )),
             discord.AutoModRuleAction(channel_id=audit_channel.id),
         ]
-        exemptions = [staff_role] if staff_exempt else []
+        exemptions = [role for role in (staff_role, admin_role) if role] if staff_exempt else []
         if managed:
             await managed.edit(
                 trigger=trigger,
