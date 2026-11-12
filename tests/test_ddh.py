@@ -23,7 +23,7 @@ from ddh.content import (GUIDE_VERSION, guide, publish_guide, publish_panels,
 from ddh.operations import inspect_automod, inspect_layout
 from ddh.permissions import operator_migration
 from ddh.verification import verify_member
-from ddh.visibility import apply_visibility
+from ddh.visibility import apply_visibility, visibility_plan
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
@@ -677,7 +677,17 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.store.get(self.guild.id, "channel:verification"),
             verification.id,
         )
-        self.assertIn("0개", await apply_visibility(self.bot, self.guild))
+        _, pending = await visibility_plan(self.bot, self.guild)
+        errors = []
+        for ch, future in pending[:2]:
+            before = {target.id: p.view_channel for target, p in ch.overwrites.items()}
+            after = {target.id: p.view_channel for target, p in future.items()}
+            errors.append((ch.name, {
+                k: (before.get(k), after.get(k))
+                for k in set(before) | set(after)
+                if before.get(k) != after.get(k)
+            }))
+        self.assertEqual(len(pending), 0, errors)
 
     async def test_owner_visibility_changes_are_not_reverted_by_background_jobs(self):
         verification = await self.guild.create_text_channel("인증")
