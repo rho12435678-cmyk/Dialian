@@ -23,7 +23,7 @@ FIELD_ROLE_NAMES = {
     "animation": "애니메이터・Animator",
 }
 ROLES = {
-    "staff": ("운영진・Staff", 0xE67E22),
+    "staff": ("운영자", 0xE67E22),
     "admin": ("관리자・Admin", 0xD35400),
     "developer": ("개발자・Developer", 0x3498DB),
     "partner": ("파트너・Partner", 0x9B59B6),
@@ -33,7 +33,7 @@ ROLES = {
 
 # Only used when the tracked role ID is unavailable (for old DDH installs).
 ROLE_ALIASES = {
-    "staff": ("DDH 운영진",),
+    "staff": ("운영자", "운영자・Operator"),
     "admin": ("관리자", "Admin"),
     "developer": ("개발자",),
     "partner": ("파트너",),
