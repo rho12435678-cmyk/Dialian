@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from ddh.backups import backup
-from ddh.blueprint import layout_summary
+from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.content import GUIDE_VERSION, publish_guide, publish_panels
 from ddh.notices import publish_due
 from ddh.security import configure_security
@@ -156,6 +156,7 @@ class Dialian(discord.Client):
                 counts = await provision(guild, self.store, self.settings)
                 await publish_panels(self, guild)
                 await self.store.set(guild.id, "release:layout_ready", True)
+                await self.store.set(guild.id, "layout:version", LAYOUT_VERSION)
             else:
                 if not await self.store.get(guild.id, "setup_complete", False):
                     raise UserError("먼저 /ddh setup apply:True로 서버 구성을 완료해 주세요.")
@@ -179,11 +180,13 @@ class Dialian(discord.Client):
             not await self.store.get(guild.id, "setup_complete", False)
             or not await self.store.get(guild.id, "security_complete", False)
             or not await self.store.get(guild.id, "release:layout_ready", False)
+            or await self.store.get(guild.id, "layout:version") != LAYOUT_VERSION
         ):
             try:
                 needs_layout = (
                     not await self.store.get(guild.id, "setup_complete", False)
                     or not await self.store.get(guild.id, "release:layout_ready", False)
+                    or await self.store.get(guild.id, "layout:version") != LAYOUT_VERSION
                 )
                 await self.apply_setup(guild, with_layout=needs_layout)
                 log.info("DDH automatic provisioning and AutoMod protections applied")
