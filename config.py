@@ -14,6 +14,7 @@ class Settings:
     notice_hour: int = 18
     notice_interval_days: int = 2
     notices_enabled: bool = True
+    auto_setup: bool = False
 
     @classmethod
     def from_env(cls):
@@ -29,4 +30,5 @@ class Settings:
         if not 0 <= hour <= 23 or not 1 <= interval <= 30:
             raise ValueError("공지 시각은 0~23시, 주기는 1~30일이어야 합니다.")
         return cls(token, int(raw_id), Path(os.getenv("DDH_DATABASE", "data/ddh.db")),
-                   hour, interval, os.getenv("DDH_NOTICES_ENABLED", "true").lower() == "true")
+                   hour, interval, os.getenv("DDH_NOTICES_ENABLED", "true").lower() == "true",
+                   os.getenv("DDH_AUTO_SETUP", "false").lower() == "true")
