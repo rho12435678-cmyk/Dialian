@@ -68,6 +68,19 @@ def _diagnostic(stage, error):
     )
 
 
+def rule_trigger_type(rule):
+    """Read trigger type across discord.py AutoModRule model versions.
+
+    Discord's API data uses trigger_type, whereas installed discord.py can
+    expose the public rule.trigger.type instead. Never assume the former.
+    """
+    trigger = getattr(rule, "trigger", None)
+    value = getattr(trigger, "type", None)
+    if value is not None:
+        return value
+    return getattr(rule, "trigger_type", None)
+
+
 def _blocks(rule):
     return getattr(rule, "enabled", False) and any(
         getattr(action, "type", None) == discord.AutoModRuleActionType.block_message
@@ -112,7 +125,7 @@ async def configure_security(guild, *, staff_role, audit_channel, admin_role=Non
         managed = next((rule for rule in existing if rule.name == name), None)
         matching = [
             rule for rule in existing
-            if rule.trigger_type == trigger.type and rule is not managed
+            if rule_trigger_type(rule) == trigger.type and rule is not managed
         ]
         if managed is None and trigger.type in (
             discord.AutoModRuleTriggerType.spam,
@@ -130,7 +143,7 @@ async def configure_security(guild, *, staff_role, audit_channel, admin_role=Non
 
         # Discord permits up to six keyword rules per guild.
         if (managed is None and trigger.type == discord.AutoModRuleTriggerType.keyword
-                and sum(rule.trigger_type == trigger.type for rule in existing) >= 6):
+                and sum(rule_trigger_type(rule) == trigger.type for rule in existing) >= 6):
             raise UserError(
                 f"보안 설정 미완료 · {name}: Discord 키워드 AutoMod 규칙 한도 "
                 "(6개)에 도달했습니다. 기존 규칙을 직접 확인해 주세요."
@@ -173,7 +186,7 @@ async def configure_security(guild, *, staff_role, audit_channel, admin_role=Non
     for name, trigger, _ in specifications():
         matching = [
             rule for rule in confirmed
-            if rule.trigger_type == trigger.type
+            if rule_trigger_type(rule) == trigger.type
             and (rule.name == name or trigger.type in (
                 discord.AutoModRuleTriggerType.spam,
                 discord.AutoModRuleTriggerType.mention_spam,
