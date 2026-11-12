@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 import discord
 
 from config import Settings
+from ddh.announcements import protect_announcement_channels
 from ddh.backups import backup, restore_dry_run, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
@@ -447,6 +448,81 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.guild.me.guild_permissions.manage_roles = False
         with self.assertRaises(UserError):
             await provision(self.guild, self.bot.store, self.settings)
+
+    async def test_announcement_channels_block_posts_attachments_threads_for_everyone(self):
+        staff = self.staff
+        admin = self.guild.member(42, [self.roles["member"], self.roles["admin"]])
+        developer = self.guild.member(
+            43, [self.roles["member"], self.roles["developer"], self.roles["field:gfx"]],
+        )
+        other = self.guild.make_role(
+            "커스텀 회원", permissions=discord.Permissions(
+                send_messages=True, attach_files=True,
+                create_public_threads=True, send_messages_in_threads=True,
+            ),
+        )
+        custom = self.guild.member(44, [self.roles["member"], other])
+        for spec in CHANNELS:
+            if spec.policy != "readonly":
+                continue
+            with self.subTest(channel=spec.key):
+                channel = await self.channel(spec.key)
+                for person in (self.visitor, self.member, developer, custom):
+                    effective = channel.permissions_for(person)
+                    self.assertTrue(effective.view_channel)
+                    for permission in (
+                        "send_messages", "attach_files", "embed_links",
+                        "add_reactions", "send_messages_in_threads",
+                        "create_public_threads", "create_private_threads",
+                        "create_polls", "manage_threads", "manage_webhooks",
+                    ):
+                        self.assertFalse(
+                            getattr(effective, permission),
+                            f"{spec.key} {person.id} can {permission}",
+                        )
+                self.assertTrue(channel.permissions_for(staff).send_messages)
+                self.assertTrue(channel.permissions_for(admin).send_messages)
+                self.assertTrue(channel.permissions_for(self.guild.me).send_messages)
+
+    async def test_existing_announcement_permissions_self_heal_without_deleting_posts(self):
+        channel = await self.channel("announcements")
+        await channel.send(embed=discord.Embed(title="기존 공지 보존"))
+        first = channel.messages[0]
+        public = self.guild.make_role(
+            "방문자 추가 역할", permissions=discord.Permissions(send_messages=True),
+        )
+        visitor = self.guild.member(50, [self.roles["member"], public])
+        changed = dict(channel.overwrites)
+        changed[public] = discord.PermissionOverwrite(
+            send_messages=True, attach_files=True, create_public_threads=True,
+        )
+        await channel.edit(overwrites=changed)
+        self.assertTrue(channel.permissions_for(visitor).send_messages)
+        updated = await protect_announcement_channels(self.bot, self.guild)
+        self.assertIn("announcements", updated)
+        restored = channel.permissions_for(visitor)
+        self.assertFalse(restored.send_messages)
+        self.assertFalse(restored.attach_files)
+        self.assertFalse(restored.create_public_threads)
+        self.assertEqual(channel.messages[0].id, first.id)
+        self.assertEqual(await protect_announcement_channels(self.bot, self.guild), [])
+        self.assertEqual(len((await self.channel("updates")).messages), 0)
+
+    async def test_official_verification_button_works_from_server_guide_location(self):
+        interaction = AsyncMock()
+        interaction.guild = self.guild
+        interaction.user = self.visitor
+        interaction.channel_id = 992211330012345678  # Server Guide resource view
+        await RulesView(self.bot).accept.callback(interaction)
+        self.visitor.add_roles.assert_awaited_once_with(
+            self.roles["member"], reason="DDH 규칙 동의 및 계정 인증",
+        )
+
+    async def test_verification_rejects_underage_account_without_role_grant(self):
+        self.visitor.created_at = datetime.now(timezone.utc) - timedelta(days=1)
+        with self.assertRaisesRegex(UserError, "계정 생성 후"):
+            await verify_member(self.bot, self.guild, self.visitor.id)
+        self.visitor.add_roles.assert_not_awaited()
 
     async def test_public_permission_matrix_uses_discord_resolution(self):
         general = await self.channel("general")
