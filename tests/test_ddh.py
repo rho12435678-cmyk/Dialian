@@ -25,7 +25,7 @@ from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
-from ddh.updates import publish_release, release_embed
+from ddh.updates import publish_release, redact_legacy_release_links, release_embed
 from ddh.views import RulesView, SupportView, TicketActions
 from fakes import Guild, Text
 
@@ -522,6 +522,31 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(channel.messages), 2)
         self.assertFalse(await retire_update_alerts_panel(self.bot, self.guild))
         self.assertTrue(await self.bot.store.get(self.guild.id, "updates:panel_retired"))
+
+    async def test_old_release_links_are_redacted_without_touching_other_notices(self):
+        channel = await self.channel("updates")
+        old = discord.Embed(
+            title="기존 업데이트", description="https://github.com/example/repo",
+        )
+        old.set_footer(text="DDH:release:" + "e" * 40)
+        legacy = await channel.send(embed=old)
+        safe = await channel.send(embed=discord.Embed(title="일반 공지"))
+        self.bot.release_sha = "e" * 40
+        self.assertEqual(
+            await redact_legacy_release_links(self.bot, self.guild), 1
+        )
+        visible = json.dumps(legacy.embeds[0].to_dict(), ensure_ascii=False).lower()
+        self.assertNotIn("github.com", visible)
+        self.assertNotIn("e" * 40, visible)
+        self.assertIn(safe, channel.messages)
+        self.assertEqual(
+            await self.bot.store.get(self.guild.id, "release:last_revision"),
+            "e" * 40,
+        )
+        self.assertEqual(
+            await redact_legacy_release_links(self.bot, self.guild), 0
+        )
+        self.assertFalse(await publish_release(self.bot, self.guild))
 
     async def test_bot_startup_posts_release_without_slash_command(self):
         self.bot.release_sha = "b" * 40
