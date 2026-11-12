@@ -62,6 +62,10 @@ class Message:
 
 
 class ChannelMethods:
+    async def delete(self, **kwargs):
+        if self in self.guild.channels:
+            self.guild.channels.remove(self)
+
     async def edit(self, **kwargs):
         if "name" in kwargs:
             self.name = kwargs["name"]
@@ -135,11 +139,21 @@ class Guild:
         self.channels = []
         self.members = {}
         self.features = ["COMMUNITY", "NEWS"]
+        self.rules_channel = None
         self.default_role = self.make_role("@everyone", role_id=guild_id, position=0)
         bot_role = self.make_role("Dialian", position=200, permissions=discord.Permissions.all())
         self.me = self.member(2, [bot_role])
         self.me.guild_permissions = discord.Permissions.all()
         self.me.top_role = bot_role
+
+    @property
+    def categories(self):
+        return [c for c in self.channels if isinstance(c, Category)]
+
+    async def edit(self, **kwargs):
+        if "rules_channel" in kwargs:
+            self.rules_channel = kwargs["rules_channel"]
+        return self
 
     def next_id(self):
         self.counter += 1
