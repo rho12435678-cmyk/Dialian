@@ -30,6 +30,16 @@ def model_data(guild, name, kind, **kwargs):
                 parent_id=category.id if category else None, topic=kwargs.get("topic"),
                 nsfw=False, rate_limit_per_user=kwargs.get("slowmode_delay", 0),
                 bitrate=64000, user_limit=0, permission_overwrites=[])
+    if kind == 15:
+        data["available_tags"] = [
+            {
+                "id": guild.next_id(), "name":tag.name,
+                "moderated": tag.moderated, "emoji_id": None, "emoji_name": None,
+            }
+            for tag in kwargs.get("available_tags", ())
+        ]
+        data["default_forum_layout"] = getattr(kwargs.get("default_layout"), "value", 0)
+        data["default_sort_order"] = getattr(kwargs.get("default_sort_order"), "value", 0)
     for target, overwrite in kwargs.get("overwrites", {}).items():
         allow, deny = overwrite.pair()
         data["permission_overwrites"].append(dict(id=target.id, type=0 if isinstance(target, discord.Role) else 1,
