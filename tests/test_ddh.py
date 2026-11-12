@@ -290,7 +290,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         setup.assert_not_awaited()
         security.assert_not_awaited()
         release.assert_awaited_once_with(self.bot, self.guild)
-        self.assertEqual(len((await self.channel("guide")).messages), 1)
+        self.assertEqual(len((await self.channel("guide")).messages), 0)  # no automatic panel restoration
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
     async def test_server_mutations_require_actual_owner(self):
