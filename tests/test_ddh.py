@@ -126,6 +126,20 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         os.utime(snapshot, (0, 0))
         self.assertIn("백업 지연", " ".join(self.bot.operations.backup_warnings()))
 
+    async def test_support_report_button_is_upgraded_once_automatically(self):
+        await publish_panels(self.bot, self.guild)
+        channel = await self.channel("support_panel")
+        original = channel.messages[0]
+        await self.bot.store.set(self.guild.id, "panels:version", "legacy")
+        self.assertTrue(await repair_missing_panels(self.bot, self.guild))
+        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(channel.messages[0].id, original.id)
+        self.assertTrue(any(
+            item.custom_id == "ddh:report:v1"
+            for item in channel.messages[0].view.children
+        ))
+        self.assertFalse(await repair_missing_panels(self.bot, self.guild))
+
     async def test_repair_deleted_guides_without_reposting_healthy_panels(self):
         self.assertTrue(await repair_missing_panels(self.bot, self.guild))
         self.assertFalse(await repair_missing_panels(self.bot, self.guild))
