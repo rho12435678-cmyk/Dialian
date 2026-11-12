@@ -135,7 +135,7 @@ async def redact_legacy_release_links(bot, guild):
         old_revisions = [
             card.footer.text.removeprefix("DDH:release:")
             for card in message.embeds
-            if card.footer.text.startswith("DDH:release:")
+            if isinstance(card.footer.text, str) and card.footer.text.startswith("DDH:release:")
         ]
         if not any(SHA.fullmatch(value) for value in old_revisions):
             continue
