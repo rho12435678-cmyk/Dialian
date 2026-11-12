@@ -34,7 +34,8 @@ async def is_staff(member, store):
     if not isinstance(member, discord.Member):
         return False
     staff_id = await store.get(member.guild.id, "role:staff")
-    return is_admin(member) or any(role.id == staff_id for role in member.roles)
+    admin_id = await store.get(member.guild.id, "role:admin")
+    return is_admin(member) or any(role.id in (staff_id, admin_id) for role in member.roles)
 
 
 async def roles_for(guild, store):
@@ -246,7 +247,7 @@ async def provision(guild, store, settings):
     roles = {}
     for key, (name, colour) in ROLES.items():
         params = dict(name=name, permissions=role_permissions(key), colour=discord.Colour(colour),
-                      hoist=key in ("staff", "developer"), mentionable=False, reason="DDH 서버 구성")
+                      hoist=key in ("staff", "admin", "developer"), mentionable=False, reason="DDH 서버 구성")
         role = found[f"role:{key}"]
         role = await role.edit(**params) if role else await guild.create_role(**params)
         roles[key] = role
@@ -259,7 +260,7 @@ async def provision(guild, store, settings):
     ordered_keys = (
         ["member", "update_alerts", "partner"]
         + [key for key in ROLES if key.startswith("field:")]
-        + ["developer", "staff"]
+        + ["developer", "admin", "staff"]
     )
     ordered = [roles[key] for key in ordered_keys]
     reorder_pending = guild.me.top_role.position <= len(ordered)
@@ -353,22 +354,20 @@ async def provision(guild, store, settings):
                 )
                 channel = await create(**params)
         await store.set(guild.id, f"channel:{spec.key}", channel.id)
-    await archive_obsolete(guild, store, categories, roles)
+    # The old archive/ticket categories are intentionally not re-created.
+    # Destructive cleanup must only run after an explicit owner confirmation.
+    if "COMMUNITY" in getattr(guild, "features", ()):
+        rules = guild.get_channel(await store.get(guild.id, "channel:rules", 0))
+        if rules is not None and getattr(guild, "rules_channel", None) != rules:
+            await guild.edit(rules_channel=rules, reason="DDH 규칙 채널 지정")
     return len(ROLES), len(CATEGORIES), len(CHANNELS)
 
 
 async def ticket_category(guild, store, roles, *, archive=False):
-    """Create private overflow categories before hitting Discord's 50-child limit."""
-    base = "archive" if archive else "tickets"
-    name = "📁 문의 보관" if archive else "🔒 문의 진행"
-    for index in range(1, 11):
-        key = f"category:{base}" if index == 1 else f"category:{base}:{index}"
-        label = name if index == 1 else f"{name} {index}"
-        cat = await find_resource(guild, store, key, label, discord.CategoryChannel)
-        if cat is None:
-            cat = await guild.create_category(label, overwrites=overwrites(guild, roles, "private"),
-                                              reason="DDH 비공개 문의 카테고리")
-            await store.set(guild.id, key, cat.id)
-        if len(cat.channels) < 48:
-            return cat
-    raise UserError("문의 보관 공간이 부족합니다. 운영진에게 정리를 요청해 주세요.")
+    """Use the existing private Staff area: no ticket/archive category created."""
+    category = guild.get_channel(await store.get(guild.id, "category:ops", 0))
+    if not isinstance(category, discord.CategoryChannel):
+        raise UserError("운영 카테고리가 없습니다. /ddh setup apply:True로 구성을 갱신해 주세요.")
+    if len(category.channels) >= 48:
+        raise UserError("운영 카테고리 공간이 부족합니다. 종료된 티켓을 먼저 정리해 주세요.")
+    return category
