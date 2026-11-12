@@ -118,6 +118,50 @@ def release_embed(previous, revision, member_role=None, marker=None):
     return card
 
 
+async def redact_legacy_release_links(bot, guild):
+    """Replace only old bot release embeds that exposed source information.
+
+    Previously published commit links/hashes cannot be unseen, but editing
+    their Discord messages prevents continued exposure to new visitors.
+    """
+    require_guild(guild, bot.settings)
+    if await bot.store.get(guild.id, "release:legacy_redacted", False):
+        return 0
+    channel = await channel_for(guild, bot.store, "updates")
+    count = 0
+    for message in [item async for item in channel.history(limit=500)]:
+        if message.author.id != guild.me.id:
+            continue
+        old_revisions = [
+            card.footer.text.removeprefix("DDH:release:")
+            for card in message.embeds
+            if card.footer.text.startswith("DDH:release:")
+        ]
+        if not any(SHA.fullmatch(value) for value in old_revisions):
+            continue
+
+        card = discord.Embed(
+            title="🚀 DDH · 이전 서버 업데이트",
+            description="**Dial Dev Hub 개선 사항이 적용된 기록입니다.**",
+            colour=0xF39C12,
+            timestamp=getattr(message, "created_at", None),
+        )
+        card.add_field(
+            name="✅ 적용 상태",
+            value="서버 업데이트 완료 · 상세 소스 정보 비공개",
+            inline=False,
+        )
+        card.set_footer(text="Dial Dev Hub · 이전 공식 공지")
+        await message.edit(embed=card, allowed_mentions=discord.AllowedMentions.none())
+        count += 1
+        if bot.release_sha in old_revisions and not await bot.store.get(
+            guild.id, "release:last_revision"
+        ):
+            await bot.store.set(guild.id, "release:last_revision", bot.release_sha)
+    await bot.store.set(guild.id, "release:legacy_redacted", True)
+    return count
+
+
 async def publish_release(bot, guild):
     """Post one automatic member-ping update per deployed revision."""
     require_guild(guild, bot.settings)
