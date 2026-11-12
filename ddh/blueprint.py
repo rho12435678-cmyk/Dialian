@@ -180,6 +180,49 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
     return result
 
 
+# Public read-only channels are hardened independently of the category.
+# Discord combines role overwrites: @everyone denying Send Messages is NOT
+# sufficient if another public role explicitly grants it.
+READONLY_CHANNEL_KEYS = (
+    "announcements", "updates", "rules", "guide", "support_panel", "partners",
+)
+
+
+def strict_readonly_overwrites(guild, roles, *, updates=False):
+    """Keep public notices readable but writable only by trusted staff/bot.
+
+    Explicit denials apply to all other roles, including custom public roles.
+    Replacing the channel's overwrites also removes any stale per-user write
+    grants. The server owner and members with Administrator permission remain
+    outside channel-level restrictions by Discord's design.
+    """
+    result = overwrites(guild, roles, "readonly")
+    blocked = discord.PermissionOverwrite(
+        view_channel=True, read_message_history=True,
+        send_messages=False, send_messages_in_threads=False,
+        create_public_threads=False, create_private_threads=False,
+        attach_files=False, embed_links=False, add_reactions=False,
+        create_polls=False, manage_threads=False, manage_webhooks=False,
+        mention_everyone=False,
+    )
+    # Do not exceed the Discord API limit of 100 permission overwrites.
+    # @everyone, operator, admin and bot are included in this count.
+    protected = {guild.default_role.id, roles["staff"].id, roles["admin"].id}
+    for role in guild.roles:
+        if role.id not in protected:
+            result[role] = blocked
+    if len(result) > 100:
+        raise ValueError(
+            "공지 채널 역할별 권한 덮어쓰기 100개 제한 초과: "
+            "일반 역할을 줄이거나 관리자에게 권한 정책을 점검받아야 합니다."
+        )
+    for key in ("staff", "admin"):
+        result[roles[key]] = access()
+        result[roles[key]].manage_threads = True
+    result[guild.me].mention_everyone = updates
+    return result
+
+
 def layout_summary():
     lines = ["**Dial Dev Hub 서버 구성**", "역할: " + ", ".join(v[0] for v in ROLES.values())]
     for category in CATEGORIES:
