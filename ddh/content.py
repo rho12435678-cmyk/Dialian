@@ -51,7 +51,7 @@ async def guide(guild, store):
 
 
 async def publish_panels(bot, guild):
-    from ddh.views import RulesView, SupportView
+    from ddh.views import RulesView, SupportView, UpdateAlertsView
 
     rules = embed("DDH에 오신 것을 환영합니다",
                   "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
@@ -73,6 +73,17 @@ async def publish_panels(bot, guild):
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
     await upsert_panel(await channel_for(guild, bot.store, "guide"), bot.store, "guide", await guide(guild, bot.store))
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
+    updates = embed(
+        "🔔 DDH 업데이트 알림 센터",
+        "새 기능, 개선 사항 및 운영 시스템 변경 내역을 이 채널에 안내합니다.\\n\\n"
+        "**알림 받기**를 누르면 업데이트가 실제 배포될 때 멘션 알림을 받을 수 있습니다.\\n"
+        "원치 않으면 언제든지 **알림 끄기**를 눌러 해제하세요.\\n"
+        "같은 버전의 봇 재시작으로 알림이 중복 발송되지 않습니다.",
+    )
+    await upsert_panel(
+        await channel_for(guild, bot.store, "updates"),
+        bot.store, "update-alerts", updates, view=UpdateAlertsView(bot),
+    )
     for key, title, text in (
         ("hiring", "구인 작성 양식", "프로젝트 / 모집 분야 / 업무 범위 / 예산·보상 방식 / 일정 / 지원 조건 / 연락 방법\n"
          "무급 또는 수익배분이면 명확하게 표시하세요. 협의와 계약은 당사자 DM에서 진행합니다."),
