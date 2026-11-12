@@ -122,11 +122,13 @@ CHANNELS = (
 
 # Resources removed from the public layout are archived instead of deleted.
 OBSOLETE_CHANNEL_KEYS = (
-    "english", "showcase", "meetings", "offtopic", "looking",
+    "hiring", "commissions", "english", "showcase", "meetings", "offtopic", "looking",
     "meeting_voice", "staff_voice",
     *(f"portfolio:{key}" for key in FIELDS),
 )
 OBSOLETE_CHANNEL_NAMES = {
+    "hiring": ("구인", "구인-기존글", "구인-hiring-기존글"),
+    "commissions": ("제작의뢰", "제작의뢰-기존글", "의뢰-commissions-기존글"),
     "english": ("english-chat",),
     "showcase": ("작품공유·피드백",),
     "meetings": ("모임일정", "meeting-plans"),
