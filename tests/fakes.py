@@ -1,4 +1,5 @@
 """In-memory Discord REST boundary using real discord.py model/permission code."""
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -170,6 +171,11 @@ class Guild:
     def member(self, member_id, roles=(), admin=False):
         member = Mock(spec=discord.Member)
         member.id = member_id
+        member.name = f"member-{member_id}"
+        member.bot = False
+        member.pending = False
+        member.created_at = datetime.now(timezone.utc) - timedelta(days=90)
+        member.joined_at = datetime.now(timezone.utc)
         member.guild = self
         member.roles = [self.default_role, *roles]
         member._roles = SnowflakeList(r.id for r in roles)
@@ -189,6 +195,9 @@ class Guild:
         member.remove_roles = AsyncMock(side_effect=remove)
         self.members[member_id] = member
         return member
+
+    def get_member(self, member_id):
+        return self.members.get(member_id)
 
     def get_role(self, role_id):
         return next((r for r in self.roles if r.id == role_id), None)

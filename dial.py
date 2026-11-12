@@ -2,6 +2,9 @@
 import argparse
 import logging
 import os
+from dataclasses import replace
+
+import discord
 
 from config import Settings
 from ddh.bot import Dialian
@@ -21,7 +24,15 @@ def main():
     if args.check_config:
         print(f"DDH configuration OK · guild {settings.guild_id} · database {settings.database}")
         return
-    Dialian(settings).run(settings.token, log_handler=None)
+    try:
+        Dialian(settings).run(settings.token, log_handler=None)
+    except discord.PrivilegedIntentsRequired:
+        if not settings.member_events:
+            raise
+        logging.getLogger(__name__).warning(
+            "Enable Server Members Intent in the Discord Developer Portal and restart to receive joins/leaves."
+        )
+        Dialian(replace(settings, member_events=False)).run(settings.token, log_handler=None)
 
 
 if __name__ == "__main__":
