@@ -40,6 +40,19 @@ def _copy_overwrite(overwrite):
     return discord.PermissionOverwrite.from_pair(*overwrite.pair())
 
 
+def _set_view(overwrites, target, visible):
+    """Reuse the saved Discord overwrite key by snowflake ID.
+
+    An uncached Discord member overwrite can be represented by discord.Object
+    rather than a cached Member; adding another key with the same ID would
+    cause needless rewrites and risk duplicate API overwrites.
+    """
+    key = next((item for item in overwrites if item.id == target.id), target)
+    rule = overwrites.get(key, discord.PermissionOverwrite())
+    rule.view_channel = visible
+    overwrites[key] = rule
+
+
 async def _allowed_member_overwrite(guild, user, member_role, operator, administrator):
     """Keep verified users and owners' moderator-specific private access."""
     if user.id in (guild.owner_id, guild.me.id):
@@ -100,16 +113,12 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
         }
         public_welcome = channel.id in permitted_ids
 
-        default = overwrites.get(guild.default_role, discord.PermissionOverwrite())
-        default.view_channel = bool(public_welcome)
-        overwrites[guild.default_role] = default
+        _set_view(overwrites, guild.default_role, bool(public_welcome))
 
         # Previously public channels stay accessible to verified members.
         # Previously private/ticket channels are NOT made public to members.
         if not public_welcome and visible_to_everyone:
-            member_perms = overwrites.get(member, discord.PermissionOverwrite())
-            member_perms.view_channel = True
-            overwrites[member] = member_perms
+            _set_view(overwrites, member, True)
 
         # Non-member roles cannot override @everyone's deny. Verified users
         # still see public channels because their Member role grants access.
@@ -117,9 +126,7 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
             for role in guild.roles:
                 if role.id in protected_roles:
                     continue
-                rule = overwrites.get(role, discord.PermissionOverwrite())
-                rule.view_channel = False
-                overwrites[role] = rule
+                _set_view(overwrites, role, False)
 
             # Direct per-user grants can also bypass an @everyone deny.
             for target, override in list(overwrites.items()):
@@ -128,19 +135,14 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
                 if override.view_channel is True and not await _allowed_member_overwrite(
                     guild, target, member, operator, administrator,
                 ):
-                    override.view_channel = False
-                    overwrites[target] = override
+                    _set_view(overwrites, target, False)
 
         # Don't break existing bot or moderator private access.
         if original_bot_visible:
-            bot_rule = overwrites.get(guild.me, discord.PermissionOverwrite())
-            bot_rule.view_channel = True
-            overwrites[guild.me] = bot_rule
+            _set_view(overwrites, guild.me, True)
         for role in (operator, administrator):
             if original_staff[role.id]:
-                role_rule = overwrites.get(role, discord.PermissionOverwrite())
-                role_rule.view_channel = True
-                overwrites[role] = role_rule
+                _set_view(overwrites, role, True)
 
         if len(overwrites) > 100:
             raise UserError(
