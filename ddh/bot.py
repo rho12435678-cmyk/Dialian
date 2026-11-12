@@ -9,7 +9,7 @@ from discord.ext import tasks
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
-from ddh.content import publish_panels
+from ddh.content import publish_panels, retire_update_alerts_panel
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
@@ -19,7 +19,7 @@ from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
 from ddh.updates import deployed_revision, publish_release
 from ddh.verification import verify_member
-from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, reply, report_error
+from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 
 log = logging.getLogger(__name__)
 
@@ -144,15 +144,6 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, f"자동 공지 {'켜짐' if enabled else '꺼짐'} · "
                     f"한국 시간 {self.bot.settings.notice_hour}시 / {self.bot.settings.notice_interval_days}일 간격")
 
-    @app_commands.command(name="release", description="소유자가 현재 배포 버전의 업데이트 공지를 게시")
-    @app_commands.guild_only()
-    @app_commands.default_permissions(manage_guild=True)
-    async def release(self, interaction: discord.Interaction):
-        self.owner(interaction)
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        published = await publish_release(self.bot, interaction.guild)
-        await reply(interaction, "업데이트 공지를 게시했습니다." if published else "게시할 새 업데이트가 없습니다.")
-
     @app_commands.command(name="status", description="Dialian 연결·구성 상태 확인")
     @app_commands.guild_only()
     async def status(self, interaction: discord.Interaction):
@@ -192,7 +183,7 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), UpdateAlertsView(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
@@ -231,6 +222,15 @@ class Dialian(discord.Client):
             log.error("Configured DDH guild is unavailable; check DDH_GUILD_ID and bot invitation")
             return
         log.info("Dialian connected to DDH guild %s", guild.id)
+        if await self.store.get(guild.id, "setup_complete", False):
+            for name, action in (
+                ("outdated update signup removal", retire_update_alerts_panel),
+                ("automatic deployment announcement", publish_release),
+            ):
+                try:
+                    await action(self, guild)
+                except Exception:
+                    log.exception("DDH %s failed at startup; maintenance will retry", name)
 
     async def on_member_join(self, member):
         await self.operations.membership(member.guild, member, joined=True)
@@ -265,8 +265,12 @@ class Dialian(discord.Client):
     async def maintenance_once(self):
         guild = self.get_guild(self.settings.guild_id)
         if guild and await self.store.get(guild.id, "setup_complete", False):
-            for name, action in (("ticket recovery", self.tickets.recover),
-                                 ("scheduled notice", lambda g: publish_due(self, g))):
+            for name, action in (
+                ("ticket recovery", self.tickets.recover),
+                ("scheduled notice", lambda g: publish_due(self, g)),
+                ("remove old update signup", lambda g: retire_update_alerts_panel(self, g)),
+                ("automatic release", lambda g: publish_release(self, g)),
+            ):
                 try:
                     await action(guild)
                 except Exception:

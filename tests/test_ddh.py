@@ -7,7 +7,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import discord
 
@@ -16,7 +16,7 @@ from ddh.backups import backup
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
-from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
+from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, retire_update_alerts_panel
 from ddh.operations import inspect_layout
 from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
@@ -26,7 +26,7 @@ from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
 from ddh.updates import publish_release, release_embed
-from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView
+from ddh.views import RulesView, SupportView, TicketActions
 from fakes import Guild, Text
 
 
@@ -81,7 +81,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.on_ready()
         setup.assert_not_awaited()
         security.assert_not_awaited()
-        release.assert_not_awaited()
+        release.assert_awaited_once_with(self.bot, self.guild)
         self.assertFalse((await self.channel("guide")).messages)
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
@@ -89,7 +89,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "security", "panels", "verify", "notices", "release", "cleanup"):
+        for command in ("setup", "layout", "security", "panels", "verify", "notices", "cleanup"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
@@ -440,7 +440,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.bot.store.get(guild.id, 'channel:guide'), old_channel.id)
         self.assertEqual(old_channel.name, '이용안내')
     async def test_panels_are_persistent_and_repair_without_duplicates(self):
-        for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView):
+        for view_type in (RulesView, SupportView, TicketActions):
             self.assertTrue(view_type(self.bot).is_persistent())
         await publish_panels(self.bot, self.guild)
         counts = [len(c.messages) for c in self.guild.channels if isinstance(c, Text)]
@@ -477,15 +477,19 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_release_announces_once_per_deployed_revision(self):
         self.bot.release_sha = "1" * 40
-        self.assertFalse(await publish_release(self.bot, self.guild))
+        self.assertTrue(await publish_release(self.bot, self.guild))
         channel = await self.channel("updates")
-        self.assertEqual(len(channel.messages), 0)
+        self.assertEqual(len(channel.messages), 1)
+        self.assertFalse(await publish_release(self.bot, self.guild))
         self.bot.release_sha = "2" * 40
         self.assertTrue(await publish_release(self.bot, self.guild))
         self.assertFalse(await publish_release(self.bot, self.guild))
-        self.assertEqual(len(channel.messages), 1)
-        self.assertEqual(channel.messages[0].content, self.roles["update_alerts"].mention)
-        self.assertIn("DDH:release:", channel.messages[0].embeds[0].footer.text)
+        self.assertEqual(len(channel.messages), 2)
+        self.assertEqual(channel.messages[0].content, self.roles["member"].mention)
+        self.assertTrue(channel.messages[1].embeds[0].description.startswith(
+            f"🔔 **업데이트 안내 · {self.roles['member'].mention}**"
+        ))
+        self.assertIn("DDH:release:", channel.messages[1].embeds[0].footer.text)
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
         self.bot.release_sha = "3" * 40
@@ -500,20 +504,45 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await publish_release(self.bot, self.guild)
         self.assertFalse(await publish_release(self.bot, self.guild))
-        self.assertEqual(len((await self.channel("updates")).messages), 1)
+        self.assertEqual(len((await self.channel("updates")).messages), 2)
 
-    async def test_update_opt_in_and_out_does_not_grant_privileges(self):
-        view = UpdateAlertsView(self.bot)
-        self.assertTrue(view.is_persistent())
-        interaction = AsyncMock()
-        interaction.response.is_done = Mock(return_value=True)
-        interaction.guild = self.guild
-        interaction.user = self.member
-        await view.subscribe.callback(interaction)
-        self.assertIn(self.roles["update_alerts"], self.member.roles)
-        self.assertFalse(self.roles["update_alerts"].permissions.value)
-        await view.unsubscribe.callback(interaction)
-        self.assertNotIn(self.roles["update_alerts"], self.member.roles)
+    async def test_retires_old_signup_panel_preserving_actual_release_posts(self):
+        channel = await self.channel("updates")
+        card = discord.Embed(title="기존 업데이트 알림 신청")
+        card.set_footer(text="DDH:update-alerts:v1")
+        panel = await channel.send(embed=card)
+        await self.bot.store.set(self.guild.id, "message:update-alerts", panel.id)
+        self.bot.release_sha = "a" * 40
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        unrelated = await channel.send(embed=discord.Embed(title="일반 공지"))
+        self.assertTrue(await retire_update_alerts_panel(self.bot, self.guild))
+        self.assertNotIn(panel, channel.messages)
+        self.assertIn(unrelated, channel.messages)
+        self.assertEqual(len(channel.messages), 2)
+        self.assertFalse(await retire_update_alerts_panel(self.bot, self.guild))
+        self.assertTrue(await self.bot.store.get(self.guild.id, "updates:panel_retired"))
+
+    async def test_bot_startup_posts_release_without_slash_command(self):
+        self.bot.release_sha = "b" * 40
+        with patch.object(self.bot, "get_guild", return_value=self.guild):
+            await self.bot.on_ready()
+            await self.bot.on_ready()
+        channel = await self.channel("updates")
+        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(channel.messages[0].content, self.roles["member"].mention)
+
+    async def test_update_role_ping_permission_fixed_without_changing_member_perms(self):
+        channel = await self.channel("updates")
+        denied = channel.overwrites_for(self.guild.me)
+        denied.mention_everyone = False
+        await channel.set_permissions(self.guild.me, overwrite=denied)
+        self.bot.release_sha = "c" * 40
+        # The fake bot role has Administrator; override the effective check to
+        # exercise the real Discord bot role's permission-repair branch.
+        with patch.object(channel, "permissions_for", return_value=discord.Permissions.none()):
+            self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertTrue(channel.overwrites_for(self.guild.me).mention_everyone)
+        self.assertFalse(channel.permissions_for(self.member).mention_everyone)
 
     async def test_layout_applies_only_requested_changes_and_never_reapplies(self):
         guide_channel = await self.channel("guide")
@@ -655,7 +684,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "release"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

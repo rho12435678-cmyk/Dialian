@@ -36,6 +36,42 @@ async def upsert_panel(channel, store, key, card, *, view=None):
     return message
 
 
+async def retire_update_alerts_panel(bot, guild):
+    """Remove only Dialian's old opt-in/out panel; preserve actual releases.
+
+    Both the saved message ID and the footer marker are checked. A durable
+    flag makes repeated maintenance checks no-ops after successful cleanup.
+    """
+    if await bot.store.get(guild.id, "updates:panel_retired", False):
+        return False
+    channel = await channel_for(guild, bot.store, "updates")
+    marker = "DDH:update-alerts:v1"
+    saved = await bot.store.get(guild.id, "message:update-alerts")
+    messages = {}
+
+    if saved:
+        try:
+            item = await channel.fetch_message(saved)
+            if item.author.id == guild.me.id and any(
+                embed.footer.text == marker for embed in item.embeds
+            ):
+                messages[item.id] = item
+        except discord.NotFound:
+            pass
+
+    async for item in channel.history(limit=200):
+        if item.author.id == guild.me.id and any(
+            embed.footer.text == marker for embed in item.embeds
+        ):
+            messages[item.id] = item
+
+    for item in messages.values():
+        await item.delete()
+    await bot.store.set(guild.id, "message:update-alerts", None)
+    await bot.store.set(guild.id, "updates:panel_retired", True)
+    return bool(messages)
+
+
 GUIDE_VERSION = "2026-11-owner-layout-guide-v2"
 
 
@@ -121,7 +157,7 @@ async def publish_guide(bot, guild):
 
 
 async def publish_panels(bot, guild):
-    from ddh.views import RulesView, SupportView, UpdateAlertsView
+    from ddh.views import RulesView, SupportView
 
     rules = embed("DDH에 오신 것을 환영합니다",
                   "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
@@ -143,17 +179,8 @@ async def publish_panels(bot, guild):
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
     await publish_guide(bot, guild)
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
-    updates = embed(
-        "🔔 DDH 업데이트 알림 센터",
-        "새 기능, 개선 사항 및 운영 시스템 변경 내역을 이 채널에 안내합니다.\\n\\n"
-        "**알림 받기**를 누르면 소유자가 업데이트 공지를 게시할 때 멘션 알림을 받을 수 있습니다.\\n"
-        "원치 않으면 언제든지 **알림 끄기**를 눌러 해제하세요.\\n"
-        "같은 버전의 봇 재시작으로 알림이 중복 발송되지 않습니다.",
-    )
-    await upsert_panel(
-        await channel_for(guild, bot.store, "updates"),
-        bot.store, "update-alerts", updates, view=UpdateAlertsView(bot),
-    )
+    # The old alert opt-in panel is retired. Release posts are automatic.
+    await retire_update_alerts_panel(bot, guild)
     # Hiring, looking-for-work, commissions, and portfolio channels are Forums.
     # Their channel descriptions act as posting guidelines. Forum channels do
     # not support sending a standalone text message as an onboarding panel.

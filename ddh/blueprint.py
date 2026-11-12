@@ -28,7 +28,6 @@ ROLES = {
     "developer": ("개발자・Developer", 0x3498DB),
     "partner": ("파트너・Partner", 0x9B59B6),
     "member": ("멤버・Member", 0x95A5A6),
-    "update_alerts": ("알림・Updates", 0x2ECC71),
     **{f"field:{key}": (FIELD_ROLE_NAMES[key], 0xF1C40F) for key in FIELDS},
 }
 
@@ -39,7 +38,6 @@ ROLE_ALIASES = {
     "developer": ("개발자",),
     "partner": ("파트너",),
     "member": ("멤버",),
-    "update_alerts": ("업데이트 알림",),
     **{f"field:{key}": (name,) for key, name in FIELDS.items()},
 }
 
@@ -82,7 +80,7 @@ CHANNELS = (
             aliases=("공지사항", "announcements"), news=True),
     Channel("updates", "업데이트-updates", "info", "readonly",
             aliases=("업데이트-공지", "업데이트 공지", "update-announcements", "updates"),
-            topic="DDH 공식 업데이트와 알림 신청", news=True),
+            topic="DDH 새 버전 배포 시 자동 공지 · 멤버 역할 멘션", news=True),
     Channel("rules", "규칙-rules", "info", "readonly",
             aliases=("시작·규칙", "welcome-and-rules")),
     Channel("guide", "가이드-guide", "info", "readonly",
