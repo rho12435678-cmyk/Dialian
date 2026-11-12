@@ -207,6 +207,7 @@ def strict_readonly_overwrites(guild, roles, *, updates=False):
     )
     # Do not exceed the Discord API limit of 100 permission overwrites.
     # @everyone, operator, admin and bot are included in this count.
+    result[guild.default_role] = blocked
     protected = {guild.default_role.id, roles["staff"].id, roles["admin"].id}
     for role in guild.roles:
         if role.id not in protected:
