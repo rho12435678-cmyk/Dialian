@@ -49,6 +49,22 @@ class GuardedView(discord.ui.View):
 
 
 class RulesView(GuardedView):
+    async def on_error(self, interaction, error, item):
+        # The earlier generic "interaction failed" message was not enough
+        # to identify live account/role errors. Keep only a safe owner-only
+        # diagnostic in SQLite, never member identifiers or Discord tokens.
+        if interaction.guild is not None:
+            problem = str(error) if isinstance(error, UserError) else (
+                f"인증 버튼 내부 오류: {type(error).__name__} · 봇 로그 확인"
+            )
+            try:
+                await self.bot.store.set(
+                    interaction.guild.id, "verification:last_error", problem[:240],
+                )
+            except Exception:
+                log.exception("Could not persist DDH verification diagnosis")
+        await report_error(interaction, error, item)
+
     @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
     async def accept(self, interaction, button):
         await interaction.response.defer(ephemeral=True)
@@ -57,6 +73,7 @@ class RulesView(GuardedView):
         # differ from the stored rules text channel; that must not block joining.
         # The server/role/account checks inside verify_member still apply.
         granted = await verify_member(self.bot, interaction.guild, interaction.user.id)
+        await self.bot.store.set(interaction.guild.id, "verification:last_error", None)
         await reply(interaction, "멤버 인증 완료. 채팅·포럼·음성 채널을 이용할 수 있습니다." if granted
                     else "이미 인증된 멤버입니다.")
 
