@@ -18,6 +18,7 @@ from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, repair_missing_panels, retire_update_alerts_panel
 from ddh.operations import inspect_layout
+from ddh.permissions import operator_migration
 from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
@@ -63,6 +64,27 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.bot.store.get(self.guild.id, "role:staff"), operator.id)
         self.assertEqual(len([role for role in self.guild.roles if role.name == "운영자"]), 1)
         self.assertIn("이전 운영진", " ".join(await inspect_layout(self.guild, self.bot.store)))
+
+    async def test_owner_only_operator_permission_migration_is_conservative(self):
+        old = self.guild.make_role("운영진・Staff")
+        channel = await self.channel("audit")
+        previous = dict(channel.overwrites)
+        previous[old] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        custom = self.guild.make_role("무관한 맞춤역할")
+        previous[custom] = discord.PermissionOverwrite(view_channel=False)
+        await channel.edit(overwrites=previous)
+        preview = await operator_migration(self.guild, self.bot.store, apply=False)
+        self.assertIn("운영진・Staff", preview)
+        self.assertIn(old, channel.overwrites)
+        result = await operator_migration(self.guild, self.bot.store, apply=True)
+        self.assertIn("변경 완료", result)
+        self.assertNotIn(old, channel.overwrites)
+        self.assertIn(self.roles["staff"], channel.overwrites)
+        self.assertIn(custom, channel.overwrites)
+        self.assertEqual(await self.bot.store.get(self.guild.id, "role:staff"), self.roles["staff"].id)
+        self.assertIn(old, self.guild.roles)  # deletion is owner-controlled
+        again = await operator_migration(self.guild, self.bot.store, apply=False)
+        self.assertIn("0개", again)
 
     async def test_no_second_operator_is_created_when_owner_role_missing(self):
         guild = Guild(self.guild.id + 914)
@@ -149,7 +171,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "security", "panels", "verify", "notices", "cleanup"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
