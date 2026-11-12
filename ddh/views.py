@@ -168,3 +168,30 @@ class TicketActions(GuardedView):
     @discord.ui.button(label="티켓 종료", style=discord.ButtonStyle.danger, custom_id="ddh:close:v1")
     async def close_ticket(self, interaction, button):
         await self.launch(interaction, "close")
+
+
+class UpdateAlertsView(GuardedView):
+    """Persistent opt-in/out controls for release notifications."""
+
+    async def checked_role(self, interaction):
+        roles = await roles_for(interaction.guild, self.bot.store)
+        role = roles["update_alerts"]
+        if role.managed or role >= interaction.guild.me.top_role or role.permissions.value:
+            raise UserError("업데이트 알림 역할의 권한/순서를 점검해 주세요.")
+        return role
+
+    @discord.ui.button(label="🔔 업데이트 알림 받기", style=discord.ButtonStyle.success,
+                       custom_id="ddh:update-alerts:join:v1")
+    async def subscribe(self, interaction, button):
+        role = await self.checked_role(interaction)
+        if role not in interaction.user.roles:
+            await interaction.user.add_roles(role, reason="DDH 업데이트 알림 신청")
+        await reply(interaction, "업데이트 알림을 신청했어요. 새 버전 배포 시 알림 역할로 안내합니다.")
+
+    @discord.ui.button(label="🔕 업데이트 알림 끄기", style=discord.ButtonStyle.secondary,
+                       custom_id="ddh:update-alerts:leave:v1")
+    async def unsubscribe(self, interaction, button):
+        role = await self.checked_role(interaction)
+        if role in interaction.user.roles:
+            await interaction.user.remove_roles(role, reason="DDH 업데이트 알림 해제")
+        await reply(interaction, "업데이트 알림을 해제했습니다.")

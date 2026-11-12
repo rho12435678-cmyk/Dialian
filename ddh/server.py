@@ -4,7 +4,7 @@ import discord
 from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, everyone_permissions, overwrites, role_permissions
 
 REQUIRED_PERMISSIONS = (
-    "manage_roles", "manage_channels", "view_channel", "send_messages", "read_message_history",
+    "manage_roles", "manage_channels", "manage_guild", "view_channel", "send_messages", "read_message_history",
     "embed_links", "attach_files", "manage_messages", "moderate_members",
     "mute_members", "deafen_members", "move_members", "connect", "speak",
 )
@@ -120,8 +120,13 @@ async def provision(guild, store, settings):
     for index, spec in enumerate(CHANNELS):
         params = dict(name=spec.name, category=categories[spec.category], position=index,
                       overwrites=overwrites(guild, roles, spec.policy, voice=spec.voice), reason="DDH 채널 구성")
+        if spec.key == "updates":
+            # Only Dialian can ping the announcement role; ordinary members cannot.
+            params["overwrites"][guild.me].mention_everyone = True
         if not spec.voice:
-            params.update(topic=spec.topic or "Dial Dev Hub · Roblox 개발자 커뮤니티", slowmode_delay=5)
+            # Discord slowmode is a baseline flood limiter, not a substitute for AutoMod.
+            delay = 30 if (spec.category in ("jobs", "portfolios")) else (0 if spec.policy == "readonly" else 10)
+            params.update(topic=spec.topic or "Dial Dev Hub · Roblox 개발자 커뮤니티", slowmode_delay=delay)
         channel = found[f"channel:{spec.key}"]
         if channel:
             channel = await channel.edit(**params)

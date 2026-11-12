@@ -11,6 +11,7 @@ KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "develop
 ROLES = {
     "staff": ("DDH 운영진", 0xE67E22), "developer": ("개발자", 0x3498DB),
     "partner": ("파트너", 0x9B59B6), "member": ("멤버", 0x95A5A6),
+    "update_alerts": ("업데이트 알림", 0x2ECC71),
     **{f"field:{key}": (label, 0xF1C40F) for key, label in FIELDS.items()},
 }
 
@@ -47,6 +48,9 @@ class Channel:
 CHANNELS = (
     Channel("rules", "시작·규칙", "info", "readonly", aliases=("welcome-and-rules",)),
     Channel("announcements", "공지사항", "info", "readonly", aliases=("announcements",)),
+    Channel("updates", "업데이트-공지", "info", "readonly",
+            aliases=("업데이트 공지", "update-announcements", "updates"),
+            topic="DDH 공식 업데이트 · 공지 알림 신청 버튼으로 새 버전 소식을 받아보세요."),
     Channel("guide", "이용안내", "info", "readonly"),
     Channel("resources", "개발자료", "community", aliases=("resources",)),
     Channel("general", "자유채팅", "community", aliases=("general",)),

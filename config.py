@@ -14,6 +14,8 @@ class Settings:
     notice_hour: int = 18
     notice_interval_days: int = 2
     notices_enabled: bool = True
+    auto_setup: bool = False
+    update_ping_mode: str = 'role'
 
     @classmethod
     def from_env(cls):
@@ -28,5 +30,10 @@ class Settings:
         interval = int(os.getenv("DDH_NOTICE_INTERVAL_DAYS", "2"))
         if not 0 <= hour <= 23 or not 1 <= interval <= 30:
             raise ValueError("공지 시각은 0~23시, 주기는 1~30일이어야 합니다.")
+        update_ping_mode = os.getenv("DDH_UPDATE_PING_MODE", "role").lower()
+        if update_ping_mode not in ("role", "everyone", "none"):
+            raise ValueError("DDH_UPDATE_PING_MODE는 role/everyone/none만 허용합니다.")
         return cls(token, int(raw_id), Path(os.getenv("DDH_DATABASE", "data/ddh.db")),
-                   hour, interval, os.getenv("DDH_NOTICES_ENABLED", "true").lower() == "true")
+                   hour, interval, os.getenv("DDH_NOTICES_ENABLED", "true").lower() == "true",
+                   os.getenv("DDH_AUTO_SETUP", "false").lower() == "true",
+                   update_ping_mode)

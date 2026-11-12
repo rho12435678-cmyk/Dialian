@@ -142,6 +142,12 @@ class Guild:
                     member.roles.append(role)
                     member._roles.add(role.id)
         member.add_roles = AsyncMock(side_effect=add)
+        async def remove(*removed_roles, **kwargs):
+            for role in removed_roles:
+                if role in member.roles:
+                    member.roles.remove(role)
+                    member._roles.remove(role.id)
+        member.remove_roles = AsyncMock(side_effect=remove)
         self.members[member_id] = member
         return member
 

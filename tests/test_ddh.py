@@ -17,9 +17,11 @@ from ddh.bot import DDHCommands, Dialian
 from ddh.content import publish_panels
 from ddh.notices import due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
+from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
-from ddh.views import RulesView, SupportView, TicketActions
+from ddh.updates import publish_release, release_embed
+from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView
 from fakes import Guild, Text
 
 
@@ -250,7 +252,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.visitor.add_roles.assert_not_called()
 
     async def test_panels_are_persistent_and_repair_without_duplicates(self):
-        for view_type in (RulesView, SupportView, TicketActions):
+        for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView):
             self.assertTrue(view_type(self.bot).is_persistent())
         await publish_panels(self.bot, self.guild)
         counts = [len(c.messages) for c in self.guild.channels if isinstance(c, Text)]
@@ -283,6 +285,45 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await publish_due(self.bot, self.guild, now))
         self.assertEqual(len((await self.channel("announcements")).messages), 1)
 
+    async def test_update_release_announces_once_per_deployed_revision(self):
+        self.bot.release_sha = "1" * 40
+        self.assertFalse(await publish_release(self.bot, self.guild))
+        channel = await self.channel("updates")
+        self.assertEqual(len(channel.messages), 0)
+        self.bot.release_sha = "2" * 40
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertFalse(await publish_release(self.bot, self.guild))
+        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(channel.messages[0].content, self.roles["update_alerts"].mention)
+        self.assertIn("DDH:release:", channel.messages[0].embeds[0].footer.text)
+
+    async def test_release_recovers_without_duplicate_when_db_save_fails(self):
+        self.bot.release_sha = "3" * 40
+        await publish_release(self.bot, self.guild)
+        self.bot.release_sha = "4" * 40
+        real_set = self.bot.store.set
+        async def fail_record(guild_id, key, value):
+            if key == "release:last_revision":
+                raise RuntimeError("after-send write failed")
+            return await real_set(guild_id, key, value)
+        with patch.object(self.bot.store, "set", side_effect=fail_record):
+            with self.assertRaises(RuntimeError):
+                await publish_release(self.bot, self.guild)
+        self.assertFalse(await publish_release(self.bot, self.guild))
+        self.assertEqual(len((await self.channel("updates")).messages), 1)
+
+    async def test_update_opt_in_and_out_does_not_grant_privileges(self):
+        view = UpdateAlertsView(self.bot)
+        self.assertTrue(view.is_persistent())
+        interaction = AsyncMock()
+        interaction.guild = self.guild
+        interaction.user = self.member
+        await view.subscribe.callback(interaction)
+        self.assertIn(self.roles["update_alerts"], self.member.roles)
+        self.assertFalse(self.roles["update_alerts"].permissions.value)
+        await view.unsubscribe.callback(interaction)
+        self.assertNotIn(self.roles["update_alerts"], self.member.roles)
+
     async def test_backup_can_restore_records(self):
         await self.bot.store.reserve(self.guild.id, 77, "feedback", {"제목": "sample", "내용": "record"})
         path = await backup(self.settings.database)
@@ -293,11 +334,28 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 
 class PureTests(unittest.TestCase):
+    def test_release_embed_never_mentions_everyone_in_git_subject(self):
+        with patch("ddh.updates._git", return_value="@everyone : critical fix"):
+            card = release_embed("1" * 40, "2" * 40)
+        self.assertNotIn("@everyone", card.fields[0].value)
+        self.assertEqual(card.footer.text, f"DDH:release:{'2' * 40}")
+
+    def test_security_rules_are_scoped_and_non_destructive(self):
+        rules = specifications()
+        self.assertEqual(len(rules), 3)
+        self.assertTrue(all(name.startswith("DDH |") for name, _, _ in rules))
+        invite_rule = rules[0][1]
+        self.assertEqual(invite_rule.type, discord.AutoModRuleTriggerType.keyword)
+        self.assertIn("discord.gg/", invite_rule.keyword_filter)
+        self.assertNotIn("github.com/", invite_rule.keyword_filter)
+        self.assertEqual(rules[1][1].type, discord.AutoModRuleTriggerType.spam)
+        self.assertEqual(rules[2][1].mention_limit, 5)
+
     def test_kst_schedule_handles_day_boundaries_and_interval(self):
         self.assertIsNone(due_date(datetime(2026, 11, 12, 8, 59, tzinfo=timezone.utc), date(2026, 11, 12), 18, 2))
         self.assertEqual(due_date(datetime(2026, 11, 12, 9, tzinfo=timezone.utc), date(2026, 11, 12), 18, 2), date(2026, 11, 12))
