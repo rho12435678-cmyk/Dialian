@@ -81,7 +81,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.on_ready()
         setup.assert_not_awaited()
         security.assert_not_awaited()
-        release.assert_not_awaited()
+        release.assert_awaited_once_with(self.bot, self.guild)
         self.assertFalse((await self.channel("guide")).messages)
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
@@ -89,7 +89,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "security", "panels", "verify", "notices", "release", "cleanup"):
+        for command in ("setup", "layout", "security", "panels", "verify", "notices", "cleanup"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
