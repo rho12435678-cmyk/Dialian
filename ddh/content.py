@@ -141,7 +141,7 @@ async def guide(guild, store):
             "작업 범위, 보상, 일정, 수정·환불 조건을 미리 명확히 하고, "
             "비밀번호·인증코드·토큰 같은 개인정보는 공유하지 마세요.\n"
             "도배, 작품 도용, 괴롭힘, 무단 서버 홍보는 허용되지 않습니다. "
-            "문제가 생기면 **서버 피드백** 티켓으로 알려주세요."
+            "문제 발생 시 **문의-support**에서 거래·도용 신고 버튼을 이용해 비공개로 알려주세요."
         ),
         inline=False,
     )
@@ -156,6 +156,35 @@ async def publish_guide(bot, guild):
     return message
 
 
+async def repair_missing_panels(bot, guild):
+    """Self-heal missing public guides/forms, without changing server layout.
+
+    Stable message IDs are checked first; the complete set is only refreshed if
+    a panel was deleted. No role/channels are created and no users are pinged.
+    """
+    if not await bot.store.get(guild.id, "setup_complete", False):
+        return False
+    for key, channel_key in (
+        ("rules", "rules"),
+        ("guide", "guide"),
+        ("support", "support_panel"),
+    ):
+        channel = await channel_for(guild, bot.store, channel_key)
+        saved = await bot.store.get(guild.id, f"message:{key}")
+        if saved:
+            try:
+                message = await channel.fetch_message(saved)
+                if (message.author.id == guild.me.id
+                        and any(e.footer.text == f"DDH:{key}:v1" for e in message.embeds)):
+                    continue
+            except discord.NotFound:
+                pass
+        async with bot.mutation_lock:
+            await publish_panels(bot, guild)
+        return True
+    return False
+
+
 async def publish_panels(bot, guild):
     from ddh.views import RulesView, SupportView
 
@@ -166,11 +195,12 @@ async def publish_panels(bot, guild):
                   "**4. 개인정보 보호하기** — 비밀번호·인증코드·쿠키·토큰·계좌 정보는 공개 채널에 올리지 마세요.\n"
                   "**5. 거래는 당사자끼리 협의하기** — DDH는 외주 제작팀이나 결제 중개 서비스가 아닙니다. "
                   "개발자 역할은 거래 이행이나 실력을 보증하지 않습니다.\n"
-                  "**6. 문제가 생기면 문의하기** — 사기·도용·규칙 위반은 서버 피드백 티켓으로 알려 주세요.\n\n"
+                  "**6. 문제가 생기면 신고하기** — 사기·도용·규칙 위반은 거래·도용 신고 버튼으로 비공개로 알려 주세요.\n\n"
                   "규칙에 동의하고 아래 버튼을 누르면 Discord 계정 조건을 확인해 멤버 역할을 지급합니다.")
     support = embed("DDH 문의·신청",
                     "**파트너 문의**: 서버 소개와 제휴 제안\n"
-                    "**서버 피드백**: 개선 제안·오류·규칙 위반 제보\n"
+                    "**서버 피드백**: 서버 개선 제안·오류 제보\n"
+                    "**거래·도용 신고**: 의뢰 분쟁, 사칭, 작품 도용 등 문제를 비공개 접수\n"
                     "**개발자 신청**: 분야를 선택하고 본인 포트폴리오 제출\n\n"
                     f"지원 분야: {' / '.join(FIELDS.values())}\n"
                     "신청 내용은 신청자와 운영진만 보는 티켓에 저장됩니다. "

@@ -1,11 +1,13 @@
 """Durable operational events and read-only policy checks for DDH."""
 import asyncio
 import logging
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import discord
 
+from ddh.backups import latest_backup, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, overwrites, role_permissions
 from ddh.security import specifications
 from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
@@ -53,8 +55,24 @@ async def inspect_layout(guild, store):
     for key, role in roles.items():
         if role is None:
             findings.append(f"역할 누락 · {ROLES[key][0]}")
+        elif key == "staff":
+            # The owner-created operator role is intentionally not overwritten.
+            # Still warn if it has powers that could bypass controlled workflows.
+            if role.permissions.administrator or role.permissions.manage_roles:
+                findings.append("운영자 역할 과도한 권한 확인 · Administrator/역할 관리")
+            if not role.permissions.manage_messages:
+                findings.append("운영자 역할 메시지 관리 권한 확인")
         elif role.permissions != role_permissions(key):
             findings.append(f"역할 권한 불일치 · {ROLES[key][0]}")
+    orphaned = [
+        role for role in guild.roles
+        if role.name in ("운영진・Staff", "DDH 운영진")
+        and role.id != getattr(roles["staff"], "id", None)
+    ]
+    if orphaned:
+        findings.append(
+            "사용 중단된 이전 운영진 역할 확인 · 멤버·비공개 채널 권한을 확인한 뒤 수동 삭제"
+        )
     if guild.me is None:
         return findings + ["봇 서버 멤버 정보 확인 불가"]
     for permission in REQUIRED_PERMISSIONS:
@@ -226,7 +244,24 @@ class Operations:
             await self.store.set(guild.id, "audit:cursor", latest)
 
     async def findings(self, guild):
-        return await inspect_layout(guild, self.store) + await inspect_automod(guild, self.store)
+        warnings = await inspect_layout(guild, self.store) + await inspect_automod(guild, self.store)
+        warnings += await asyncio.to_thread(self.backup_warnings)
+        return warnings
+
+    def backup_warnings(self):
+        source = self.bot.settings.database
+        latest = latest_backup(source)
+        if latest is None:
+            return ["DB 백업 없음 · 봇이 백업을 만들었는지 점검하세요"]
+        now = datetime.now(timezone.utc).timestamp()
+        if now - latest.stat().st_mtime > 36 * 3600:
+            return ["DB 백업 지연 · 최신 백업이 36시간 이상 경과"]
+        try:
+            verify_snapshot(latest)
+        except (OSError, ValueError, RuntimeError, sqlite3.DatabaseError):
+            log.exception("DDH latest backup verification failed")
+            return ["DB 백업 검증 실패 · 원본 백업과 디스크 상태를 점검하세요"]
+        return []
 
     async def check(self, guild):
         findings = await self.findings(guild)

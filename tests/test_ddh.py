@@ -12,12 +12,13 @@ from unittest.mock import AsyncMock, patch
 import discord
 
 from config import Settings
-from ddh.backups import backup
+from ddh.backups import backup, restore_dry_run, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
-from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, retire_update_alerts_panel
+from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, repair_missing_panels, retire_update_alerts_panel
 from ddh.operations import inspect_layout
+from ddh.permissions import operator_migration
 from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
@@ -26,7 +27,7 @@ from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
 from ddh.updates import publish_release, redact_legacy_release_links, release_embed
-from ddh.views import RulesView, SupportView, TicketActions
+from ddh.views import ReportModal, RulesView, SupportView, TicketActions
 from fakes import Guild, Text
 
 
@@ -53,6 +54,87 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     def payload(self):
         return {"_fields": ["gfx", "vfx"], "Roblox 사용자명·프로필": "Dial",
                 "포트폴리오 링크": "https://example.com/works", "경력·도구·본인 담당 부분": "Blender, 본인 작업"}
+
+    async def test_existing_operator_is_adopted_without_legacy_staff_duplication(self):
+        operator = next(role for role in self.guild.roles if role.name == "운영자")
+        self.assertEqual(self.roles["staff"].id, operator.id)
+        previous = self.guild.make_role("운영진・Staff")
+        await self.bot.store.set(self.guild.id, "role:staff", previous.id)
+        await provision(self.guild, self.bot.store, self.settings)
+        self.assertEqual(await self.bot.store.get(self.guild.id, "role:staff"), operator.id)
+        self.assertEqual(len([role for role in self.guild.roles if role.name == "운영자"]), 1)
+        self.assertIn("이전 운영진", " ".join(await inspect_layout(self.guild, self.bot.store)))
+
+    async def test_owner_only_operator_permission_migration_is_conservative(self):
+        old = self.guild.make_role("운영진・Staff")
+        channel = await self.channel("audit")
+        previous = dict(channel.overwrites)
+        previous[old] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        custom = self.guild.make_role("무관한 맞춤역할")
+        previous[custom] = discord.PermissionOverwrite(view_channel=False)
+        await channel.edit(overwrites=previous)
+        preview = await operator_migration(self.guild, self.bot.store, apply=False)
+        self.assertIn("운영진・Staff", preview)
+        self.assertIn(old, channel.overwrites)
+        result = await operator_migration(self.guild, self.bot.store, apply=True)
+        self.assertIn("변경 완료", result)
+        self.assertNotIn(old, channel.overwrites)
+        self.assertIn(self.roles["staff"], channel.overwrites)
+        self.assertIn(custom, channel.overwrites)
+        self.assertEqual(await self.bot.store.get(self.guild.id, "role:staff"), self.roles["staff"].id)
+        self.assertIn(old, self.guild.roles)  # deletion is owner-controlled
+        again = await operator_migration(self.guild, self.bot.store, apply=False)
+        self.assertIn("0개", again)
+
+    async def test_no_second_operator_is_created_when_owner_role_missing(self):
+        guild = Guild(self.guild.id + 914)
+        guild.roles = [role for role in guild.roles if role.name != "운영자"]
+        count = len(guild.roles)
+        with self.assertRaisesRegex(UserError, "운영자"):
+            await provision(guild, self.bot.store, Settings("test", guild.id))
+        self.assertEqual(len(guild.roles), count)
+
+    async def test_private_report_flow_and_basic_validation(self):
+        view = SupportView(self.bot)
+        self.assertTrue(any(item.custom_id == "ddh:report:v1" for item in view.children))
+        self.assertEqual(ReportModal(self.bot).title, "DDH 거래·도용 신고")
+        report = await self.bot.tickets.create(
+            self.guild, self.member, "feedback",
+            {"제목": "[거래·작품 신고] 게시물 도용", "내용": "제작물 원본을 무단 게시한 것으로 신고"},
+        )
+        self.assertFalse(report.permissions_for(self.visitor).view_channel)
+        self.assertTrue(report.permissions_for(self.staff).view_channel)
+        stored = await self.bot.store.channel_ticket(self.guild.id, report.id)
+        self.assertEqual(stored["kind"], "feedback")
+        self.assertIn("거래·작품 신고", stored["fields"])
+
+    async def test_backup_restore_dry_run_and_freshness(self):
+        await self.bot.store.reserve(
+            self.guild.id, 699, "feedback", {"제목": "verify", "내용": "test"}
+        )
+        self.assertIn("백업 없음", " ".join(self.bot.operations.backup_warnings()))
+        snapshot = await backup(self.settings.database)
+        self.assertTrue(verify_snapshot(snapshot))
+        self.assertEqual(self.bot.operations.backup_warnings(), [])
+        restored = restore_dry_run(snapshot, Path(self.tmp.name) / "restore-check.db")
+        with sqlite3.connect(restored) as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM tickets WHERE owner_id=699").fetchone()[0], 1
+            )
+        with self.assertRaises(FileExistsError):
+            restore_dry_run(snapshot, restored)
+        os.utime(snapshot, (0, 0))
+        self.assertIn("백업 지연", " ".join(self.bot.operations.backup_warnings()))
+
+    async def test_repair_deleted_guides_without_reposting_healthy_panels(self):
+        self.assertTrue(await repair_missing_panels(self.bot, self.guild))
+        self.assertFalse(await repair_missing_panels(self.bot, self.guild))
+        self.assertEqual(len((await self.channel("rules")).messages), 1)
+        guide_channel = await self.channel("guide")
+        guide_channel.messages.clear()
+        self.assertTrue(await repair_missing_panels(self.bot, self.guild))
+        self.assertEqual(len(guide_channel.messages), 1)
+        self.assertEqual(len((await self.channel("support_panel")).messages), 1)
 
     async def test_setup_keeps_owner_names_permissions_positions_and_ids(self):
         counts = len(self.guild.channels), len(self.guild.roles)
@@ -82,14 +164,14 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         setup.assert_not_awaited()
         security.assert_not_awaited()
         release.assert_awaited_once_with(self.bot, self.guild)
-        self.assertFalse((await self.channel("guide")).messages)
+        self.assertEqual(len((await self.channel("guide")).messages), 1)
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
     async def test_server_mutations_require_actual_owner(self):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "security", "panels", "verify", "notices", "cleanup"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
@@ -235,7 +317,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         await guild.create_text_channel("자유채팅")
         with self.assertRaises(UserError):
             await preflight(guild, self.bot.store)
-        self.assertEqual(len(guild.roles), 2)
+        self.assertEqual(len(guild.roles), 3)  # everyone, existing 운영자, Dialian bot
 
     async def test_missing_role_permission_blocks_creation_only(self):
         role = self.roles["field:gfx"]
@@ -710,7 +792,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

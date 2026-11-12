@@ -152,6 +152,11 @@ class Guild:
         self.features = ["COMMUNITY", "NEWS"]
         self.rules_channel = None
         self.default_role = self.make_role("@everyone", role_id=guild_id, position=0)
+        # Owner-created operator role is not provisioned or renamed by Dialian.
+        self.make_role("운영자", position=150, permissions=discord.Permissions(
+            manage_messages=True, moderate_members=True, mute_members=True,
+            deafen_members=True, move_members=True,
+        ))
         bot_role = self.make_role("Dialian", position=200, permissions=discord.Permissions.all())
         self.me = self.member(2, [bot_role])
         self.me.guild_permissions = discord.Permissions.all()
