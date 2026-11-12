@@ -58,14 +58,22 @@ class DDHCommands(app_commands.Group):
             log.exception("DDH release baseline setup failed; will retry")
         roles, categories, channels = counts
         pending = await self.bot.store.get(interaction.guild.id, "role_order_pending", False)
+        news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         ordering = (
-            "⚠️ 역할 정렬은 건너뛰었습니다. Discord 서버 설정 → 역할에서 "
-            "Dialian을 DDH 역할보다 위로 올리고, 운영진을 일반 멤버보다 위로 배치해 주세요.\n"
+            "⚠️ 역할 정렬은 건너뛰었습니다. 서버 설정 → 역할에서 "
+            "Dialian을 DDH 역할보다 위로 올려 주세요.\n"
             if pending else ""
+        )
+        announcement = (
+            "⚠️ 공지사항·업데이트-공지의 공지형식 전환은 Discord 서버 설정에서 "
+            "커뮤니티를 활성화한 뒤 재설정해 주세요.\n"
+            if news_pending else ""
         )
         await reply(interaction, f"DDH 구성 완료: 역할 {roles}개 · 카테고리 {categories}개 · 채널 {channels}개.\n"
                     f"AutoMod 보안: {len(safeguards)}개 규칙 처리. 운영-로그 채널에서 차단 알림을 확인하세요.\n"
-                    + ordering + "운영진 역할은 서버 소유자가 직접 지정합니다.")
+                    + ordering + announcement
+                    + "구인·구직/제작의뢰/포트폴리오는 포럼으로 관리합니다. 기존 텍스트 글은 읽기 전용으로 보존됩니다.\n"
+                    + "운영진 역할은 서버 소유자가 직접 지정합니다.")
 
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
@@ -104,8 +112,10 @@ class DDHCommands(app_commands.Group):
         notices = await self.bot.store.get(interaction.guild.id, "notices_enabled", self.bot.settings.notices_enabled)
         security = await self.bot.store.get(interaction.guild.id, "security_complete", False)
         role_order_pending = await self.bot.store.get(interaction.guild.id, "role_order_pending", False)
+        news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}\n"
                     f"역할 정렬: {'수동 확인 필요' if role_order_pending else '정상'}\n"
+                    f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
                     f"자동 공지: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
