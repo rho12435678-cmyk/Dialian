@@ -170,6 +170,31 @@ DB 저장 직전 연결이 끊겨도 채널 topic의 티켓 ID로 기존 티켓�
 
 ## 기존 VPS에서 재가동
 
+### DigitalOcean 콘솔에서 직접 실행
+
+등록할 DDH 서버 ID는 `1570276882669240383`입니다. 봇을 이 서버에 초대하고
+필수 권한을 설정한 뒤 기존 VPS의 root Bash 콘솔에서 실행합니다.
+현재 DDH 변경안은 `feat/ddh-community-rebuild` 브랜치에 있습니다.
+
+```bash
+(
+set -e
+cd /root/Dialian
+git diff --quiet
+git diff --cached --quiet
+git fetch origin feat/ddh-community-rebuild
+git checkout --detach origin/feat/ddh-community-rebuild
+bash deploy/console.sh
+)
+```
+
+토큰은 실행 중 표시되는 입력란에만 넣습니다. 입력 내용은 화면에 표시되지 않습니다.
+스크립트는 토큰을 Git이나 셸 명령 이력에 쓰지 않고 설치 프로그램에 환경 변수로 전달합니다.
+성공하면 Discord에서 `/ddh setup`으로 점검하고 `/ddh setup apply:True`로 서버를 구성합니다.
+GitHub Actions 배포도 사용할 경우 Secrets의 `TOKEN`을 현재 토큰과 일치시켜 주세요.
+
+### GitHub Actions에서 실행
+
 기존 저장소에 있던 `/root/Dialian` 경로와 `HOST`, `USERNAME`, `SSH_PRIVATE_KEY`, `TOKEN` GitHub Secrets를 재사용합니다.
 자동 `main` 푸시 배포는 **수동 실행 Deploy DDH Bot**으로 바꿨습니다.
 DDH 서버 ID를 확인하기 전에 기존 DDS 봇을 자동으로 교체하지 않기 위한 전환 절차입니다.
