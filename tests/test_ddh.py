@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import discord
 
@@ -59,6 +59,36 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(counts, (len(CATEGORIES) + len(CHANNELS), len(ROLES) + 2))
         self.assertFalse(self.guild.default_role.permissions.send_messages)
         self.assertTrue(all(not r.permissions.administrator for r in self.roles.values()))
+
+    async def test_reorder_missing_permissions_does_not_abort_setup(self):
+        rejected = discord.HTTPException(
+            Mock(status=400, reason="Bad Request"),
+            {"message": "Missing Permissions", "code": 50013},
+        )
+        with patch.object(self.guild, "edit_role_positions", side_effect=rejected):
+            result = await provision(self.guild, self.bot.store, self.settings)
+        self.assertEqual(result, (len(ROLES), len(CATEGORIES), len(CHANNELS)))
+        self.assertTrue(await self.bot.store.get(self.guild.id, "role_order_pending"))
+        self.assertIsNotNone(await self.channel("guide"))
+        self.assertIsNotNone(await self.channel("updates"))
+
+    async def test_low_bot_role_does_not_attempt_unsafe_ordering(self):
+        guild = Guild(self.guild.id + 200)
+        guild.me.top_role.position = 2
+        with patch.object(guild, "edit_role_positions", new_callable=AsyncMock) as order:
+            result = await provision(guild, self.bot.store, Settings("test", guild.id))
+        order.assert_not_awaited()
+        self.assertEqual(result, (len(ROLES), len(CATEGORIES), len(CHANNELS)))
+        self.assertTrue(await self.bot.store.get(guild.id, "role_order_pending"))
+
+    async def test_other_role_reorder_api_errors_are_not_swallowed(self):
+        rejected = discord.HTTPException(
+            Mock(status=400, reason="Bad Request"),
+            {"message": "Invalid Form Body", "code": 50035},
+        )
+        with patch.object(self.guild, "edit_role_positions", side_effect=rejected):
+            with self.assertRaises(discord.HTTPException):
+                await provision(self.guild, self.bot.store, self.settings)
 
     async def test_adopts_original_screenshot_channels(self):
         guild = Guild(self.guild.id + 1)
