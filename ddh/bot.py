@@ -203,8 +203,13 @@ class DDHCommands(app_commands.Group):
     async def release(self, interaction: discord.Interaction):
         self.owner(interaction)
         await interaction.response.defer(ephemeral=True, thinking=True)
-        published = await publish_release(self.bot, interaction.guild)
-        await reply(interaction, "업데이트 공지를 게시했습니다." if published else "게시할 새 업데이트가 없습니다.")
+        guild = interaction.guild
+        published = await publish_release(self.bot, guild, manual=True)
+        channel_id = await self.bot.store.get(guild.id, "release:last_channel")
+        message_id = await self.bot.store.get(guild.id, "release:last_message")
+        link = f"\nhttps://discord.com/channels/{guild.id}/{channel_id}/{message_id}" if channel_id and message_id else ""
+        result = "업데이트 공지를 게시했습니다." if published else "이미 게시된 업데이트 공지를 확인했습니다."
+        await reply(interaction, result + link)
 
     @app_commands.command(name="status", description="Dialian 연결·구성 상태 확인")
     @app_commands.guild_only()
@@ -294,6 +299,8 @@ class Dialian(discord.Client):
             return
         try:
             await publish_release(self, guild)
+        except UserError as error:
+            log.warning("DDH release announcement pending: %s", error)
         except Exception:
             log.exception("DDH release announcement failed; will retry")
 

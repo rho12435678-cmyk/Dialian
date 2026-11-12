@@ -512,6 +512,45 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await publish_release(self.bot, self.guild))
         self.assertIsNone((await self.channel("updates")).messages[0].content)
 
+    async def test_summary_backfill_works_without_setup_or_git_and_with_old_recap_record(self):
+        guild_id = self.guild.id
+        channel = await self.channel("updates")
+        self.bot.release_sha = None
+        await self.bot.store.set(guild_id, "setup_complete", False)
+        await self.bot.store.set(guild_id, "channel:updates", None)
+        await self.bot.store.set(guild_id, "release:operations_recap", True)
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertFalse(await publish_release(self.bot, self.guild))
+        card = channel.messages[0].embeds[0]
+        self.assertIn("전체 업데이트 안내", card.title)
+        self.assertEqual(len(card.fields), 6)
+        self.assertIn("입장 권한 적용이 끝나면", card.fields[0].value)
+        self.assertLess(len(card), 6000)
+
+    async def test_manual_release_recovers_deleted_summary_and_returns_link(self):
+        self.bot.release_sha = "5" * 40
+        channel = await self.channel("updates")
+        await publish_release(self.bot, self.guild)
+        old_id = channel.messages.pop().id
+        interaction = AsyncMock(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id))
+        interaction.response.is_done = Mock(return_value=True)
+        group = DDHCommands(self.bot)
+        await group.release.callback(group, interaction)
+        await group.release.callback(group, interaction)
+        self.assertEqual(len(channel.messages), 1)
+        message = channel.messages[0]
+        self.assertNotEqual(message.id, old_id)
+        self.assertIn("전체 업데이트 안내", message.embeds[0].title)
+        self.assertIn(f"https://discord.com/channels/{self.guild.id}/{channel.id}/{message.id}",
+                      interaction.followup.send.await_args.args[0])
+
+    async def test_release_explains_channel_permission_failure(self):
+        channel = await self.channel("updates")
+        with patch.object(channel, "permissions_for", return_value=discord.Permissions(view_channel=True)):
+            with self.assertRaisesRegex(UserError, "메시지 보내기"):
+                await publish_release(self.bot, self.guild, manual=True)
+        self.assertFalse(channel.messages)
+
     async def test_update_opt_in_and_out_does_not_grant_privileges(self):
         view = UpdateAlertsView(self.bot)
         self.assertTrue(view.is_persistent())
