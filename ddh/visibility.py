@@ -40,6 +40,11 @@ def _copy_overwrite(overwrite):
     return discord.PermissionOverwrite.from_pair(*overwrite.pair())
 
 
+def _view_flags(overwrites):
+    """Canonical View Channel values by Discord ID, regardless of cache type."""
+    return {target.id: policy.view_channel for target, policy in overwrites.items()}
+
+
 def _set_view(overwrites, target, visible):
     """Reuse the saved Discord overwrite key by snowflake ID.
 
@@ -149,7 +154,7 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
                 f"{channel.name}: Discord 채널 권한 덮어쓰기 100개 한도 초과. "
                 "아무 설정도 변경하지 않았습니다. 역할 수를 검토해 주세요."
             )
-        if overwrites != original:
+        if _view_flags(overwrites) != _view_flags(original):
             planned.append((channel, overwrites))
     return verification, planned
 
