@@ -16,7 +16,7 @@ from ddh.backups import backup
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
 from ddh.bot import DDHCommands, Dialian
 from ddh.cleanup import cleanup_legacy
-from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
+from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels, upsert_panel
 from ddh.operations import inspect_layout
 from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
@@ -147,7 +147,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.bot.store.get(guild.id, "news_format_pending"))
 
     async def test_compact_bilingual_layout_and_announce_support(self):
-        self.assertEqual(len(CATEGORIES), 6)
+        self.assertEqual(len(CATEGORIES), 7)
         names = {ch.name for ch in CHANNELS}
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
@@ -202,7 +202,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(admin, self.roles["staff"])
         rules = await self.channel("rules")
         self.assertEqual(self.guild.rules_channel.id, rules.id)
-        self.assertEqual([ch.key for ch in CHANNELS][:2], ["announcements", "updates"])
+        self.assertEqual([ch.key for ch in CHANNELS if ch.category == "info"][:2], ["announcements", "updates"])
 
     async def test_active_ticket_in_staff_area_and_closed_channel_removed(self):
         channel = await self.bot.tickets.create(
@@ -218,8 +218,8 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["state"], "closed")
 
     async def test_support_categories_follow_notice_categories(self):
-        expected = ["info", "support", "community", "jobs"]
-        self.assertEqual([category.key for category in CATEGORIES][:4], expected)
+        expected = ["entry", "info", "support", "community", "jobs"]
+        self.assertEqual([category.key for category in CATEGORIES][:5], expected)
 
     async def test_adopts_original_screenshot_channels(self):
         guild = Guild(self.guild.id + 1)
@@ -629,6 +629,52 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         interaction.user = self.visitor
         await verification.messages[0].view.accept.callback(interaction)
         self.assertIn(self.roles["member"], self.visitor.roles)
+
+    async def test_existing_entry_channels_move_without_sync_and_rules_button_is_removed(self):
+        guild = self.guild
+        store = self.bot.store
+        entry = guild.get_channel(await store.get(guild.id, "category:entry"))
+        info = guild.get_channel(await store.get(guild.id, "category:info"))
+        staff = guild.get_channel(await store.get(guild.id, "category:ops"))
+        verification = await self.channel("verification")
+        member_log = await self.channel("member_log")
+        rules = await self.channel("rules")
+        await verification.edit(category=info)
+        await member_log.edit(category=staff)
+        entry.position = 90
+        await entry.delete()
+        await store.set(guild.id, "category:entry", None)
+        previous_permissions = member_log.overwrites
+        log_message = await member_log.send("이전 입퇴장 기록")
+        owner_message = await rules.send("내 규칙 안내")
+        legacy_panel = await upsert_panel(
+            rules, store, "rules", discord.Embed(description="기존 규칙\n\n아래 버튼으로 인증하세요."),
+            view=RulesView(self.bot),
+        )
+        group = DDHCommands(self.bot)
+        interaction = AsyncMock()
+        interaction.guild = guild
+        interaction.user = SimpleNamespace(id=guild.owner_id)
+        interaction.response.is_done = Mock(return_value=True)
+
+        await group.onboarding.callback(group, interaction, apply=True)
+
+        new_entry = guild.get_channel(await store.get(guild.id, "category:entry"))
+        self.assertLess(new_entry.position, info.position)
+        self.assertEqual(verification.category_id, new_entry.id)
+        self.assertEqual(member_log.category_id, new_entry.id)
+        self.assertLess(verification.position, member_log.position)
+        self.assertEqual(member_log.overwrites, previous_permissions)
+        self.assertFalse(member_log.permissions_for(self.visitor).view_channel)
+        self.assertIn(log_message, member_log.messages)
+        self.assertIn(owner_message, rules.messages)
+        self.assertIsNone(legacy_panel.view)
+        self.assertIn(verification.mention, legacy_panel.embeds[0].description)
+        self.assertTrue(verification.messages[0].view.is_persistent())
+
+        new_entry.position = 90
+        await group.onboarding.callback(group, interaction, apply=True)
+        self.assertEqual(new_entry.position, 90)
 
     async def test_rejoin_rejects_restored_roles_until_current_join_is_verified(self):
         from ddh.onboarding import INSTALLED

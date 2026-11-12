@@ -11,15 +11,14 @@ def embed(title, description):
     return discord.Embed(title=title, description=description, colour=ORANGE)
 
 
-async def upsert_panel(channel, store, key, card, *, view=None):
+async def find_panel(channel, store, key):
     marker = f"DDH:{key}:v1"
-    card.set_footer(text=marker)
     saved = await store.get(channel.guild.id, f"message:{key}")
     message = None
     if saved:
         try:
             candidate = await channel.fetch_message(saved)
-            if candidate.author.id == channel.guild.me.id:
+            if candidate.author.id == channel.guild.me.id and any(e.footer.text == marker for e in candidate.embeds):
                 message = candidate
         except discord.NotFound:
             pass
@@ -28,6 +27,12 @@ async def upsert_panel(channel, store, key, card, *, view=None):
             if candidate.author.id == channel.guild.me.id and any(e.footer.text == marker for e in candidate.embeds):
                 message = candidate
                 break
+    return message
+
+
+async def upsert_panel(channel, store, key, card, *, view=None):
+    card.set_footer(text=f"DDH:{key}:v1")
+    message = await find_panel(channel, store, key)
     if message:
         await message.edit(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
     else:
@@ -138,12 +143,31 @@ async def publish_verification(bot, guild):
     await upsert_panel(channel, bot.store, "verification", panel, view=VerificationView(bot))
 
 
+async def remove_rules_verification_button(bot, guild, verification):
+    channel = guild.get_channel(await bot.store.get(guild.id, "channel:rules", 0))
+    if not isinstance(channel, discord.TextChannel):
+        return
+    message = await find_panel(channel, bot.store, "rules")
+    if message is None or not message.components:
+        return
+    buttons = [component for row in message.components for component in row.children]
+    if not buttons or any(getattr(button, "custom_id", None) != "ddh:rules:v1" for button in buttons):
+        return
+    embeds = [embed.copy() for embed in message.embeds]
+    for embed in embeds:
+        if embed.footer.text == "DDH:rules:v1" and embed.description:
+            body, separator, last = embed.description.rpartition("\n\n")
+            if separator and "아래 버튼" in last:
+                embed.description = f"{body}{separator}규칙을 읽은 뒤 {verification.mention}에서 인증해 주세요."
+    await message.edit(embeds=embeds, view=None, allowed_mentions=discord.AllowedMentions.none())
+
+
 async def publish_panels(bot, guild):
-    from ddh.views import RulesView, SupportView, UpdateAlertsView
+    from ddh.views import SupportView, UpdateAlertsView
 
     verification = guild.get_channel(await bot.store.get(guild.id, "channel:verification", 0))
     instruction = (f"규칙을 읽은 뒤 {verification.mention}에서 인증해 주세요." if verification else
-                   "규칙에 동의하고 아래 버튼을 눌러 멤버 인증을 진행해 주세요.")
+                   "운영진이 안내한 인증 채널에서 멤버 인증을 진행해 주세요.")
     rules = embed("DDH에 오신 것을 환영합니다",
                   "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
                   "**2. 본인 작품만 게시하기** — 도용·사칭을 금지하며 공동작업은 본인의 담당 부분을 밝혀 주세요.\n"
@@ -161,7 +185,7 @@ async def publish_panels(bot, guild):
                     "신청 내용은 신청자와 운영진만 보는 티켓에 저장됩니다. "
                     "종료 시 대화 채널이 삭제되고 신청·처리 기록은 내부 DB에 남습니다.\n"
                     "진행 중인 티켓은 종류별로 1개까지 열 수 있습니다.")
-    await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
+    await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules)
     await publish_guide(bot, guild)
     if await bot.store.get(guild.id, "channel:verification"):
         await publish_verification(bot, guild)

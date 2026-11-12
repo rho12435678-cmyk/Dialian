@@ -53,8 +53,9 @@ class Category:
     aliases: tuple[str, ...] = ()
 
 
-# Five public sections; ticket and staff areas remain private.
+# Entry precedes Info on new servers. Private channels use their own overwrites.
 CATEGORIES = (
+    Category("entry", "🚪 입장・Entry"),
     Category("info", "📌 안내・Info", aliases=("📌 안내", "Information", "📌 안내 • Info")),
     Category("support", "📨 문의・Support", aliases=("📨 문의", "📨 문의 • Support")),
     Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels", "💬 커뮤니티 • Chat")),
@@ -78,6 +79,12 @@ class Channel:
 
 
 CHANNELS = (
+    Channel("verification", "인증-verify", "entry", "readonly",
+            topic="규칙을 읽고 버튼을 눌러 DDH 멤버 인증"),
+
+    Channel("member_log", "입퇴장-join-leave", "entry", "log",
+            topic="멤버의 입장·퇴장 기록"),
+
     # News channels are the first visible items in the Info category.
     Channel("announcements", "공지-news", "info", "readonly",
             aliases=("공지사항", "announcements"), news=True),
@@ -89,9 +96,6 @@ CHANNELS = (
     Channel("guide", "가이드-guide", "info", "readonly",
             aliases=("가이드", "이용안내", "guide"),
             topic="DDH 소개 · 규칙 동의 · 개발자 등록 · 협업 안내", news=True),
-
-    Channel("verification", "인증-verify", "info", "readonly",
-            topic="규칙을 읽고 버튼을 눌러 DDH 멤버 인증"),
 
     # Announcement channels with permanent bot buttons, no regular user posts.
     Channel("support_panel", "문의-support", "support", "readonly",
@@ -126,8 +130,6 @@ CHANNELS = (
     Channel("staff_chat", "운영진-chat", "ops", "private",
             aliases=("운영진-대화",)),
     Channel("audit", "로그-logs", "ops", "log", aliases=("운영-로그",)),
-    Channel("member_log", "입퇴장-join-leave", "ops", "log",
-            topic="멤버의 입장·퇴장 기록"),
     Channel("security_log", "보안-security", "ops", "log",
             topic="AutoMod 및 권한·변경량 점검 알림"),
 )

@@ -88,7 +88,7 @@ class DDHCommands(app_commands.Group):
         await interaction.response.defer(ephemeral=True, thinking=True)
         guild = interaction.guild
         if not apply:
-            await reply(interaction, "인증-verify, 비공개 입퇴장-join-leave, 명령어-commands를 연결하고 "
+            await reply(interaction, "안내 위 입장 구역에 인증·비공개 입퇴장 채널을 배치하고 규칙 버튼을 제거합니다. 명령어 채널과 "
                         "외부봇 역할을 구성합니다. DDH 활동 채널은 인증 전 활동을 제한합니다. "
                         "`/ddh onboarding apply:True`로 적용하세요.")
             return

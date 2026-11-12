@@ -1,12 +1,13 @@
 """Owner-installed entry controls for DDH members and external bots."""
 import discord
 
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, access
-from ddh.content import publish_verification
+from ddh.blueprint import CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, access, overwrites
+from ddh.content import publish_verification, remove_rules_verification_button
 from ddh.operations import private_channel
 from ddh.server import UserError, create_text_board, find_forum_resource, find_resource, roles_for
 
 INSTALLED = "onboarding:entry-controls"
+ENTRY_LAYOUT = "onboarding:entry-category-arranged"
 CHANNEL_KEYS = {"verification", "member_log", "commands"}
 ACTIVITY_FLAGS = (
     "send_messages", "send_messages_in_threads", "create_public_threads",
@@ -133,6 +134,23 @@ async def restrict_public_activity(guild, store, roles):
     return exceptions
 
 
+async def arrange_entry(guild, store, entry, info, verification, member_log):
+    if await store.get(guild.id, ENTRY_LAYOUT) == entry.id:
+        return
+    reason = "DDH 소유자 요청: 입장 카테고리 정리"
+    categories = sorted(guild.categories, key=lambda channel: (channel.position, channel.id))
+    info_index = categories.index(info)
+    if info_index == 0 or categories[info_index - 1].id != entry.id:
+        await entry.move(before=info, reason=reason)
+    if verification.category_id != entry.id or (verification.position, verification.id) > (
+            member_log.position, member_log.id):
+        await verification.move(category=entry, beginning=True, sync_permissions=False, reason=reason)
+    if member_log.category_id != entry.id:
+        last_position = max(channel.position for channel in guild.channels) + 1
+        await member_log.edit(category=entry, position=last_position, sync_permissions=False, reason=reason)
+    await store.set(guild.id, ENTRY_LAYOUT, entry.id)
+
+
 async def install_onboarding(bot, guild):
     """Create scoped resources, then enable the entry and bot assignment rules."""
     store = bot.store
@@ -141,13 +159,22 @@ async def install_onboarding(bot, guild):
     if role is not None:
         validate_bot_role(role, guild)
 
+    entry_spec = next(category for category in CATEGORIES if category.key == "entry")
+    info_spec = next(category for category in CATEGORIES if category.key == "info")
+    info = await find_resource(guild, store, "category:info", info_spec.name,
+                               discord.CategoryChannel, info_spec.aliases)
+    if info is None:
+        raise UserError("입장 구역을 배치할 안내 카테고리를 찾지 못했습니다.")
+    entry = await find_resource(guild, store, "category:entry", entry_spec.name,
+                                discord.CategoryChannel, entry_spec.aliases)
+    arrange = entry is None or await store.get(guild.id, ENTRY_LAYOUT) != entry.id
     plans = []
     for spec in CHANNELS:
         if spec.key not in CHANNEL_KEYS:
             continue
         channel = await find_resource(guild, store, f"channel:{spec.key}", spec.name, discord.TextChannel, spec.aliases)
         category = None
-        if channel is None:
+        if channel is None and spec.category != "entry":
             parent = next(category for category in CATEGORIES if category.key == spec.category)
             category = await find_resource(guild, store, f"category:{parent.key}", parent.name,
                                            discord.CategoryChannel, parent.aliases)
@@ -159,6 +186,16 @@ async def install_onboarding(bot, guild):
             raise UserError("입퇴장 채널을 Staff 전용으로 제한한 뒤 다시 실행해 주세요.")
         plans.append((spec, channel, category))
 
+    if entry is not None:
+        incoming = sum(spec.category == "entry" and
+                       (channel is None or (arrange and channel.category_id != entry.id))
+                       for spec, channel, _ in plans)
+        if len(entry.channels) + incoming > 50:
+            raise UserError("입장 카테고리에 채널 공간을 확보해 주세요.")
+    if entry is None:
+        entry = await guild.create_category(name=entry_spec.name, overwrites=overwrites(guild, roles, "readonly"),
+                                            reason="DDH 소유자 요청: 입장 카테고리")
+    await store.set(guild.id, "category:entry", entry.id)
     if role is None:
         name, colour = ROLES["external_bots"]
         role = await guild.create_role(name=name, colour=discord.Colour(colour),
@@ -166,16 +203,19 @@ async def install_onboarding(bot, guild):
                                        reason="DDH 소유자 요청: 외부 봇 역할")
     roles["external_bots"] = role
     await store.set(guild.id, "role:external_bots", role.id)
-    mentions = []
+    channels = {}
     for spec, channel, category in plans:
         if channel is None:
-            channel = await create_text_board(guild, spec, category, roles, reason="DDH 소유자 요청: 인증·입퇴장·명령어")
+            channel = await create_text_board(guild, spec, entry if spec.category == "entry" else category, roles,
+                    reason="DDH 소유자 요청: 인증·입퇴장·명령어")
         await store.set(guild.id, f"channel:{spec.key}", channel.id)
-        mentions.append(channel.mention)
+        channels[spec.key] = channel
+    await arrange_entry(guild, store, entry, info, channels["verification"], channels["member_log"])
     await publish_verification(bot, guild)
+    await remove_rules_verification_button(bot, guild, channels["verification"])
     exceptions = await restrict_public_activity(guild, store, roles)
     await store.set(guild.id, INSTALLED, True)
-    return role, mentions, exceptions
+    return role, [channel.mention for channel in channels.values()], exceptions
 
 
 async def connect_existing_bots(guild, role):
