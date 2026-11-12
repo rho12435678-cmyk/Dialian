@@ -178,9 +178,8 @@ async def archive_obsolete(guild, store, categories, roles):
             if channel.id in active or channel.id in moved:
                 continue
             moved.add(channel.id)
-            name = (channel.name + "-보관")[:100]
-            if not channel.name.endswith("-보관"):
-                name = ("보관-" + channel.name)[:100]
+            name = (channel.name if channel.name.startswith("보관-")
+                    else ("보관-" + channel.name)[:100])
             params = {
                 "category": archive_cat, "name": name,
                 "overwrites": overwrites(guild, roles, "private"),
