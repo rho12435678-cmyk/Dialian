@@ -4,7 +4,7 @@ import logging
 import discord
 
 from ddh.blueprint import FIELDS, KINDS
-from ddh.server import UserError, is_staff, require_guild, roles_for
+from ddh.server import UserError, is_staff, require_guild
 
 from ddh.verification import verify_member
 
