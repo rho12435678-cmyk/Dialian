@@ -90,6 +90,63 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(discord.HTTPException):
                 await provision(self.guild, self.bot.store, self.settings)
 
+    async def test_job_and_portfolio_channels_use_forum_types_and_tags(self):
+        for key in ("hiring", "looking", "commissions", "portfolio:gfx", "portfolio:ui"):
+            channel = await self.channel(key)
+            self.assertIsInstance(channel, discord.ForumChannel)
+            self.assertGreaterEqual(len(channel.available_tags), 3)
+        self.assertEqual((await self.channel("announcements")).type, discord.ChannelType.news)
+        self.assertEqual((await self.channel("updates")).type, discord.ChannelType.news)
+
+    async def test_forum_permissions_support_member_comments_not_fake_portfolios(self):
+        forum = await self.channel("portfolio:gfx")
+        viewer = self.guild.member(120, [self.roles["member"]])
+        gfx = self.guild.member(121, [self.roles["member"], self.roles["field:gfx"]])
+        self.assertTrue(forum.permissions_for(viewer).view_channel)
+        self.assertTrue(forum.permissions_for(viewer).send_messages_in_threads)
+        self.assertFalse(forum.permissions_for(viewer).send_messages)
+        self.assertTrue(forum.permissions_for(gfx).send_messages)
+        self.assertFalse(forum.permissions_for(self.visitor).send_messages)
+        commission = await self.channel("commissions")
+        self.assertTrue(commission.permissions_for(viewer).send_messages)
+        looking = await self.channel("looking")
+        self.assertFalse(looking.permissions_for(viewer).send_messages)
+
+    async def test_converts_text_boards_to_new_forums_without_deleting_old_posts(self):
+        guild = Guild(self.guild.id + 321)
+        old = await guild.create_text_channel("구인")
+        await old.send(embed=discord.Embed(title="기존 구인 글"))
+        await provision(guild, self.bot.store, Settings("test", guild.id))
+        new = guild.get_channel(await self.bot.store.get(guild.id, "channel:hiring"))
+        self.assertIsInstance(new, discord.ForumChannel)
+        self.assertNotEqual(old.id, new.id)
+        self.assertEqual(old.name, "구인-기존글")
+        self.assertEqual(len(old.messages), 1)
+        self.assertFalse(old.permissions_for(guild.member(500)).send_messages)
+        count = len(guild.channels)
+        await provision(guild, self.bot.store, Settings("test", guild.id))
+        self.assertEqual(count, len(guild.channels))
+        self.assertEqual(new.id, await self.bot.store.get(guild.id, "channel:hiring"))
+
+    async def test_missing_news_feature_preserves_text_and_reports_pending(self):
+        guild = Guild(self.guild.id + 322)
+        guild.features = []
+        old = await guild.create_text_channel("공지사항")
+        await provision(guild, self.bot.store, Settings("test", guild.id))
+        new = guild.get_channel(await self.bot.store.get(guild.id, "channel:announcements"))
+        self.assertEqual(old.id, new.id)
+        self.assertEqual(new.type, discord.ChannelType.text)
+        self.assertTrue(await self.bot.store.get(guild.id, "news_format_pending"))
+        self.assertIsInstance(guild.get_channel(await self.bot.store.get(guild.id, "channel:hiring")), discord.ForumChannel)
+        guild.features = ["NEWS", "COMMUNITY"]
+        await provision(guild, self.bot.store, Settings("test", guild.id))
+        self.assertEqual(new.type, discord.ChannelType.news)
+        self.assertFalse(await self.bot.store.get(guild.id, "news_format_pending"))
+
+    async def test_support_categories_follow_notice_categories(self):
+        expected = ["info", "support", "tickets", "archive"]
+        self.assertEqual([category.key for category in CATEGORIES][:4], expected)
+
     async def test_adopts_original_screenshot_channels(self):
         guild = Guild(self.guild.id + 1)
         original = await guild.create_text_channel("general")
