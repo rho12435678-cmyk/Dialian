@@ -1,11 +1,13 @@
-"""Release announcements for actual deployed Git revisions.
+"""Discord-only DDH release notifications.
 
-A release is identified once per bot process at startup, not by GitHub pushes.
-A durable ledger plus a Discord-side marker prevents restart/retry spam.
+Source control is used privately for detecting a new deployment. Public Discord
+messages never include the repository owner, URL, commit hash, author, or
+unreviewed Git commit subjects.
 """
 import logging
 import re
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,15 +17,15 @@ from ddh.server import channel_for, require_guild, roles_for
 
 log = logging.getLogger(__name__)
 REPOSITORY = Path(__file__).resolve().parents[1]
-GITHUB_COMMITS = "https://github.com/rho12435678-cmyk/Dialian/commit/"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+NONCE = re.compile(r"[0-9a-f]{24}\Z")
 
 
 def _git(*args):
     try:
         output = subprocess.run(
-            ["git", "-C", str(REPOSITORY), *args], check=True,
-            capture_output=True, text=True, timeout=5,
+            ["git", "-C", str(REPOSITORY), *args],
+            check=True, capture_output=True, text=True, timeout=5,
         )
         return output.stdout.strip()
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -31,49 +33,137 @@ def _git(*args):
 
 
 def deployed_revision():
-    """Snapshot the checked-out revision when the bot process starts."""
+    """Private revision used solely to tell whether new code was deployed."""
     revision = _git("rev-parse", "--verify", "HEAD")
     return revision if SHA.fullmatch(revision) else None
 
 
-def summarize_release(previous, revision):
-    """Show up to five actual deployed Git commit subjects, never invent notes."""
+def _public_notes(previous, revision):
+    """Summarize changed components without displaying any Git metadata."""
     if previous and SHA.fullmatch(previous):
-        notes = _git("log", "--no-merges", "--format=%s", "-n", "5", f"{previous}..{revision}")
+        changed = _git("diff", "--name-only", f"{previous}..{revision}")
     else:
-        notes = ""
-    if not notes:
-        notes = _git("show", "-s", "--format=%s", revision)
-    lines = []
-    for subject in notes.splitlines()[:5]:
-        clean = discord.utils.escape_markdown(discord.utils.escape_mentions(subject.strip()))
-        if clean:
-            lines.append(f"• {clean[:160]}")
-    return "\n".join(lines)[:1000] or "서버 안정성 및 기능 개선"
+        changed = _git("show", "--pretty=format:", "--name-only", revision)
+
+    categories = []
+    filenames = set(changed.splitlines())
+
+    def include(condition, description):
+        if condition and description not in categories:
+            categories.append(description)
+
+    include("ddh/updates.py" in filenames, "업데이트 공지 자동화 및 표시 방식 개선")
+    include(
+        bool(filenames & {"ddh/blueprint.py", "ddh/server.py", "ddh/layout.py"}),
+        "서버 채널·역할·권한 구성 개선",
+    )
+    include(
+        bool(filenames & {"ddh/security.py", "ddh/operations.py", "ddh/verification.py"}),
+        "보안·인증 및 운영 관리 기능 개선",
+    )
+    include(
+        bool(filenames & {"ddh/tickets.py", "ddh/views.py"}),
+        "문의·신청 및 사용자 기능 개선",
+    )
+    include(
+        bool(filenames & {"ddh/content.py", "ddh/notices.py"}),
+        "안내 및 공지 내용·표시 개선",
+    )
+    include(
+        bool(filenames & {"ddh/bot.py", "ddh/backups.py", "dial.py", "config.py"}),
+        "봇 실행 및 안정성 개선",
+    )
+    if not categories:
+        categories.append("봇 운영 및 유지보수 개선")
+
+    # Optional private editorial notes are kept only on the VPS: data/ is
+    # gitignored. Exact-revision filenames prevent stale notes from being
+    # published again on later deployments.
+    private_file = REPOSITORY / "data" / "release-notes" / (revision + ".txt")
+    try:
+        if private_file.is_file():
+            private_lines = []
+            for raw in private_file.read_text(encoding="utf-8").splitlines():
+                text = raw.strip().lstrip("•- ").strip()
+                # No account names, emails, mentions or links in public notes.
+                if not text or re.search(r"(?i)(github|https?://|@)", text):
+                    continue
+                private_lines.append(discord.utils.escape_markdown(text[:160]))
+                if len(private_lines) == 5:
+                    break
+            if private_lines:
+                return "\n".join("• " + line for line in private_lines)[:1000]
+    except (OSError, UnicodeError):
+        log.exception("Private DDH release notes could not be read; using safe summary")
+
+    return "\n".join("• " + value for value in categories[:5])
 
 
-def release_embed(previous, revision, member_role=None):
-    """Beautiful release card. An embed mention renders but cannot notify."""
+def release_embed(previous, revision, member_role=None, marker=None):
+    """Build a polished announcement with no source account or revision leaks."""
     audience = f"🔔 **업데이트 안내 · {member_role.mention}**\n\n" if member_role else ""
     card = discord.Embed(
-        title="🚀 DDH · 새로운 업데이트",
+        title="🚀 DDH · 서버 업데이트 안내",
         description=(
             audience
-            + "**Dial Dev Hub에 새로운 업데이트가 적용되었습니다.**\n"
-            + "개발자와 이용자 모두를 위한 개선 사항을 확인해 주세요."
+            + "**Dial Dev Hub에 새로운 개선 사항이 적용되었습니다.**\n"
+            + "더 편리하고 안전한 개발자 커뮤니티를 위한 업데이트입니다."
         ),
-        colour=0x5865F2,
+        colour=0xF39C12,
         timestamp=datetime.now(timezone.utc),
     )
-    card.add_field(name="✨ 이번 변경사항", value=summarize_release(previous, revision), inline=False)
-    card.add_field(name="📦 적용 버전", value=f"`{revision[:9]}`", inline=True)
-    card.add_field(name="📋 상세 변경 내역", value=f"[GitHub에서 보기]({GITHUB_COMMITS}{revision})", inline=True)
-    card.set_footer(text=f"DDH:release:{revision}")
+    card.add_field(name="✨ 주요 변경사항", value=_public_notes(previous, revision), inline=False)
+    card.add_field(name="✅ 적용 상태", value="DDH 서버에 적용 완료", inline=False)
+    card.set_footer(text=marker or "Dial Dev Hub · 공식 업데이트")
     return card
 
 
+async def redact_legacy_release_links(bot, guild):
+    """Replace only old bot release embeds that exposed source information.
+
+    Previously published commit links/hashes cannot be unseen, but editing
+    their Discord messages prevents continued exposure to new visitors.
+    """
+    require_guild(guild, bot.settings)
+    if await bot.store.get(guild.id, "release:legacy_redacted", False):
+        return 0
+    channel = await channel_for(guild, bot.store, "updates")
+    count = 0
+    for message in [item async for item in channel.history(limit=500)]:
+        if message.author.id != guild.me.id:
+            continue
+        old_revisions = [
+            card.footer.text.removeprefix("DDH:release:")
+            for card in message.embeds
+            if isinstance(card.footer.text, str) and card.footer.text.startswith("DDH:release:")
+        ]
+        if not any(SHA.fullmatch(value) for value in old_revisions):
+            continue
+
+        card = discord.Embed(
+            title="🚀 DDH · 이전 서버 업데이트",
+            description="**Dial Dev Hub 개선 사항이 적용된 기록입니다.**",
+            colour=0xF39C12,
+            timestamp=getattr(message, "created_at", None),
+        )
+        card.add_field(
+            name="✅ 적용 상태",
+            value="서버 업데이트 완료 · 상세 소스 정보 비공개",
+            inline=False,
+        )
+        card.set_footer(text="Dial Dev Hub · 이전 공식 공지")
+        await message.edit(embed=card, allowed_mentions=discord.AllowedMentions.none())
+        count += 1
+        if bot.release_sha in old_revisions and not await bot.store.get(
+            guild.id, "release:last_revision"
+        ):
+            await bot.store.set(guild.id, "release:last_revision", bot.release_sha)
+    await bot.store.set(guild.id, "release:legacy_redacted", True)
+    return count
+
+
 async def publish_release(bot, guild):
-    """Automatically announce each deployed Git SHA once, including the first."""
+    """Post one automatic member-ping update per deployed revision."""
     require_guild(guild, bot.settings)
     revision = bot.release_sha
     if not revision or not SHA.fullmatch(revision):
@@ -85,39 +175,47 @@ async def publish_release(bot, guild):
         previous = await bot.store.get(guild.id, "release:last_revision")
         if previous == revision:
             return False
+
         channel = await channel_for(guild, bot.store, "updates")
-        marker = f"DDH:release:{revision}"
-        # A message may have been delivered before recording its revision.
+        pending = await bot.store.get(guild.id, "release:pending")
+        if not isinstance(pending, dict) or pending.get("revision") != revision or not (
+            isinstance(pending.get("nonce"), str) and NONCE.fullmatch(pending["nonce"])
+        ):
+            pending = {"revision": revision, "nonce": uuid.uuid4().hex[:24]}
+            # Record before posting, so a retry can find the posted message.
+            await bot.store.set(guild.id, "release:pending", pending)
+
+        marker = "Dial Dev Hub · #" + pending["nonce"]
+        old_marker = f"DDH:release:{revision}"
         async for message in channel.history(limit=500):
             if message.author.id == guild.me.id and any(
-                item.footer.text == marker for item in message.embeds
+                item.footer.text in (marker, old_marker) for item in message.embeds
             ):
                 await bot.store.set(guild.id, "release:last_revision", revision)
                 return False
 
         member = (await roles_for(guild, bot.store, keys=("member",)))["member"]
-        # Discord does NOT notify from an embed-only mention. The small first
-        # message line is necessary to ping; the embed also displays the role
-        # at its very top, exactly where community members expect it.
+        # A mention inside an embed does not create a Discord notification.
         if not channel.permissions_for(guild.me).mention_everyone:
             if not guild.me.guild_permissions.manage_channels:
                 raise PermissionError(
-                    "Dialian needs Mention Everyone/Roles in the updates channel"
+                    "Dialian needs role-mention permission in the update channel"
                 )
             overwrite = channel.overwrites_for(guild.me)
             overwrite.mention_everyone = True
             await channel.set_permissions(
                 guild.me, overwrite=overwrite,
-                reason="DDH 공식 업데이트: 봇에게만 멤버 역할 멘션 허용",
+                reason="DDH 공식 공지: 봇만 멤버 역할 멘션 가능",
             )
+
         message = await channel.send(
             content=member.mention,
-            embed=release_embed(previous, revision, member_role=member),
+            embed=release_embed(previous, revision, member_role=member, marker=marker),
             allowed_mentions=discord.AllowedMentions(
                 everyone=False, users=False, roles=[member],
             ),
         )
         await bot.store.set(guild.id, "release:last_revision", revision)
         await bot.store.set(guild.id, "release:last_message", message.id)
-        log.info("DDH release %s announced in %s", revision[:9], channel.id)
+        log.info("DDH update announcement sent to channel %s", channel.id)
         return True

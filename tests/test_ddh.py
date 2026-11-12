@@ -25,7 +25,7 @@ from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
-from ddh.updates import publish_release, release_embed
+from ddh.updates import publish_release, redact_legacy_release_links, release_embed
 from ddh.views import RulesView, SupportView, TicketActions
 from fakes import Guild, Text
 
@@ -489,7 +489,8 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(channel.messages[1].embeds[0].description.startswith(
             f"🔔 **업데이트 안내 · {self.roles['member'].mention}**"
         ))
-        self.assertIn("DDH:release:", channel.messages[1].embeds[0].footer.text)
+        self.assertTrue(channel.messages[1].embeds[0].footer.text.startswith("Dial Dev Hub · #"))
+        self.assertNotIn(self.bot.release_sha, channel.messages[1].embeds[0].footer.text)
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
         self.bot.release_sha = "3" * 40
@@ -521,6 +522,31 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(channel.messages), 2)
         self.assertFalse(await retire_update_alerts_panel(self.bot, self.guild))
         self.assertTrue(await self.bot.store.get(self.guild.id, "updates:panel_retired"))
+
+    async def test_old_release_links_are_redacted_without_touching_other_notices(self):
+        channel = await self.channel("updates")
+        old = discord.Embed(
+            title="기존 업데이트", description="https://github.com/example/repo",
+        )
+        old.set_footer(text="DDH:release:" + "e" * 40)
+        legacy = await channel.send(embed=old)
+        safe = await channel.send(embed=discord.Embed(title="일반 공지"))
+        self.bot.release_sha = "e" * 40
+        self.assertEqual(
+            await redact_legacy_release_links(self.bot, self.guild), 1
+        )
+        visible = json.dumps(legacy.embeds[0].to_dict(), ensure_ascii=False).lower()
+        self.assertNotIn("github.com", visible)
+        self.assertNotIn("e" * 40, visible)
+        self.assertIn(safe, channel.messages)
+        self.assertEqual(
+            await self.bot.store.get(self.guild.id, "release:last_revision"),
+            "e" * 40,
+        )
+        self.assertEqual(
+            await redact_legacy_release_links(self.bot, self.guild), 0
+        )
+        self.assertFalse(await publish_release(self.bot, self.guild))
 
     async def test_bot_startup_posts_release_without_slash_command(self):
         self.bot.release_sha = "b" * 40
@@ -689,11 +715,25 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PureTests(unittest.TestCase):
-    def test_release_embed_never_mentions_everyone_in_git_subject(self):
-        with patch("ddh.updates._git", return_value="@everyone : critical fix"):
-            card = release_embed("1" * 40, "2" * 40)
+    def test_release_embed_has_no_source_account_link_or_commit_hash(self):
+        revision = "2" * 40
+        with patch("ddh.updates._git", return_value="ddh/updates.py"):
+            card = release_embed("1" * 40, revision)
+        visible = json.dumps(card.to_dict(), ensure_ascii=False).lower()
+        self.assertNotIn("github", visible)
+        self.assertNotIn("rho12435678", visible)
+        self.assertNotIn("https://", visible)
+        self.assertNotIn(revision, visible)
+        self.assertIn("업데이트 공지 자동화", visible)
+
+    def test_release_notes_never_repeat_untrusted_commit_messages(self):
+        revision = "4" * 40
+        source = "account-name : @everyone https://github.com/example"
+        with patch("ddh.updates._git", return_value=source):
+            card = release_embed("3" * 40, revision)
+        self.assertNotIn("account-name", card.fields[0].value)
         self.assertNotIn("@everyone", card.fields[0].value)
-        self.assertEqual(card.footer.text, f"DDH:release:{'2' * 40}")
+        self.assertNotIn("github", card.fields[0].value.lower())
 
     def test_security_rules_are_scoped_and_non_destructive(self):
         rules = specifications()
