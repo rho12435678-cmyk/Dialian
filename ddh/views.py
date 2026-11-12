@@ -49,6 +49,23 @@ class GuardedView(discord.ui.View):
 
 
 class RulesView(GuardedView):
+    async def interaction_check(self, interaction):
+        # Acknowledge in under three seconds even when SQLite or Discord role
+        # checks are slow. Only this view is deferred in interaction_check:
+        # other views must still be able to open Discord modal dialogs.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            require_guild(interaction.guild, self.bot.settings)
+            await self.bot.tickets.ready(interaction.guild)
+            return True
+        except UserError as error:
+            if interaction.guild is not None:
+                await self.bot.store.set(
+                    interaction.guild.id, "verification:last_error", str(error)[:240],
+                )
+            await reply(interaction, str(error))
+            return False
+
     async def on_error(self, interaction, error, item):
         # The earlier generic "interaction failed" message was not enough
         # to identify live account/role errors. Keep only a safe owner-only
@@ -67,7 +84,6 @@ class RulesView(GuardedView):
 
     @discord.ui.button(label="규칙 동의 · 멤버 인증", style=discord.ButtonStyle.success, custom_id="ddh:rules:v1")
     async def accept(self, interaction, button):
-        await interaction.response.defer(ephemeral=True)
         # The official persistent DDH button can also be displayed in a
         # Discord Server Guide resource page. Its interaction.channel_id may
         # differ from the stored rules text channel; that must not block joining.
