@@ -8,7 +8,7 @@ from discord.ext import tasks
 
 from ddh.backups import backup
 from ddh.blueprint import layout_summary
-from ddh.content import publish_panels
+from ddh.content import GUIDE_VERSION, publish_guide, publish_panels
 from ddh.notices import publish_due
 from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
@@ -171,6 +171,16 @@ class Dialian(discord.Client):
                 log.info("DDH automatic provisioning and AutoMod protections applied")
             except Exception:
                 log.exception("DDH automatic setup failed; check roles, permissions and resource conflicts")
+        # Keep the official guide current after a deployment, without
+        # creating another message for returning users.
+        if await self.store.get(guild.id, "setup_complete", False):
+            try:
+                async with self.mutation_lock:
+                    if await self.store.get(guild.id, "guide:version") != GUIDE_VERSION:
+                        await publish_guide(self, guild)
+                        log.info("DDH first-visit guide refreshed")
+            except Exception:
+                log.exception("DDH first-visit guide refresh failed; use /ddh panels to retry")
         try:
             await publish_release(self, guild)
         except Exception:

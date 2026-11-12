@@ -36,18 +36,84 @@ async def upsert_panel(channel, store, key, card, *, view=None):
     return message
 
 
+GUIDE_VERSION = "2026-11-onboarding-v2"
+
+
 async def guide(guild, store):
+    """Render the public first-visit guide with live links to DDH channels."""
     async def link(key):
         return (await channel_for(guild, store, key)).mention
-    return embed("DDH · Dial Dev Hub 이용 안내",
-                 "Roblox 개발자가 작품을 소개하고 팀과 동료를 찾는 커뮤니티입니다.\n\n"
-                 f"**시작**: {await link('rules')}에서 규칙에 동의하면 채팅·구인·음성 채널을 이용할 수 있습니다.\n"
-                 f"**개발자 등록**: {await link('support_panel')} → 분야 선택 → 포트폴리오 제출 → 운영진 심사.\n"
-                 "**포트폴리오**: 승인된 분야 채널에 본인의 작업물과 연락 방법을 올려 주세요.\n"
-                 f"**구인·구직**: {await link('hiring')} / {await link('looking')}에서 연결된 뒤 당사자 DM으로 협의하세요.\n"
-                 f"**문의**: {await link('support_panel')}에서 파트너·서버 피드백·개발자 신청을 선택하세요.\n\n"
-                 "DDH는 직접 주문을 접수하거나 대금을 보관하지 않습니다. "
-                 "작업 범위·금액·납기·수정·환불 조건은 당사자끼리 합의하고 기록을 남겨 주세요.")
+
+    card = discord.Embed(
+        title="🌐 DDH · Dial Dev Hub | 처음 오셨나요?",
+        description=(
+            "**Roblox 개발자와 프로젝트 제작자가 함께 성장하는 연결 공간**\n"
+            "DDH는 작품을 소개하고, 개발자를 찾고, 협업 기회를 나누는 커뮤니티입니다.\n"
+            "처음 방문했다면 이 가이드만 읽어도 활동을 시작할 수 있어요."
+        ),
+        colour=0x5865F2,
+    )
+    card.add_field(
+        name="💡 DDH는 왜 만들어졌나요?",
+        value=(
+            "기존 DDS가 디자인 주문제작 중심이었다면, DDH는 그 범위를 Roblox 개발 전반으로 넓혔습니다.\n"
+            "개발자는 포트폴리오와 실력을 알리고, 게임 제작자는 필요한 팀원이나 협업 상대를 "
+            "더 쉽게 찾을 수 있도록 만들었습니다."
+        ),
+        inline=False,
+    )
+    card.add_field(
+        name="🧩 여기서 무엇을 할 수 있나요?",
+        value=(
+            "• **포트폴리오 공유** — GFX · UI · 복장 · VFX · 모델링 · 빌딩 · 애니메이션 · 스크립팅\n"
+            "• **구인·구직** — 프로젝트 팀원 모집, 개발 참여 기회 탐색\n"
+            "• **커뮤니티** — 개발 질문, 자료 공유, 작품 피드백, 공동 작업\n"
+            "• **문의·신청** — 개발자 등록, 파트너 제안, 서버 개선 의견 제출"
+        ),
+        inline=False,
+    )
+    card.add_field(
+        name="🚀 처음 들어왔다면 이 순서대로!",
+        value=(
+            f"**① 규칙 읽고 참여하기** — {await link('rules')}의 버튼을 눌러 멤버 역할 받기\n"
+            f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
+            f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
+            f"**④ 함께할 사람 찾기** — {await link('hiring')}에서 모집 공고 확인, "
+            f"승인된 개발자는 {await link('looking')}에서 구직 글 작성"
+        ),
+        inline=False,
+    )
+    card.add_field(
+        name="📂 도움이 되는 채널",
+        value=(
+            f"**작품 공유·피드백** {await link('showcase')}  |  "
+            f"**개발 자료** {await link('resources')}\n"
+            f"**업데이트 공지** {await link('updates')}  |  "
+            f"**문의·신청** {await link('support_panel')}"
+        ),
+        inline=False,
+    )
+    card.add_field(
+        name="🛡️ 안전하고 편리한 활동을 위해",
+        value=(
+            "DDH는 직접 주문을 접수하거나 결제·납품을 대신 처리하지 않습니다. "
+            "의뢰·협업 조건은 당사자들이 DM에서 합의하세요.\n"
+            "작업 범위, 보상, 일정, 수정·환불 조건을 미리 명확히 하고, "
+            "비밀번호·인증코드·토큰 같은 개인정보는 공유하지 마세요.\n"
+            "도배, 작품 도용, 괴롭힘, 무단 서버 홍보는 허용되지 않습니다. "
+            "문제가 생기면 **서버 피드백** 티켓으로 알려주세요."
+        ),
+        inline=False,
+    )
+    return card
+
+
+async def publish_guide(bot, guild):
+    """Create or edit one guide embed; never spam duplicate guide messages."""
+    channel = await channel_for(guild, bot.store, "guide")
+    message = await upsert_panel(channel, bot.store, "guide", await guide(guild, bot.store))
+    await bot.store.set(guild.id, "guide:version", GUIDE_VERSION)
+    return message
 
 
 async def publish_panels(bot, guild):
@@ -71,7 +137,7 @@ async def publish_panels(bot, guild):
                     "종료한 티켓은 운영진 전용 보관함에 남습니다. 삭제 요청은 운영진에게 알려 주세요.\n"
                     "진행 중인 티켓은 종류별로 1개까지 열 수 있습니다.")
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
-    await upsert_panel(await channel_for(guild, bot.store, "guide"), bot.store, "guide", await guide(guild, bot.store))
+    await publish_guide(bot, guild)
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
     updates = embed(
         "🔔 DDH 업데이트 알림 센터",

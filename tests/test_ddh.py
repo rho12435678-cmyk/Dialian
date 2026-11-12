@@ -14,7 +14,7 @@ from config import Settings
 from ddh.backups import backup
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, ROLES, overwrites
 from ddh.bot import DDHCommands, Dialian
-from ddh.content import publish_panels
+from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
 from ddh.notices import due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import specifications
@@ -251,6 +251,34 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await RulesView(self.bot).accept.callback(interaction)
         self.visitor.add_roles.assert_not_called()
 
+    async def test_public_guide_explains_purpose_and_first_steps(self):
+        card = await guide(self.guild, self.bot.store)
+        self.assertIn('Dial Dev Hub', card.title)
+        values = '\n'.join(field.value for field in card.fields)
+        self.assertIn('왜 만들어졌나요', '\n'.join(field.name for field in card.fields))
+        self.assertIn('구인·구직', values)
+        self.assertIn('포트폴리오', values)
+        self.assertIn((await self.channel('rules')).mention, values)
+        self.assertIn((await self.channel('support_panel')).mention, values)
+        self.assertIn((await self.channel('hiring')).mention, values)
+        self.assertIn((await self.channel('updates')).mention, values)
+        self.assertLess(len(card), 6000)
+
+    async def test_guide_refresh_is_idempotent(self):
+        original = await publish_guide(self.bot, self.guild)
+        self.assertEqual(await self.bot.store.get(self.guild.id, 'guide:version'), GUIDE_VERSION)
+        refreshed = await publish_guide(self.bot, self.guild)
+        self.assertEqual(original.id, refreshed.id)
+        channel = await self.channel('guide')
+        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(channel.messages[0].embeds[0].footer.text, 'DDH:guide:v1')
+
+    async def test_existing_guide_channel_is_reused_and_renamed(self):
+        guild = Guild(self.guild.id + 100)
+        old_channel = await guild.create_text_channel('이용안내')
+        await provision(guild, self.bot.store, Settings('test', guild.id))
+        self.assertEqual(await self.bot.store.get(guild.id, 'channel:guide'), old_channel.id)
+        self.assertEqual(old_channel.name, '가이드')
     async def test_panels_are_persistent_and_repair_without_duplicates(self):
         for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView):
             self.assertTrue(view_type(self.bot).is_persistent())
