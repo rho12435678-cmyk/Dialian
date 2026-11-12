@@ -66,7 +66,7 @@ async def guide(guild, store):
         name="🧩 여기서 무엇을 할 수 있나요?",
         value=(
             "• **포트폴리오 공유** — GFX · UI · 복장 · VFX · 모델링 · 빌딩 · 애니메이션 · 스크립팅\n"
-            "• **구인·구직** — 프로젝트 팀원 모집, 개발 참여 기회 탐색\n"
+            "• **구인·구직** — 프로젝트 팀원 모집, 개발 참여 기회 탐색\n"\n            "• **제작의뢰** — 예산과 작업 범위를 적어 주문제작 개발자 찾기\n"
             "• **커뮤니티** — 개발 질문, 자료 공유, 작품 피드백, 공동 작업\n"
             "• **문의·신청** — 개발자 등록, 파트너 제안, 서버 개선 의견 제출"
         ),
@@ -78,8 +78,8 @@ async def guide(guild, store):
             f"**① 규칙 읽고 참여하기** — {await link('rules')}의 버튼을 눌러 멤버 역할 받기\n"
             f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
             f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
-            f"**④ 함께할 사람 찾기** — {await link('hiring')}에서 모집 공고 확인, "
-            f"승인된 개발자는 {await link('looking')}에서 구직 글 작성"
+            f"**④ 함께할 사람 찾기** — {await link('hiring')}·{await link('commissions')}에서 "
+            f"협업·주문제작 의뢰 확인, 승인된 개발자는 {await link('looking')}에서 구직 글 작성"
         ),
         inline=False,
     )
