@@ -17,7 +17,7 @@ from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
-from ddh.updates import deployed_revision, publish_release
+from ddh.updates import deployed_revision, publish_release, redact_legacy_release_links
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 
@@ -225,6 +225,7 @@ class Dialian(discord.Client):
         if await self.store.get(guild.id, "setup_complete", False):
             for name, action in (
                 ("outdated update signup removal", retire_update_alerts_panel),
+                ("redact old release source links", redact_legacy_release_links),
                 ("automatic deployment announcement", publish_release),
             ):
                 try:
@@ -269,6 +270,7 @@ class Dialian(discord.Client):
                 ("ticket recovery", self.tickets.recover),
                 ("scheduled notice", lambda g: publish_due(self, g)),
                 ("remove old update signup", lambda g: retire_update_alerts_panel(self, g)),
+                ("redact old release metadata", lambda g: redact_legacy_release_links(self, g)),
                 ("automatic release", lambda g: publish_release(self, g)),
             ):
                 try:
