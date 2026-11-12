@@ -23,7 +23,7 @@ from ddh.verification import verify_member
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
-from ddh.security import configure_security, specifications
+from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
 from ddh.updates import publish_release, redact_legacy_release_links, release_embed
