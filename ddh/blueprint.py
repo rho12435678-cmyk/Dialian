@@ -26,11 +26,15 @@ class Category:
 
 CATEGORIES = (
     Category("info", "📌 안내", aliases=("Information",)),
+    # All support categories appear immediately below the public notices.
+    Category("support", "📨 문의"),
+    Category("tickets", "🔒 문의 진행", True),
+    Category("archive", "📁 문의 보관", True),
     Category("community", "💬 커뮤니티", aliases=("Text Channels",)),
-    Category("jobs", "🤝 구인·구직"), Category("portfolios", "🎨 포트폴리오"),
+    Category("jobs", "🤝 구인·구직"),
+    Category("portfolios", "🎨 포트폴리오"),
     Category("voice", "🔊 음성 채널", aliases=("Voice Channels",)),
-    Category("support", "📨 문의"), Category("tickets", "🔒 문의 진행", True),
-    Category("archive", "📁 문의 보관", True), Category("ops", "🛠 운영", True),
+    Category("ops", "🛠 운영", True),
 )
 
 
@@ -43,14 +47,17 @@ class Channel:
     voice: bool = False
     aliases: tuple[str, ...] = ()
     topic: str = ""
+    forum: bool = False
+    news: bool = False
 
 
 CHANNELS = (
     Channel("rules", "시작·규칙", "info", "readonly", aliases=("welcome-and-rules",)),
-    Channel("announcements", "공지사항", "info", "readonly", aliases=("announcements",)),
+    Channel("announcements", "공지사항", "info", "readonly",
+            aliases=("announcements",), news=True),
     Channel("updates", "업데이트-공지", "info", "readonly",
             aliases=("업데이트 공지", "update-announcements", "updates"),
-            topic="DDH 공식 업데이트 · 공지 알림 신청 버튼으로 새 버전 소식을 받아보세요."),
+            topic="DDH 공식 업데이트 · 공지 알림 신청 버튼으로 새 버전 소식을 받아보세요.", news=True),
     Channel("guide", "가이드", "info", "readonly", aliases=("이용안내", "guide"),
             topic="DDH에 오신 것을 환영합니다 · 서버 소개, 활동 방법, 개발자 등록과 구인·구직 안내"),
     Channel("resources", "개발자료", "community", aliases=("resources",)),
@@ -60,10 +67,14 @@ CHANNELS = (
     Channel("showcase", "작품공유·피드백", "community"),
     Channel("meetings", "모임일정", "community", aliases=("meeting-plans",)),
     Channel("offtopic", "잡담", "community", aliases=("off-topic",)),
-    Channel("hiring", "구인", "jobs", topic="분야·업무·예산/보상·일정·연락 방법을 명시하세요. 협의는 당사자 DM에서 진행합니다."),
-    Channel("looking", "구직", "jobs", "developer", topic="개발자 역할 승인 후 분야·포트폴리오·가능 일정·연락 방법을 작성하세요."),
-    *[Channel(f"portfolio:{key}", f"{key}-포트폴리오", "portfolios", f"field:{key}",
-              topic=f"{label} 개발자 작품·역할·작업 범위·연락 방법. 문의와 거래는 당사자 DM으로 진행하세요.")
+    Channel("hiring", "구인", "jobs", forum=True,
+            topic="🎯 프로젝트 구인 게시판 | 새 글: 프로젝트명 / 모집 분야 / 업무 / 예산·보상 / 일정 / 지원 조건 / 연락 방법. 의뢰와 협의는 당사자 DM에서 진행하세요."),
+    Channel("looking", "구직", "jobs", "developer", forum=True,
+            topic="🧑‍💻 개발자 구직 게시판 | 개발자 승인 후 새 글: 전문 분야 / 포트폴리오 / 경력 / 가능한 업무 / 희망 조건 / 연락 방법."),
+    Channel("commissions", "제작의뢰", "jobs", forum=True,
+            topic="🛠️ Roblox 주문제작 의뢰 게시판 | 새 글: 필요한 작업(GFX·UI·복장·VFX·모델·빌딩·애니메이션·스크립트) / 예산 / 납기 / 요구 사항 / DM 연락 방법. DDH는 거래·결제를 중개하지 않습니다."),
+    *[Channel(f"portfolio:{key}", f"{key}-포트폴리오", "portfolios", f"field:{key}", forum=True,
+              topic=f"🎨 {label} 작품·커미션 포럼 | 승인된 분야 개발자가 작품명 / 이미지·영상 / 본인 담당 부분 / 작업 가능 범위 / 예상 가격·납기 / 문의 방법을 올립니다. 방문자는 게시물에서 질문하거나 DM으로 의뢰할 수 있습니다.")
       for key, label in FIELDS.items()],
     Channel("lounge", "라운지", "voice", voice=True, aliases=("Lounge",)),
     Channel("workroom", "공동작업실", "voice", voice=True),
