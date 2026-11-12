@@ -9,7 +9,7 @@ import discord
 
 from ddh.backups import latest_backup, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, overwrites, role_permissions
-from ddh.security import specifications
+from ddh.security import rule_trigger_type, specifications
 from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
 
 log = logging.getLogger(__name__)
@@ -131,8 +131,8 @@ async def inspect_automod(guild, store):
         managed = next((rule for rule in rules if rule.name == name), None)
         candidates = [managed] if managed else [
             rule for rule in rules
-            if trigger.type != discord.AutoModRuleTriggerType.keyword and rule.trigger_type == trigger.type]
-        if not any(rule.enabled and rule.trigger_type == trigger.type
+            if trigger.type != discord.AutoModRuleTriggerType.keyword and rule_trigger_type(rule) == trigger.type]
+        if not any(rule.enabled and rule_trigger_type(rule) == trigger.type
                    and any(action.type == discord.AutoModRuleActionType.block_message for action in rule.actions)
                    for rule in candidates):
             findings.append(f"AutoMod 차단 설정 확인 · {name}")
