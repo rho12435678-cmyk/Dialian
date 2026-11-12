@@ -1,56 +1,57 @@
-name: Deploy Bot
-
+name: Deploy DDH Bot
+# First DDH deployment must explicitly identify the new guild.
+# A normal main push no longer restarts the old DDS production process.
 on:
-  push:
-    branches:
-      - main
-
+  workflow_dispatch:
+    inputs:
+      ddh_guild_id:
+        description: '새 Dial Dev Hub 서버 ID (기존 DDS 서버 ID를 입력하지 마세요)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: dialian-production
+  cancel-in-progress: false
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Deploy
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - name: Validate target
+        env:
+          DDH_GUILD_ID: ${{ inputs.ddh_guild_id }}
+          TOKEN: validation-only
+        run: python dial.py --check-config
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy tested revision to existing VPS
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DDH_GUILD_ID: ${{ inputs.ddh_guild_id }}
+          TOKEN: ${{ secrets.TOKEN }}
+          DDH_DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-
+          envs: DDH_GUILD_ID,TOKEN,DDH_DEPLOY_SHA
+          command_timeout: 15m
           script: |
+            set -eu
             cd /root/Dialian
-
-            mkdir -p deploy-backups
-            if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-              BACKUP_FILE="deploy-backups/pre-deploy-$(date +%Y%m%d-%H%M%S).patch"
-              git diff --binary > "$BACKUP_FILE"
-              git stash push --include-untracked -m "pre-deploy backup $(date -Iseconds)"
-            fi
-            git pull --ff-only origin main
-
-            source venv/bin/activate
-            # Install before stopping the running bot: the venv may lack aiohttp.
-            python -m pip install -r requirements.txt
-            python -c "import aiohttp, aiosqlite, discord"
-
-            export TOKEN="${{ secrets.TOKEN }}"
-            export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
-
-            if [ -f bot.pid ]; then
-              OLD_PID="$(cat bot.pid)"
-              if ps -p "$OLD_PID" > /dev/null 2>&1; then
-                kill "$OLD_PID" || true
-                sleep 3
-              fi
-            fi
-
-            # Stop old manual and automated launches (including python3 -u).
-            pkill -f '(^|/)(python|python3)( -u)? dial[.]py$' || true
-            sleep 2
-
-            nohup /root/Dialian/venv/bin/python3 -u dial.py > bot.log 2>&1 < /dev/null &
-            echo $! > bot.pid
-            sleep 5
-            kill -0 "$(cat bot.pid)"
-            pgrep -af '(^|/)(python|python3)( -u)? dial[.]py$'
+            git fetch origin
+            # Refuse to discard live source changes. Runtime data stays outside Git.
+            git diff --quiet
+            git diff --cached --quiet
+            # checkout itself refuses untracked files that would be overwritten;
+            # existing untracked venv/runtime files may remain in place.
+            git checkout --detach "$DDH_DEPLOY_SHA"
+            bash deploy/install.sh

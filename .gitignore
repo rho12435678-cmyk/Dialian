@@ -8,3 +8,9 @@ deploy-backups/
 __pycache__/
 .venv/
 *.py[cod]
+venv/
+venv-ddh/
+.ruff_cache/
+*.db
+*.db-wal
+*.db-shm
