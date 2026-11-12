@@ -23,7 +23,7 @@ from ddh.content import (GUIDE_VERSION, guide, publish_guide, publish_panels,
 from ddh.operations import inspect_automod, inspect_layout
 from ddh.permissions import operator_migration
 from ddh.verification import verify_member
-from ddh.visibility import apply_visibility, visibility_plan
+from ddh.visibility import apply_visibility
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
