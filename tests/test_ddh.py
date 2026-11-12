@@ -55,6 +55,67 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         return {"_fields": ["gfx", "vfx"], "Roblox 사용자명·프로필": "Dial",
                 "포트폴리오 링크": "https://example.com/works", "경력·도구·본인 담당 부분": "Blender, 본인 작업"}
 
+    async def test_security_api_failure_reports_exact_stage_and_keeps_incomplete(self):
+        self.guild.fetch_automod_rules = AsyncMock(side_effect=RuntimeError("API unavailable"))
+        with self.assertRaisesRegex(UserError, "AutoMod 규칙 목록 조회"):
+            await self.bot.apply_security(self.guild)
+        self.assertFalse(await self.bot.store.get(self.guild.id, "security_complete"))
+        self.assertIn(
+            "AutoMod 규칙 목록 조회",
+            await self.bot.store.get(self.guild.id, "security:last_error"),
+        )
+
+    async def test_security_rejects_exposed_log_channel_with_owner_hint(self):
+        audit = await self.channel("security_log")
+        await audit.edit(overwrites={
+            self.guild.default_role: discord.PermissionOverwrite(view_channel=True),
+            self.guild.me: discord.PermissionOverwrite(view_channel=True),
+        })
+        with self.assertRaisesRegex(UserError, "비공개 권한 불일치"):
+            await self.bot.apply_security(self.guild)
+        self.assertFalse(await self.bot.store.get(self.guild.id, "security_complete"))
+
+    async def test_security_does_not_claim_success_with_disabled_existing_spam(self):
+        rules = [SimpleNamespace(
+            name="서버 기존 스팸 차단",
+            trigger_type=discord.AutoModRuleTriggerType.spam,
+            enabled=False, actions=[],
+        )]
+        self.guild.fetch_automod_rules = AsyncMock(side_effect=lambda: list(rules))
+
+        async def create_rule(**params):
+            rule = SimpleNamespace(
+                name=params["name"], trigger_type=params["trigger"].type,
+                enabled=params["enabled"], actions=params["actions"],
+            )
+            rules.append(rule)
+            return rule
+
+        self.guild.create_automod_rule = AsyncMock(side_effect=create_rule)
+        with self.assertRaisesRegex(UserError, "기존 Discord 규칙이 비활성화"):
+            await self.bot.apply_security(self.guild)
+        self.assertFalse(await self.bot.store.get(self.guild.id, "security_complete"))
+
+    async def test_security_applies_all_automod_rules_and_clears_error(self):
+        rules = []
+        self.guild.fetch_automod_rules = AsyncMock(side_effect=lambda: list(rules))
+
+        async def create_rule(**params):
+            rule = SimpleNamespace(
+                name=params["name"], trigger_type=params["trigger"].type,
+                enabled=params["enabled"], actions=params["actions"],
+            )
+            rules.append(rule)
+            return rule
+
+        self.guild.create_automod_rule = AsyncMock(side_effect=create_rule)
+        await self.bot.store.set(self.guild.id, "security:last_error", "이전 실패")
+        result = await self.bot.apply_security(self.guild)
+        self.assertEqual(len(result), 3)
+        self.assertTrue(await self.bot.store.get(self.guild.id, "security_complete"))
+        self.assertIsNone(await self.bot.store.get(self.guild.id, "security:last_error"))
+        self.assertEqual(len(rules), 3)
+
     async def test_existing_operator_is_adopted_without_legacy_staff_duplication(self):
         operator = next(role for role in self.guild.roles if role.name == "운영자")
         self.assertEqual(self.roles["staff"].id, operator.id)
