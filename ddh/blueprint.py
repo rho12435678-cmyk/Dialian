@@ -65,6 +65,12 @@ CATEGORIES = (
 )
 
 
+def category_policy(spec):
+    if spec.key == "entry":
+        return "verification"
+    return "private" if spec.private else "readonly"
+
+
 @dataclass(frozen=True)
 class Channel:
     key: str
@@ -79,7 +85,7 @@ class Channel:
 
 
 CHANNELS = (
-    Channel("verification", "인증-verify", "entry", "readonly",
+    Channel("verification", "인증-verify", "entry", "verification",
             topic="규칙을 읽고 버튼을 눌러 DDH 멤버 인증"),
 
     Channel("member_log", "입퇴장-join-leave", "entry", "log",
@@ -161,10 +167,10 @@ def access(*, write=True, voice=False):
 
 
 def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed=False):
-    private = policy in ("private", "log", "commands")
+    is_entry = policy == "verification"
     result = {
         guild.default_role: discord.PermissionOverwrite(
-            view_channel=not private, read_message_history=not private,
+            view_channel=is_entry, read_message_history=is_entry,
             send_messages=False, send_messages_in_threads=False, add_reactions=False,
             create_public_threads=False, create_private_threads=False,
             connect=False, speak=False, mention_everyone=False,
@@ -184,8 +190,14 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
             result[roles[key]].manage_threads = False
             result[roles[key]].manage_channels = False
             result[roles[key]].manage_webhooks = False
-    if policy in ("member", "developer", "commands"):
+    if policy in ("member", "developer", "commands", "verification"):
         result[guild.default_role].use_application_commands = False
+    if policy == "readonly":
+        result[roles["member"]] = access(write=False)
+    if is_entry:
+        result[guild.default_role].create_instant_invite = False
+        result[guild.default_role].use_external_apps = False
+        result[roles["member"]] = discord.PermissionOverwrite(view_channel=False)
     if policy == "commands":
         for key in ("staff", "admin", "member"):
             result[roles[key]] = access()
@@ -194,6 +206,9 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
     writer = roles.get(policy)
     if writer:
         result[writer] = access(voice=voice)
+        if policy == "developer":
+            # The Developer role can post only when Member also grants visibility.
+            result[writer].view_channel = None
     if owner is not None:
         result[owner] = access(write=not closed)
     return result

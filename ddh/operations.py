@@ -7,7 +7,7 @@ from uuid import uuid4
 import discord
 
 from ddh.audit_details import describe_audit, identity
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, overwrites, role_permissions
+from ddh.blueprint import CATEGORIES, CHANNELS, ROLES, category_policy, overwrites, role_permissions
 from ddh.security import specifications
 from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
 
@@ -74,9 +74,8 @@ async def inspect_layout(guild, store):
         channel = guild.get_channel(state.get(f"category:{spec.key}", 0))
         if not isinstance(channel, discord.CategoryChannel):
             findings.append(f"카테고리 누락 · {spec.name}")
-        elif roles["staff"] and roles["admin"]:
-            policy = "private" if spec.private else "readonly"
-            if channel.overwrites != overwrites(guild, roles, policy):
+        elif roles["staff"] and roles["admin"] and roles["member"]:
+            if channel.overwrites != overwrites(guild, roles, category_policy(spec)):
                 findings.append(f"카테고리 권한 불일치 · {spec.name}")
     for spec in CHANNELS:
         channel = guild.get_channel(state.get(f"channel:{spec.key}", 0))
@@ -98,7 +97,7 @@ async def inspect_layout(guild, store):
                     reason = "@everyone 채널 보기 차단 없음" + (f" / {reason}" if reason else "")
                 findings.insert(0, f"비공개 채널 접근 확인 · {identity(channel)} · {reason}")
         required = ("member", "external_bots") if spec.policy == "commands" else ()
-        if (roles["staff"] and roles["admin"] and all(roles[key] for key in required)
+        if (roles["staff"] and roles["admin"] and roles["member"] and all(roles[key] for key in required)
                 and (spec.policy not in roles or roles[spec.policy])):
             policy = forum_permissions(guild, roles, spec.policy) if spec.forum else overwrites(
                 guild, roles, spec.policy, voice=spec.voice)

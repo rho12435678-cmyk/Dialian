@@ -254,7 +254,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         voice = await self.channel("lounge")
         gfx = self.guild.member(6, [self.roles["member"], self.roles["developer"], self.roles["field:gfx"]])
         vfx = self.guild.member(7, [self.roles["member"], self.roles["developer"], self.roles["field:vfx"]])
-        self.assertTrue(general.permissions_for(self.visitor).view_channel)
+        self.assertFalse(general.permissions_for(self.visitor).view_channel)
         self.assertFalse(general.permissions_for(self.visitor).send_messages)
         self.assertTrue(general.permissions_for(self.member).send_messages)
         self.assertFalse(rules.permissions_for(self.member).send_messages)
@@ -639,6 +639,60 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         interaction.user = self.visitor
         await verification.messages[0].view.accept.callback(interaction)
         self.assertIn(self.roles["member"], self.visitor.roles)
+        self.assertFalse(verification.permissions_for(self.visitor).view_channel)
+        self.assertTrue(pictures.permissions_for(self.visitor).view_channel)
+
+    async def test_onboarding_closes_legacy_visibility_and_preserves_private_boundaries(self):
+        guild = self.guild
+        other_role = guild.make_role("구형 역할")
+        await self.visitor.add_roles(other_role, self.roles["developer"])
+        ticket = await self.bot.tickets.create(guild, self.member, "feedback", {"제목": "권한", "내용": "확인"})
+        custom = await guild.create_text_channel("추가-채널", overwrites={
+            guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            other_role: discord.PermissionOverwrite(view_channel=True, attach_files=True),
+            self.visitor: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        })
+        restricted = await guild.create_text_channel("기존-역할-제한", overwrites={
+            guild.default_role: discord.PermissionOverwrite(view_channel=True),
+            other_role: discord.PermissionOverwrite(view_channel=False),
+        })
+        rules = await self.channel("rules")
+        await rules.edit(overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False)})
+        await ticket.set_permissions(guild.default_role, overwrite=discord.PermissionOverwrite(view_channel=True))
+        log = await self.channel("member_log")
+        await log.set_permissions(other_role, overwrite=discord.PermissionOverwrite(view_channel=True))
+        group = DDHCommands(self.bot)
+        interaction = AsyncMock(guild=guild, user=SimpleNamespace(id=guild.owner_id))
+        interaction.response.is_done = Mock(return_value=True)
+
+        await group.onboarding.callback(group, interaction, apply=True)
+
+        visible = {c.id for c in guild.channels if not isinstance(c, discord.CategoryChannel)
+                   and c.permissions_for(self.visitor).view_channel}
+        verification = await self.channel("verification")
+        self.assertEqual(visible, {verification.id})
+        self.assertIn("서로 존중하기", verification.messages[0].embeds[0].description)
+        self.assertTrue(custom.permissions_for(self.member).send_messages)
+        self.assertTrue(custom.overwrites_for(other_role).attach_files)
+        self.assertFalse(restricted.permissions_for(self.member).view_channel)
+        self.assertTrue(rules.permissions_for(self.member).view_channel)
+        self.assertFalse(rules.permissions_for(self.member).send_messages)
+        self.assertTrue(ticket.permissions_for(self.member).view_channel)
+        self.assertFalse(ticket.permissions_for(guild.member(80, [self.roles["member"]])).view_channel)
+        self.assertTrue(log.permissions_for(self.staff).view_channel)
+
+    async def test_rejoin_requires_verification_to_restore_personal_ticket_visibility(self):
+        from ddh.onboarding import INSTALLED, VISIBILITY_INSTALLED
+
+        guild = self.guild
+        await self.bot.store.set(guild.id, INSTALLED, True)
+        await self.bot.store.set(guild.id, VISIBILITY_INSTALLED, True)
+        ticket = await self.bot.tickets.create(guild, self.member, "feedback", {"제목": "테스트", "내용": "문의"})
+        self.member.joined_at += timedelta(days=1)
+        await self.bot.on_member_join(self.member)
+        self.assertFalse(ticket.permissions_for(self.member).view_channel)
+        self.assertTrue(await verify_member(self.bot, guild, self.member.id))
+        self.assertTrue(ticket.permissions_for(self.member).view_channel)
 
     async def test_existing_entry_channels_move_without_sync_and_rules_button_is_removed(self):
         guild = self.guild

@@ -5,6 +5,15 @@ from ddh.blueprint import FIELDS
 from ddh.server import UserError, channel_for
 
 ORANGE = 0xF39C12
+RULES = (
+    "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
+    "**2. 본인 작품만 게시하기** — 도용·사칭을 금지하며 공동작업은 본인의 담당 부분을 밝혀 주세요.\n"
+    "**3. 구인 내용을 명확히 쓰기** — 업무·보상·일정·연락 방법을 기재하고 무급/수익배분이면 표시하세요.\n"
+    "**4. 개인정보 보호하기** — 비밀번호·인증코드·쿠키·토큰·계좌 정보는 공개 채널에 올리지 마세요.\n"
+    "**5. 거래는 당사자끼리 협의하기** — DDH는 외주 제작팀이나 결제 중개 서비스가 아닙니다. "
+    "개발자 역할은 거래 이행이나 실력을 보증하지 않습니다.\n"
+    "**6. 문제가 생기면 문의하기** — 사기·도용·규칙 위반은 서버 피드백 티켓으로 알려 주세요."
+)
 
 
 def embed(title, description):
@@ -54,7 +63,7 @@ async def guide(guild, store):
 
     verification = guild.get_channel(await store.get(guild.id, "channel:verification", 0))
     rules_link = await link("rules")
-    start = (f"{rules_link}을 읽고 {verification.mention}에서 멤버 인증하기" if verification else
+    start = (f"{rules_link}에서 인증 때 동의한 규칙 다시 보기" if verification else
              f"{rules_link}의 버튼을 눌러 멤버 역할 받기")
     card = discord.Embed(
         title="🌐 DDH · Dial Dev Hub | 처음 오셨나요?",
@@ -133,13 +142,11 @@ async def publish_verification(bot, guild):
     from ddh.views import VerificationView
 
     channel = await channel_for(guild, bot.store, "verification")
-    rules = guild.get_channel(await bot.store.get(guild.id, "channel:rules", 0))
-    rules_label = rules.mention if rules else "서버 규칙"
     age = bot.settings.verification_min_days
     requirement = f"\n• Discord 계정을 만든 지 {age}일 이상 지나야 해요." if age else ""
-    panel = embed("DDH 멤버 인증",
-                  f"• 먼저 {rules_label}을 읽고 Discord에서 요구하는 서버 규칙 확인을 마쳐 주세요."
-                  f"{requirement}\n• 아래 버튼으로 규칙에 동의하면 멤버 역할을 받아요.")
+    panel = embed("DDH 멤버 인증", f"{RULES}\n\n"
+                  "• Discord에서 서버 규칙 확인을 요청하면 먼저 완료해 주세요."
+                  f"{requirement}\n• 아래 버튼으로 동의하면 멤버 역할이 지급되고 서버 채널이 열려요.")
     await upsert_panel(channel, bot.store, "verification", panel, view=VerificationView(bot))
 
 
@@ -168,15 +175,7 @@ async def publish_panels(bot, guild):
     verification = guild.get_channel(await bot.store.get(guild.id, "channel:verification", 0))
     instruction = (f"규칙을 읽은 뒤 {verification.mention}에서 인증해 주세요." if verification else
                    "운영진이 안내한 인증 채널에서 멤버 인증을 진행해 주세요.")
-    rules = embed("DDH에 오신 것을 환영합니다",
-                  "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
-                  "**2. 본인 작품만 게시하기** — 도용·사칭을 금지하며 공동작업은 본인의 담당 부분을 밝혀 주세요.\n"
-                  "**3. 구인 내용을 명확히 쓰기** — 업무·보상·일정·연락 방법을 기재하고 무급/수익배분이면 표시하세요.\n"
-                  "**4. 개인정보 보호하기** — 비밀번호·인증코드·쿠키·토큰·계좌 정보는 공개 채널에 올리지 마세요.\n"
-                  "**5. 거래는 당사자끼리 협의하기** — DDH는 외주 제작팀이나 결제 중개 서비스가 아닙니다. "
-                  "개발자 역할은 거래 이행이나 실력을 보증하지 않습니다.\n"
-                  "**6. 문제가 생기면 문의하기** — 사기·도용·규칙 위반은 서버 피드백 티켓으로 알려 주세요.\n\n"
-                  + instruction)
+    rules = embed("DDH에 오신 것을 환영합니다", f"{RULES}\n\n{instruction}")
     support = embed("DDH 문의·신청",
                     "**파트너 문의**: 서버 소개와 제휴 제안\n"
                     "**서버 피드백**: 개선 제안·오류·규칙 위반 제보\n"

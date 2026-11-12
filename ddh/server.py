@@ -1,7 +1,7 @@
 """Repeatable provisioning of explicitly managed DDH resources."""
 import discord
 
-from ddh.blueprint import CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, overwrites, role_permissions
+from ddh.blueprint import CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, category_policy, overwrites, role_permissions
 
 REQUIRED_PERMISSIONS = (
     "manage_roles", "manage_channels", "manage_guild", "view_channel", "send_messages", "read_message_history",
@@ -150,7 +150,7 @@ async def create_text_board(guild, spec, category, roles, *, reason):
     return await guild.create_text_channel(
         name=spec.name, category=category, reason=reason, overwrites=overwrites(guild, roles, spec.policy),
         topic=spec.topic or "Dial Dev Hub · Roblox 개발자 커뮤니티",
-        slowmode_delay=0 if spec.policy in ("readonly", "log") else 10,
+        slowmode_delay=0 if spec.policy in ("readonly", "log", "verification") else 10,
         news=spec.news and "NEWS" in guild.features,
     )
 
@@ -178,7 +178,7 @@ async def provision(guild, store, settings):
         category = found[f"category:{spec.key}"]
         if category is None:
             category = await guild.create_category(
-                name=spec.name, overwrites=overwrites(guild, roles, "private" if spec.private else "readonly"),
+                name=spec.name, overwrites=overwrites(guild, roles, category_policy(spec)),
                 reason="DDH 소유자 초기 구성")
         categories[spec.key] = category
         await store.set(guild.id, f"category:{spec.key}", category.id)

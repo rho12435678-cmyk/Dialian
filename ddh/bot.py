@@ -91,7 +91,7 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, summary)
 
     @app_commands.command(name="onboarding", description="인증·입퇴장·명령어 채널과 외부봇 역할 설정")
-    @app_commands.describe(apply="True: 채널과 외부봇 역할 연결 및 인증 전 활동 제한 적용")
+    @app_commands.describe(apply="True: 입장 채널을 연결하고 인증 전 채널 보기 제한 적용")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def onboarding(self, interaction: discord.Interaction, apply: bool = False):
@@ -100,12 +100,13 @@ class DDHCommands(app_commands.Group):
         guild = interaction.guild
         if not apply:
             await reply(interaction, "안내 위 입장 구역에 인증·비공개 입퇴장 채널을 배치하고 규칙 버튼을 제거합니다. 명령어 채널과 "
-                        "외부봇 역할을 구성합니다. DDH 활동 채널은 인증 전 활동을 제한합니다. "
+                        "외부봇 역할을 구성합니다. 인증 전에는 인증 채널만 보이도록 하고, 다른 채널에 "
+                        "미인증자에게 보기 권한을 주는 역할·개별 허용을 정리합니다. "
                         "`/ddh onboarding apply:True`로 적용하세요.")
             return
         async with self.bot.mutation_lock:
             await self.bot.tickets.ready(guild)
-            role, mentions, exceptions = await install_onboarding(self.bot, guild)
+            role, mentions, adjusted, review = await install_onboarding(self.bot, guild)
         note = "\n입퇴장과 신규 봇 연결은 Server Members Intent를 켜고 재시작하면 작동합니다."
         if self.bot.intents.members:
             try:
@@ -115,8 +116,11 @@ class DDHCommands(app_commands.Group):
                     note += f" 역할을 지급하지 못한 봇 {blocked}개는 Dialian 역할 순서를 확인해 주세요."
             except discord.HTTPException:
                 note = "\n기존 봇 목록을 읽지 못했습니다. 기존 봇에게는 외부봇 역할을 직접 지정해 주세요."
-        if exceptions:
-            note += "\n기존 개별 활동 허용 권한을 확인할 채널 · " + ", ".join(exceptions[:8])
+        note += "\n미인증자는 인증 채널만 볼 수 있습니다."
+        if adjusted:
+            note += f"\n기존 채널 보기 허용 정리 {len(adjusted)}곳 · " + ", ".join(adjusted[:8])
+        if review:
+            note += f"\n기존 역할 차단을 우선한 채널 {len(review)}곳 · " + ", ".join(review[:8])
         await self.audit_change(interaction, "onboarding", "입장·인증·명령어 채널 연결 · " + " · ".join(mentions) + note)
         await reply(interaction, "설치 완료 · " + " · ".join(mentions) + note)
 
