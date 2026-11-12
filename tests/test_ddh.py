@@ -12,8 +12,9 @@ import discord
 
 from config import Settings
 from ddh.backups import backup
-from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, ROLES, overwrites
+from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, ROLES, overwrites, role_permissions
 from ddh.bot import DDHCommands, Dialian
+from ddh.cleanup import cleanup_legacy
 from ddh.content import GUIDE_VERSION, guide, publish_guide, publish_panels
 from ddh.notices import due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
@@ -142,7 +143,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.bot.store.get(guild.id, "news_format_pending"))
 
     async def test_compact_bilingual_layout_and_announce_support(self):
-        self.assertEqual(len(CATEGORIES), 8)
+        self.assertEqual(len(CATEGORIES), 6)
         names = {ch.name for ch in CHANNELS}
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
@@ -153,26 +154,63 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.channel("portfolio")).type, discord.ChannelType.forum)
         self.assertFalse((await self.channel("portfolio")).permissions_for(self.member).send_messages)
 
-    async def test_obsolete_channels_archive_without_data_loss(self):
-        guild = Guild(self.guild.id + 987)
-        old_category = await guild.create_category("🎨 포트폴리오")
-        await self.bot.store.set(guild.id, "category:portfolios", old_category.id)
-        old_forum = await guild.create_forum("gfx-포트폴리오", category=old_category)
-        old_chat = await guild.create_text_channel("잡담")
-        await old_chat.send(embed=discord.Embed(title="기록 보존"))
-        await self.bot.store.set(guild.id, "channel:portfolio:gfx", old_forum.id)
-        await self.bot.store.set(guild.id, "channel:offtopic", old_chat.id)
-        await provision(guild, self.bot.store, Settings("test", guild.id))
-        archival = guild.get_channel(await self.bot.store.get(guild.id, "category:archive"))
-        self.assertEqual(old_forum.category_id, archival.id)
-        self.assertEqual(old_chat.category_id, archival.id)
-        self.assertTrue(old_forum.name.startswith("보관-"))
-        self.assertEqual(len(old_chat.messages), 1)
-        self.assertFalse(old_chat.permissions_for(guild.member(765)).view_channel)
-        total_channels = len(guild.channels)
-        await provision(guild, self.bot.store, Settings("test", guild.id))
-        self.assertEqual(total_channels, len(guild.channels))
-        self.assertEqual(len(old_chat.messages), 1)
+    async def test_legacy_cleanup_requires_explicit_confirmation(self):
+        old_tickets = await self.guild.create_category("🔐 티켓・Tickets")
+        old_archive = await self.guild.create_category("📁 보관・Archive")
+        await self.bot.store.set(self.guild.id, "category:tickets", old_tickets.id)
+        await self.bot.store.set(self.guild.id, "category:archive", old_archive.id)
+        old = await self.guild.create_text_channel("보관-잡담", category=old_archive)
+        await old.send(embed=discord.Embed(title="영구삭제 전 기록"))
+        ongoing = await self.bot.tickets.create(
+            self.guild, self.member, "developer", self.payload()
+        )
+        await ongoing.edit(category=old_tickets)
+        plan = await cleanup_legacy(
+            self.guild, self.bot.store, self.settings, confirm=False
+        )
+        self.assertIn("삭제 대상", plan)
+        self.assertIn(old, self.guild.channels)
+        self.assertIn(ongoing, self.guild.channels)
+        self.assertIn(old_archive, self.guild.channels)
+
+        result = await cleanup_legacy(
+            self.guild, self.bot.store, self.settings, confirm=True
+        )
+        self.assertIn("정리 완료", result)
+        self.assertNotIn(old, self.guild.channels)
+        self.assertNotIn(old_archive, self.guild.channels)
+        self.assertNotIn(old_tickets, self.guild.channels)
+        self.assertIn(ongoing, self.guild.channels)
+        ops = await self.bot.store.get(self.guild.id, "category:ops")
+        self.assertEqual(ongoing.category_id, ops)
+        self.assertEqual(
+            (await self.bot.store.channel_ticket(self.guild.id, ongoing.id))["state"],
+            "open",
+        )
+
+    async def test_admin_role_and_top_community_rules_shortcut(self):
+        admin = self.roles["admin"]
+        self.assertTrue(admin.permissions.manage_channels)
+        self.assertTrue(admin.permissions.manage_roles)
+        self.assertFalse(admin.permissions.administrator)
+        self.assertLess(self.roles["developer"].position, admin.position)
+        self.assertLess(admin.position, self.roles["staff"].position)
+        rules = await self.channel("rules")
+        self.assertEqual(self.guild.rules_channel.id, rules.id)
+        self.assertEqual([ch.key for ch in CHANNELS][:2], ["announcements", "updates"])
+
+    async def test_active_ticket_in_staff_area_and_closed_channel_removed(self):
+        channel = await self.bot.tickets.create(
+            self.guild, self.member, "feedback", {"제목": "test", "내용": "hello"}
+        )
+        self.assertEqual(
+            channel.category_id,
+            await self.bot.store.get(self.guild.id, "category:ops"),
+        )
+        await self.bot.tickets.close(self.guild, channel, self.member, "resolved")
+        self.assertNotIn(channel, self.guild.channels)
+        record = await self.bot.store.channel_ticket(self.guild.id, channel.id)
+        self.assertEqual(record["state"], "closed")
 
     async def test_support_categories_follow_notice_categories(self):
         expected = ["info", "support", "community", "jobs"]
@@ -356,6 +394,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         channel.fail_edit = False
         await self.bot.tickets.recover(self.guild)
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))["state"], "closed")
+        self.assertNotIn(channel, self.guild.channels)
         self.assertFalse(channel.permissions_for(self.member).view_channel)
         self.assertTrue(channel.permissions_for(self.staff).view_channel)
 
@@ -480,7 +519,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 
