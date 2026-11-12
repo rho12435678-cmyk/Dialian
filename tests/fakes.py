@@ -117,6 +117,9 @@ class Category(ChannelMethods, discord.CategoryChannel):
     def __init__(self, guild, name, **kwargs):
         super().__init__(state=Mock(), guild=guild, data=model_data(guild, name, 4, **kwargs))
 
+    async def delete(self, **kwargs):
+        self.guild.channels.remove(self)
+
 
 class Voice(ChannelMethods, discord.VoiceChannel):
     def __init__(self, guild, name, **kwargs):

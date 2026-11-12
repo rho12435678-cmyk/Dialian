@@ -8,12 +8,37 @@ FIELDS = {
     "vfx": "VFX", "building": "빌더", "modeling": "모델러", "animation": "애니메이터",
 }
 KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청"}
-LAYOUT_VERSION = "2026-11-forum-news-roles-v1"
+LAYOUT_VERSION = "2026-11-minimal-bilingual-v1"
+
+# Preserve field-specific verification and ticket approvals, but expose just
+# one portfolio board with field tags to reduce the visible channel list.
+FIELD_ROLE_NAMES = {
+    "gfx": "GFX・그래픽",
+    "ui": "UI・인터페이스",
+    "clothing": "복장・Clothing",
+    "scripting": "스크립터・Scripter",
+    "vfx": "VFX・이펙트",
+    "building": "빌더・Builder",
+    "modeling": "모델러・Modeler",
+    "animation": "애니메이터・Animator",
+}
 ROLES = {
-    "staff": ("DDH 운영진", 0xE67E22), "developer": ("개발자", 0x3498DB),
-    "partner": ("파트너", 0x9B59B6), "member": ("멤버", 0x95A5A6),
-    "update_alerts": ("업데이트 알림", 0x2ECC71),
-    **{f"field:{key}": (label, 0xF1C40F) for key, label in FIELDS.items()},
+    "staff": ("운영진・Staff", 0xE67E22),
+    "developer": ("개발자・Developer", 0x3498DB),
+    "partner": ("파트너・Partner", 0x9B59B6),
+    "member": ("멤버・Member", 0x95A5A6),
+    "update_alerts": ("알림・Updates", 0x2ECC71),
+    **{f"field:{key}": (FIELD_ROLE_NAMES[key], 0xF1C40F) for key in FIELDS},
+}
+
+# Only used when the tracked role ID is unavailable (for old DDH installs).
+ROLE_ALIASES = {
+    "staff": ("DDH 운영진",),
+    "developer": ("개발자",),
+    "partner": ("파트너",),
+    "member": ("멤버",),
+    "update_alerts": ("업데이트 알림",),
+    **{f"field:{key}": (name,) for key, name in FIELDS.items()},
 }
 
 
@@ -25,17 +50,16 @@ class Category:
     aliases: tuple[str, ...] = ()
 
 
+# Five public sections; ticket and staff areas remain private.
 CATEGORIES = (
-    Category("info", "📌 안내", aliases=("Information",)),
-    # All support categories appear immediately below the public notices.
-    Category("support", "📨 문의"),
-    Category("tickets", "🔒 문의 진행", True),
-    Category("archive", "📁 문의 보관", True),
-    Category("community", "💬 커뮤니티", aliases=("Text Channels",)),
-    Category("jobs", "🤝 구인·구직"),
-    Category("portfolios", "🎨 포트폴리오"),
-    Category("voice", "🔊 음성 채널", aliases=("Voice Channels",)),
-    Category("ops", "🛠 운영", True),
+    Category("info", "📌 안내・Info", aliases=("📌 안내", "Information")),
+    Category("support", "📨 문의・Support", aliases=("📨 문의",)),
+    Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels")),
+    Category("jobs", "💼 거래・Market", aliases=("🤝 구인·구직",)),
+    Category("voice", "🔊 음성・Voice", aliases=("🔊 음성 채널", "Voice Channels")),
+    Category("tickets", "🔐 티켓・Tickets", True, aliases=("🔒 문의 진행",)),
+    Category("archive", "📁 보관・Archive", True, aliases=("📁 문의 보관",)),
+    Category("ops", "🔒 운영・Staff", True, aliases=("🛠 운영",)),
 )
 
 
@@ -53,39 +77,67 @@ class Channel:
 
 
 CHANNELS = (
-    Channel("rules", "시작·규칙", "info", "readonly", aliases=("welcome-and-rules",)),
-    Channel("announcements", "공지사항", "info", "readonly",
-            aliases=("announcements",), news=True),
-    Channel("updates", "업데이트-공지", "info", "readonly",
-            aliases=("업데이트 공지", "update-announcements", "updates"),
-            topic="DDH 공식 업데이트 · 공지 알림 신청 버튼으로 새 버전 소식을 받아보세요.", news=True),
-    Channel("guide", "가이드", "info", "readonly", aliases=("이용안내", "guide"),
-            topic="DDH에 오신 것을 환영합니다 · 서버 소개, 활동 방법, 개발자 등록과 구인·구직 안내"),
-    Channel("resources", "개발자료", "community", aliases=("resources",)),
-    Channel("general", "자유채팅", "community", aliases=("general",)),
-    Channel("english", "english-chat", "community"),
-    Channel("questions", "개발질문", "community"),
-    Channel("showcase", "작품공유·피드백", "community"),
-    Channel("meetings", "모임일정", "community", aliases=("meeting-plans",)),
-    Channel("offtopic", "잡담", "community", aliases=("off-topic",)),
-    Channel("hiring", "구인", "jobs", forum=True,
-            topic="🎯 프로젝트 구인 게시판 | 새 글: 프로젝트명 / 모집 분야 / 업무 / 예산·보상 / 일정 / 지원 조건 / 연락 방법. 의뢰와 협의는 당사자 DM에서 진행하세요."),
-    Channel("looking", "구직", "jobs", "developer", forum=True,
-            topic="🧑‍💻 개발자 구직 게시판 | 개발자 승인 후 새 글: 전문 분야 / 포트폴리오 / 경력 / 가능한 업무 / 희망 조건 / 연락 방법."),
-    Channel("commissions", "제작의뢰", "jobs", forum=True,
-            topic="🛠️ Roblox 주문제작 의뢰 게시판 | 새 글: 필요한 작업(GFX·UI·복장·VFX·모델·빌딩·애니메이션·스크립트) / 예산 / 납기 / 요구 사항 / DM 연락 방법. DDH는 거래·결제를 중개하지 않습니다."),
-    *[Channel(f"portfolio:{key}", f"{key}-포트폴리오", "portfolios", f"field:{key}", forum=True,
-              topic=f"🎨 {label} 작품·커미션 포럼 | 승인된 분야 개발자가 작품명 / 이미지·영상 / 본인 담당 부분 / 작업 가능 범위 / 예상 가격·납기 / 문의 방법을 올립니다. 방문자는 게시물에서 질문하거나 DM으로 의뢰할 수 있습니다.")
-      for key, label in FIELDS.items()],
-    Channel("lounge", "라운지", "voice", voice=True, aliases=("Lounge",)),
-    Channel("workroom", "공동작업실", "voice", voice=True),
-    Channel("meeting_voice", "미팅룸", "voice", voice=True, aliases=("Meeting Room",)),
-    Channel("support_panel", "문의·신청", "support", "readonly"),
-    Channel("partners", "파트너-소개", "support", "readonly"),
-    Channel("staff_chat", "운영진-대화", "ops", "private"),
-    Channel("audit", "운영-로그", "ops", "private"),
-    Channel("staff_voice", "운영진-회의", "ops", "private", voice=True),
+    Channel("rules", "규칙-rules", "info", "readonly",
+            aliases=("시작·규칙", "welcome-and-rules")),
+    Channel("announcements", "공지-news", "info", "readonly",
+            aliases=("공지사항", "announcements"), news=True),
+    Channel("updates", "업데이트-updates", "info", "readonly",
+            aliases=("업데이트-공지", "업데이트 공지", "update-announcements", "updates"),
+            topic="DDH 공식 업데이트와 알림 신청", news=True),
+    Channel("guide", "가이드-guide", "info", "readonly",
+            aliases=("가이드", "이용안내", "guide"),
+            topic="DDH 소개 · 규칙 동의 · 개발자 등록 · 협업 안내"),
+
+    # Announcement channels with permanent bot buttons, no regular user posts.
+    Channel("support_panel", "문의-support", "support", "readonly",
+            aliases=("문의·신청",), news=True),
+    Channel("partners", "파트너-partners", "support", "readonly",
+            aliases=("파트너-소개",), news=True),
+
+    Channel("general", "채팅-chat", "community",
+            aliases=("자유채팅", "general")),
+    Channel("questions", "질문-help", "community",
+            aliases=("개발질문",)),
+    Channel("resources", "자료-resources", "community",
+            aliases=("개발자료", "resources")),
+
+    Channel("hiring", "구인-hiring", "jobs", forum=True,
+            aliases=("구인",),
+            topic="팀원 모집: 프로젝트 / 역할 / 예산·보상 / 기간 / 연락 방법"),
+    Channel("commissions", "의뢰-commissions", "jobs", forum=True,
+            aliases=("제작의뢰",),
+            topic="작업 의뢰: 분야 / 요구사항 / 예산 / 납기 / 연락 방법. DDH는 결제와 거래를 중개하지 않습니다."),
+    Channel("portfolio", "포트폴리오-portfolio", "jobs", "developer", forum=True,
+            aliases=("포트폴리오",),
+            topic="개발자 전용 포트폴리오: 분야 태그 / 본인 작업 / 가격·의뢰 가능 여부 / 연락 방법. 회원은 댓글과 DM으로 문의 가능합니다."),
+
+    Channel("lounge", "라운지-voice", "voice", voice=True, aliases=("라운지", "Lounge")),
+    Channel("workroom", "작업-work", "voice", voice=True, aliases=("공동작업실",)),
+
+    Channel("staff_chat", "운영진-chat", "ops", "private",
+            aliases=("운영진-대화",)),
+    Channel("audit", "로그-logs", "ops", "private",
+            aliases=("운영-로그",)),
 )
+
+# Resources removed from the public layout are archived instead of deleted.
+OBSOLETE_CHANNEL_KEYS = (
+    "hiring", "commissions", "english", "showcase", "meetings", "offtopic", "looking",
+    "meeting_voice", "staff_voice",
+    *(f"portfolio:{key}" for key in FIELDS),
+)
+OBSOLETE_CHANNEL_NAMES = {
+    "hiring": ("구인", "구인-기존글", "구인-hiring-기존글"),
+    "commissions": ("제작의뢰", "제작의뢰-기존글", "의뢰-commissions-기존글"),
+    "english": ("english-chat",),
+    "showcase": ("작품공유·피드백",),
+    "meetings": ("모임일정", "meeting-plans"),
+    "offtopic": ("잡담", "off-topic"),
+    "looking": ("구직",),
+    "meeting_voice": ("미팅룸", "Meeting Room"),
+    "staff_voice": ("운영진-회의",),
+    **{f"portfolio:{key}": (f"{key}-포트폴리오",) for key in FIELDS},
+}
 
 
 def role_permissions(key):
