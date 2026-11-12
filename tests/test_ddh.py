@@ -55,7 +55,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         channel.name = "renamed"
         await provision(self.guild, self.bot.store, self.settings)
         self.assertEqual(counts, (len(self.guild.channels), len(self.guild.roles)))
-        self.assertEqual(channel.name, "자유채팅")
+        self.assertEqual(channel.name, "채팅-chat")
         self.assertEqual(counts, (len(CATEGORIES) + len(CHANNELS), len(ROLES) + 2))
         self.assertFalse(self.guild.default_role.permissions.send_messages)
         self.assertTrue(all(not r.permissions.administrator for r in self.roles.values()))
