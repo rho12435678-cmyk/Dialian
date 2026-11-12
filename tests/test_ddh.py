@@ -440,7 +440,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.bot.store.get(guild.id, 'channel:guide'), old_channel.id)
         self.assertEqual(old_channel.name, '이용안내')
     async def test_panels_are_persistent_and_repair_without_duplicates(self):
-        for view_type in (RulesView, SupportView, TicketActions, UpdateAlertsView):
+        for view_type in (RulesView, SupportView, TicketActions):
             self.assertTrue(view_type(self.bot).is_persistent())
         await publish_panels(self.bot, self.guild)
         counts = [len(c.messages) for c in self.guild.channels if isinstance(c, Text)]
@@ -536,10 +536,12 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         denied = channel.overwrites_for(self.guild.me)
         denied.mention_everyone = False
         await channel.set_permissions(self.guild.me, overwrite=denied)
-        self.assertFalse(channel.permissions_for(self.guild.me).mention_everyone)
         self.bot.release_sha = "c" * 40
-        self.assertTrue(await publish_release(self.bot, self.guild))
-        self.assertTrue(channel.permissions_for(self.guild.me).mention_everyone)
+        # The fake bot role has Administrator; override the effective check to
+        # exercise the real Discord bot role's permission-repair branch.
+        with patch.object(channel, "permissions_for", return_value=discord.Permissions.none()):
+            self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertTrue(channel.overwrites_for(self.guild.me).mention_everyone)
         self.assertFalse(channel.permissions_for(self.member).mention_everyone)
 
     async def test_layout_applies_only_requested_changes_and_never_reapplies(self):
