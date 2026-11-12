@@ -8,6 +8,7 @@ FIELDS = {
     "vfx": "VFX", "building": "빌더", "modeling": "모델러", "animation": "애니메이터",
 }
 KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청"}
+LAYOUT_VERSION = "2026-11-forum-news-roles-v1"
 ROLES = {
     "staff": ("DDH 운영진", 0xE67E22), "developer": ("개발자", 0x3498DB),
     "partner": ("파트너", 0x9B59B6), "member": ("멤버", 0x95A5A6),
