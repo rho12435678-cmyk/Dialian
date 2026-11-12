@@ -97,7 +97,7 @@ class Tickets:
         card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
                      f"신청자: <@{ticket['owner_id']}>\n운영진이 확인 후 답변합니다. "
                      "추가 자료는 이 채널에 첨부해 주세요. 비밀번호·토큰은 보내지 마세요.\n"
-                     "승인/반려는 운영진 전용이며 종료 시 운영진 전용 보관함으로 이동합니다.")
+                     "승인/반려는 운영진 전용입니다. 종료하면 처리 기록은 DB와 운영 로그에 남고 대화 채널은 삭제됩니다.")
         fields = json.loads(ticket["fields"])
         for key, value in fields.items():
             if key == "_fields":
@@ -185,8 +185,13 @@ class Tickets:
             await self.audit(guild, f"문의 #{ticket['id']} 종료 · 처리자 ID {actor.id} · {channel.mention}")
 
     async def finish_close(self, guild, channel, ticket, roles, category):
-        await channel.edit(name=f"closed-{ticket['kind']}-{ticket['id']:04d}", category=category,
-                           overwrites=overwrites(guild, roles, "private"), reason="DDH 문의 종료·비공개 보관")
+        await channel.edit(
+            name=f"closed-{ticket['kind']}-{ticket['id']:04d}", category=category,
+            overwrites=overwrites(guild, roles, "private"),
+            reason="DDH 문의 종료 및 비공개 처리",
+        )
+        # Closing was recorded first, so an interrupted deletion is retryable.
+        await channel.delete(reason="DDH 문의 종료: 티켓 카테고리 없이 정리")
         await self.store.update_ticket(ticket["id"], guild.id, state="closed")
 
     async def recover(self, guild):
@@ -210,7 +215,9 @@ class Tickets:
                 try:
                     channel = await guild.fetch_channel(ticket["channel_id"])
                 except discord.NotFound:
-                    await self.store.update_ticket(ticket["id"], guild.id, state="deleted")
+                    # The channel may have been deleted after a completed close,
+                    # but before the final database update.
+                    await self.store.update_ticket(ticket["id"], guild.id, state="closed")
                     continue
                 category = await ticket_category(guild, self.store, roles, archive=True)
                 await self.finish_close(guild, channel, ticket, roles, category)

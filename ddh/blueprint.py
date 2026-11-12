@@ -8,7 +8,7 @@ FIELDS = {
     "vfx": "VFX", "building": "빌더", "modeling": "모델러", "animation": "애니메이터",
 }
 KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청"}
-LAYOUT_VERSION = "2026-11-minimal-bilingual-v1"
+LAYOUT_VERSION = "2026-11-clean-top-rules-admin-v1"
 
 # Preserve field-specific verification and ticket approvals, but expose just
 # one portfolio board with field tags to reduce the visible channel list.
@@ -24,6 +24,7 @@ FIELD_ROLE_NAMES = {
 }
 ROLES = {
     "staff": ("운영진・Staff", 0xE67E22),
+    "admin": ("관리자・Admin", 0xD35400),
     "developer": ("개발자・Developer", 0x3498DB),
     "partner": ("파트너・Partner", 0x9B59B6),
     "member": ("멤버・Member", 0x95A5A6),
@@ -34,6 +35,7 @@ ROLES = {
 # Only used when the tracked role ID is unavailable (for old DDH installs).
 ROLE_ALIASES = {
     "staff": ("DDH 운영진",),
+    "admin": ("관리자", "Admin"),
     "developer": ("개발자",),
     "partner": ("파트너",),
     "member": ("멤버",),
@@ -57,8 +59,6 @@ CATEGORIES = (
     Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels")),
     Category("jobs", "💼 거래・Market", aliases=("🤝 구인·구직",)),
     Category("voice", "🔊 음성・Voice", aliases=("🔊 음성 채널", "Voice Channels")),
-    Category("tickets", "🔐 티켓・Tickets", True, aliases=("🔒 문의 진행",)),
-    Category("archive", "📁 보관・Archive", True, aliases=("📁 문의 보관",)),
     Category("ops", "🔒 운영・Staff", True, aliases=("🛠 운영",)),
 )
 
@@ -77,13 +77,14 @@ class Channel:
 
 
 CHANNELS = (
-    Channel("rules", "규칙-rules", "info", "readonly",
-            aliases=("시작·규칙", "welcome-and-rules")),
+    # News channels are the first visible items in the Info category.
     Channel("announcements", "공지-news", "info", "readonly",
             aliases=("공지사항", "announcements"), news=True),
     Channel("updates", "업데이트-updates", "info", "readonly",
             aliases=("업데이트-공지", "업데이트 공지", "update-announcements", "updates"),
             topic="DDH 공식 업데이트와 알림 신청", news=True),
+    Channel("rules", "규칙-rules", "info", "readonly",
+            aliases=("시작·규칙", "welcome-and-rules")),
     Channel("guide", "가이드-guide", "info", "readonly",
             aliases=("가이드", "이용안내", "guide"),
             topic="DDH 소개 · 규칙 동의 · 개발자 등록 · 협업 안내"),
@@ -141,6 +142,15 @@ OBSOLETE_CHANNEL_NAMES = {
 
 
 def role_permissions(key):
+    if key == "admin":
+        # Dedicated management role, but no dangerous global Administrator
+        # bypass. The server owner must assign it manually.
+        return discord.Permissions(
+            manage_guild=True, manage_channels=True, manage_roles=True,
+            manage_messages=True, manage_threads=True, view_audit_log=True,
+            kick_members=True, ban_members=True, moderate_members=True,
+            mute_members=True, deafen_members=True, move_members=True,
+        )
     if key == "staff":
         return discord.Permissions(manage_messages=True, moderate_members=True,
                                    mute_members=True, deafen_members=True, move_members=True)
@@ -176,6 +186,7 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
             connect=True, speak=True,
         ),
         roles["staff"]: access(voice=voice),
+        roles["admin"]: access(voice=voice),
     }
     writer = roles.get(policy)
     if writer:
@@ -190,6 +201,8 @@ def layout_summary():
     for category in CATEGORIES:
         names = [c.name for c in CHANNELS if c.category == category.key]
         lines.append(f"• {category.name}: {', '.join(names) or '비공개 티켓 자동 생성'}")
-    lines.append("\n적용 시 관리 대상 채널의 이름·권한·분류와 기본 역할 권한을 맞춥니다. "
+    lines.append("\n개편 후 기존 티켓/보관 카테고리는 자동 생성하지 않습니다. "
+                 "이전 데이터 삭제는 명시적 관리자 확인 명령으로만 진행합니다. "
+                 "적용 시 관리 대상 채널의 이름·권한·분류와 기본 역할 권한을 맞춥니다. "
                  "사진의 기본 채널은 이름으로 재사용하며 그 외 채널은 삭제하지 않습니다.")
     return "\n".join(lines)
