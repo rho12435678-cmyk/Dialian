@@ -14,7 +14,8 @@ from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
-from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
+from ddh.updates import deployed_revision, publish_release
+from ddh.views import RulesView, SupportView, TicketActions, UpdateAlertsView, reply, report_error
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ class DDHCommands(app_commands.Group):
         if self.bot.mutation_lock.locked():
             raise UserError("다른 서버 구성이 진행 중입니다. 잠시 후 다시 시도해 주세요.")
         counts, safeguards = await self.bot.apply_setup(interaction.guild, with_layout=True)
+        try:
+            await publish_release(self.bot, interaction.guild)
+        except Exception:
+            log.exception("DDH release baseline setup failed; will retry")
         roles, categories, channels = counts
         await reply(interaction, f"DDH 구성 완료: 역할 {roles}개 · 카테고리 {categories}개 · 채널 {channels}개.\n"
                     f"AutoMod 보안: {len(safeguards)}개 규칙 처리. 운영-로그 채널에서 차단 알림을 확인하세요.\n"
@@ -111,12 +116,14 @@ class Dialian(discord.Client):
         self.tree.on_error = self.command_error
         self.started_at = utcnow()
         self.last_backup_day = None
+        self.release_sha = deployed_revision()
+        self.update_lock = asyncio.Lock()
 
     async def setup_hook(self):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), UpdateAlertsView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
@@ -130,6 +137,7 @@ class Dialian(discord.Client):
             if with_layout:
                 counts = await provision(guild, self.store, self.settings)
                 await publish_panels(self, guild)
+                await self.store.set(guild.id, "release:layout_ready", True)
             else:
                 if not await self.store.get(guild.id, "setup_complete", False):
                     raise UserError("먼저 /ddh setup apply:True로 서버 구성을 완료해 주세요.")
@@ -152,13 +160,21 @@ class Dialian(discord.Client):
         if self.settings.auto_setup and (
             not await self.store.get(guild.id, "setup_complete", False)
             or not await self.store.get(guild.id, "security_complete", False)
+            or not await self.store.get(guild.id, "release:layout_ready", False)
         ):
             try:
-                needs_layout = not await self.store.get(guild.id, "setup_complete", False)
+                needs_layout = (
+                    not await self.store.get(guild.id, "setup_complete", False)
+                    or not await self.store.get(guild.id, "release:layout_ready", False)
+                )
                 await self.apply_setup(guild, with_layout=needs_layout)
                 log.info("DDH automatic provisioning and AutoMod protections applied")
             except Exception:
                 log.exception("DDH automatic setup failed; check roles, permissions and resource conflicts")
+        try:
+            await publish_release(self, guild)
+        except Exception:
+            log.exception("DDH release announcement failed; maintenance will retry")
 
     async def on_guild_channel_delete(self, channel):
         if channel.guild.id != self.settings.guild_id:
@@ -183,7 +199,8 @@ class Dialian(discord.Client):
         guild = self.get_guild(self.settings.guild_id)
         if guild and await self.store.get(guild.id, "setup_complete", False):
             for name, action in (("ticket recovery", self.tickets.recover),
-                                 ("scheduled notice", lambda g: publish_due(self, g))):
+                                 ("scheduled notice", lambda g: publish_due(self, g)),
+                                 ("release announcement", lambda g: publish_release(self, g))):
                 try:
                     await action(guild)
                 except Exception:
