@@ -171,6 +171,12 @@ class DDHCommands(app_commands.Group):
         if not security and interaction.user.id == interaction.guild.owner_id:
             failure = await self.bot.store.get(interaction.guild.id, "security:last_error")
         details = f"\n최근 보안 오류: {failure}" if failure else ""
+        if interaction.user.id == interaction.guild.owner_id:
+            verification_error = await self.bot.store.get(
+                interaction.guild.id, "verification:last_error",
+            )
+            if verification_error:
+                details += f"\n최근 인증 오류: {verification_error}"
         await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
                     f"정기 안내: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"

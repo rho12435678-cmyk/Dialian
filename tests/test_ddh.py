@@ -508,6 +508,56 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await protect_announcement_channels(self.bot, self.guild), [])
         self.assertEqual(len((await self.channel("updates")).messages), 0)
 
+    async def test_missing_live_verification_button_is_repaired_on_startup(self):
+        await publish_panels(self.bot, self.guild)
+        rules = await self.channel("rules")
+        guide_channel = await self.channel("guide")
+        rules_message = rules.messages[0]
+        guide_message = guide_channel.messages[0]
+        # The older logic accepted the embed footer even if the button had
+        # gone missing; the new check must inspect live message components.
+        rules_message.view = None
+        guide_message.view = None
+        self.assertTrue(await repair_missing_panels(self.bot, self.guild))
+        self.assertEqual(rules.messages[0].id, rules_message.id)
+        self.assertEqual(guide_channel.messages[0].id, guide_message.id)
+        self.assertTrue(any(
+            component.custom_id == "ddh:rules:v1"
+            for component in rules_message.view.children
+        ))
+        self.assertTrue(any(
+            component.custom_id == "ddh:rules:v1"
+            for component in guide_message.view.children
+        ))
+        self.assertFalse(await repair_missing_panels(self.bot, self.guild))
+
+    async def test_verification_allows_basic_existing_member_role_permissions(self):
+        role = self.roles["member"]
+        role._permissions = discord.Permissions(
+            view_channel=True, read_message_history=True,
+            use_application_commands=True,
+        ).value
+        self.assertTrue(await verify_member(self.bot, self.guild, self.visitor.id))
+        self.assertIn(role, self.visitor.roles)
+
+    async def test_verification_error_is_recorded_for_owner_and_success_clears(self):
+        interaction = AsyncMock()
+        interaction.guild = self.guild
+        with patch("ddh.views.report_error", new_callable=AsyncMock):
+            await RulesView(self.bot).on_error(
+                interaction, UserError("멤버 역할 순서 확인 필요"), None,
+            )
+        self.assertIn(
+            "역할 순서",
+            await self.bot.store.get(self.guild.id, "verification:last_error"),
+        )
+        interaction.user = self.visitor
+        interaction.channel_id = (await self.channel("rules")).id
+        await RulesView(self.bot).accept.callback(interaction)
+        self.assertIsNone(
+            await self.bot.store.get(self.guild.id, "verification:last_error"),
+        )
+
     async def test_official_verification_button_works_from_server_guide_location(self):
         interaction = AsyncMock()
         interaction.guild = self.guild
