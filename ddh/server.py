@@ -124,7 +124,23 @@ def forum_permissions(guild, roles, policy):
 async def preflight(guild, store):
     found = {}
     for key, (name, _) in ROLES.items():
-        role = await find_resource(guild, store, f"role:{key}", name, discord.Role, ROLE_ALIASES.get(key, ()))
+        if key == "staff":
+            # Owner has already created '운영자'. Never reuse the previously
+            # stored '운영진・Staff' role or create a second moderator role.
+            names = {normalize_name(name), normalize_name("운영자・Operator")}
+            matches = [role for role in guild.roles if normalize_name(role.name) in names]
+            if len(matches) != 1:
+                raise UserError(
+                    "기존 '운영자' 역할이 정확히 하나 있어야 합니다. "
+                    "역할을 만들거나 이름 중복을 정리한 뒤 다시 실행해 주세요. "
+                    "기존 운영진 역할은 자동 삭제하지 않습니다."
+                )
+            role = matches[0]
+        else:
+            role = await find_resource(
+                guild, store, f"role:{key}", name, discord.Role,
+                ROLE_ALIASES.get(key, ()),
+            )
         found[f"role:{key}"] = role
     for spec in CATEGORIES:
         found[f"category:{spec.key}"] = await find_resource(
