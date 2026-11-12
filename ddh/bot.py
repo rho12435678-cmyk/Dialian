@@ -166,9 +166,13 @@ class DDHCommands(app_commands.Group):
         notices = await self.bot.store.get(interaction.guild.id, OWNER_NOTICES_KEY, False)
         security = await self.bot.store.get(interaction.guild.id, "security_complete", False)
         news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
-        await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}\n"
+        failure = None
+        if not security and interaction.user.id == interaction.guild.owner_id:
+            failure = await self.bot.store.get(interaction.guild.id, "security:last_error")
+        details = f"\n최근 보안 오류: {failure}" if failure else ""
+        await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
-                    f"자동 공지: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
+                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
@@ -220,15 +224,33 @@ class Dialian(discord.Client):
     async def apply_security(self, guild):
         require_guild(guild, self.settings)
         async with self.mutation_lock:
-            await self.tickets.ready(guild)
-            roles = await roles_for(guild, self.store, keys=("staff", "admin"))
-            audit = await channel_for(guild, self.store, "security_log")
-            if not private_channel(audit, guild, {roles["staff"].id, roles["admin"].id, guild.me.id}):
-                raise UserError("보안 로그 채널의 비공개 권한을 확인한 뒤 보안 설정을 적용해 주세요.")
             await self.store.set(guild.id, "security_complete", False)
-            safeguards = await configure_security(guild, staff_role=roles["staff"], admin_role=roles["admin"],
-                                                   audit_channel=audit)
+            try:
+                await self.tickets.ready(guild)
+                roles = await roles_for(guild, self.store, keys=("staff", "admin"))
+                audit = await channel_for(guild, self.store, "security_log")
+                if not private_channel(
+                    audit, guild, {roles["staff"].id, roles["admin"].id, guild.me.id},
+                ):
+                    raise UserError(
+                        "보안 설정 미완료 · 보안-security 채널의 비공개 권한 불일치. "
+                        "서버 소유자는 /ddh operator로 이전 운영진 권한을 점검하고 "
+                        "필요하면 /ddh operator apply:True로 적용해 주세요."
+                    )
+                safeguards = await configure_security(
+                    guild, staff_role=roles["staff"], admin_role=roles["admin"],
+                    audit_channel=audit,
+                )
+            except Exception as error:
+                # Store a sanitized summary only; Discord tokens and response
+                # bodies must not leak into public status or audit messages.
+                detail = str(error) if isinstance(error, UserError) else (
+                    f"내부 오류 ({type(error).__name__}) · 서비스 로그 확인"
+                )
+                await self.store.set(guild.id, "security:last_error", detail[:300])
+                raise
             await self.store.set(guild.id, "security_complete", True)
+            await self.store.set(guild.id, "security:last_error", None)
             return safeguards
 
     async def on_ready(self):
