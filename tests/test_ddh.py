@@ -17,6 +17,7 @@ from ddh.bot import DDHCommands, Dialian
 from ddh.content import publish_panels
 from ddh.notices import due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
+from ddh.security import specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
 from ddh.views import RulesView, SupportView, TicketActions
@@ -293,11 +294,22 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 
 class PureTests(unittest.TestCase):
+    def test_security_rules_are_scoped_and_non_destructive(self):
+        rules = specifications()
+        self.assertEqual(len(rules), 3)
+        self.assertTrue(all(name.startswith("DDH |") for name, _, _ in rules))
+        invite_rule = rules[0][1]
+        self.assertEqual(invite_rule.type, discord.AutoModRuleTriggerType.keyword)
+        self.assertIn("discord.gg/", invite_rule.keyword_filter)
+        self.assertNotIn("github.com/", invite_rule.keyword_filter)
+        self.assertEqual(rules[1][1].type, discord.AutoModRuleTriggerType.spam)
+        self.assertEqual(rules[2][1].mention_limit, 5)
+
     def test_kst_schedule_handles_day_boundaries_and_interval(self):
         self.assertIsNone(due_date(datetime(2026, 11, 12, 8, 59, tzinfo=timezone.utc), date(2026, 11, 12), 18, 2))
         self.assertEqual(due_date(datetime(2026, 11, 12, 9, tzinfo=timezone.utc), date(2026, 11, 12), 18, 2), date(2026, 11, 12))
