@@ -7,7 +7,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import discord
 
@@ -31,7 +31,7 @@ from ddh.security import rule_trigger_type, specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
 from ddh.updates import publish_release, redact_legacy_release_links, release_embed
-from ddh.views import ReportModal, RulesView, SupportView, TicketActions
+from ddh.views import ReportModal, RulesView, SupportView, TicketActions, TicketModal
 from fakes import Guild, Text
 
 
@@ -758,7 +758,18 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await self.channel("staff_chat")).permissions_for(self.member).view_channel)
 
     async def test_private_ticket_only_owner_staff_and_bot(self):
-        channel = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
+        modal = TicketModal(self.bot, "developer", ["gfx"])
+        values = {**self.payload(), "포트폴리오 링크": ""}
+        for item in modal.children:
+            item._value = values.get(item.label, "신청 소개")
+        self.assertFalse(next(item for item in modal.children if item.label == "포트폴리오 링크").required)
+        interaction = AsyncMock(guild=self.guild, user=self.member)
+        interaction.response.is_done = Mock(return_value=True)
+        await modal.on_submit(interaction)
+        ticket = await self.bot.store.active(self.guild.id, self.member.id, "developer")
+        channel = self.guild.get_channel(ticket["channel_id"])
+        self.assertTrue(channel.permissions_for(self.member).attach_files)
+        self.assertIn("작업 이미지·영상·PDF", channel.messages[0].embeds[0].description)
         for person in (self.member, self.staff, self.guild.me):
             self.assertTrue(channel.permissions_for(person).view_channel)
         for person in (self.visitor, self.guild.member(8, [self.roles["developer"], self.roles["partner"]])):

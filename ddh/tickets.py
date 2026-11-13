@@ -12,6 +12,7 @@ from ddh.operations import private_channel
 from ddh.server import UserError, is_staff, require_guild, roles_for, ticket_category
 
 log = logging.getLogger(__name__)
+PORTFOLIO_LINK = "포트폴리오 링크"
 
 
 def validate_payload(kind, fields):
@@ -20,7 +21,7 @@ def validate_payload(kind, fields):
     required = {
         "partner": ("서버 이름", "초대 링크", "서버 소개·제휴 제안"),
         "feedback": ("제목", "내용"),
-        "developer": ("Roblox 사용자명·프로필", "포트폴리오 링크", "경력·도구·본인 담당 부분"),
+        "developer": ("Roblox 사용자명·프로필", "경력·도구·본인 담당 부분"),
     }[kind]
     if any(not str(fields.get(key, "")).strip() for key in required):
         raise UserError("필수 항목을 모두 작성해 주세요.")
@@ -30,10 +31,17 @@ def validate_payload(kind, fields):
         selected = fields.get("_fields", [])
         if not isinstance(selected, list) or not selected or set(selected) - FIELDS.keys():
             raise UserError("지원할 개발 분야를 선택해 주세요.")
-    link_key = {"partner": "초대 링크", "developer": "포트폴리오 링크"}.get(kind)
-    if link_key:
-        links = str(fields[link_key]).split()
-        if not any(urlsplit(url).scheme in ("https", "http") and urlsplit(url).netloc for url in links):
+    link_key = {"partner": "초대 링크", "developer": PORTFOLIO_LINK}.get(kind)
+    links = str(fields.get(link_key, "")).split() if link_key else []
+    if links:
+        for url in links:
+            try:
+                parsed = urlsplit(url)
+            except ValueError:
+                continue
+            if parsed.scheme in ("https", "http") and parsed.netloc:
+                break
+        else:
             raise UserError("http:// 또는 https://로 시작하는 링크를 입력해 주세요.")
 
 
@@ -104,15 +112,20 @@ class Tickets:
         if not private_channel(channel, guild, permitted):
             raise UserError("티켓 채널의 비공개 권한을 확인해 주세요. 운영진이 권한을 직접 수정한 뒤 다시 시도할 수 있습니다.")
         await self.store.update_ticket(ticket["id"], guild.id, channel_id=channel.id)
+        attachment_guide = (
+            "포트폴리오 링크가 없다면 이 티켓에 작업 이미지·영상·PDF를 첨부해 주세요. "
+            "공동 작업은 본인이 맡은 부분을 함께 적어 주세요."
+            if ticket["kind"] == "developer" else "추가 자료는 이 채널에 첨부해 주세요."
+        )
         card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
                      f"신청자: <@{ticket['owner_id']}>\n운영진이 확인 후 답변합니다. "
-                     "추가 자료는 이 채널에 첨부해 주세요. 비밀번호·토큰은 보내지 마세요.\n"
+                     f"{attachment_guide} 비밀번호·토큰은 보내지 마세요.\n"
                      "승인/반려는 운영진 전용입니다. 종료하면 처리 기록은 DB와 운영 로그에 남고 대화 채널은 삭제됩니다.")
         fields = json.loads(ticket["fields"])
         for key, value in fields.items():
             if key == "_fields":
                 card.add_field(name="지원 분야", value=" / ".join(FIELDS[f] for f in value), inline=False)
-            else:
+            elif key != PORTFOLIO_LINK or value:
                 card.add_field(name=key, value=value or "미입력", inline=False)
         await upsert_panel(channel, self.store, f"ticket:{ticket['id']}", card, view=TicketActions(self.bot))
         if ticket["state"] == "creating":
