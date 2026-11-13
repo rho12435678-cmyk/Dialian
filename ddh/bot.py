@@ -6,11 +6,10 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from ddh.announcements import protect_announcement_channels
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
-from ddh.content import publish_panels, repair_missing_panels, retire_update_alerts_panel
+from ddh.content import publish_panels
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
@@ -19,9 +18,10 @@ from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
-from ddh.updates import deployed_revision, publish_release, redact_legacy_release_links
+from ddh.updates import deployed_revision, publish_release
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
+from ddh.visibility import apply_visibility
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +106,26 @@ class DDHCommands(app_commands.Group):
                 interaction.guild, self.bot.store, apply=apply
             )
         await reply(interaction, result)
+
+    @app_commands.command(name="visibility", description="소유자 확인 후 미인증자에게 규칙·가이드·인증만 표시")
+    @app_commands.describe(
+        apply="True: 이 요청에 한 번만 채널 보기 권한 변경",
+        verification_channel="이미 사용 중인 인증 텍스트 채널",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def visibility(
+        self, interaction: discord.Interaction, apply: bool = False,
+        verification_channel: discord.TextChannel | None = None,
+    ):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.mutation_lock:
+            summary = await apply_visibility(
+                self.bot, interaction.guild, apply=apply,
+                verification_channel=verification_channel,
+            )
+        await reply(interaction, summary)
 
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
@@ -200,11 +220,8 @@ class Dialian(discord.Client):
         self.tree.on_error = self.command_error
         self.started_at = utcnow()
         self.last_backup_day = None
-        self.last_panel_check = None
-        self.last_announcement_check = None
         self.release_sha = deployed_revision()
         self.update_lock = asyncio.Lock()
-        self.last_policy_check = None
 
     async def setup_hook(self):
         await self.store.initialize()
@@ -266,43 +283,16 @@ class Dialian(discord.Client):
         if guild is None:
             log.error("Configured DDH guild is unavailable; check DDH_GUILD_ID and bot invitation")
             return
-        log.info("Dialian connected to DDH guild %s", guild.id)
+        log.info("Dialian connected to DDH guild %s (owner-controlled configuration)", guild.id)
+        # No automatic layout, channel, role, permission, AutoMod or panel
+        # repair. The owner has explicitly requested that their manual edits
+        # remain untouched. A previously requested new-version announcement
+        # is a new post only, not a change to guild configuration.
         if await self.store.get(guild.id, "setup_complete", False):
-            for name, action in (
-                ("lock down public announcement channels", protect_announcement_channels),
-                ("repair deleted onboarding panels", repair_missing_panels),
-                ("outdated update signup removal", retire_update_alerts_panel),
-                ("redact old release source links", redact_legacy_release_links),
-                ("automatic deployment announcement", publish_release),
-            ):
-                try:
-                    await action(self, guild)
-                except Exception:
-                    log.exception("DDH %s failed at startup; maintenance will retry", name)
-
-    async def on_guild_channel_update(self, before, after):
-        # Repair notice permission edits promptly, without deleting any posts.
-        if after.guild.id != self.settings.guild_id:
-            return
-        try:
-            changed = await self.store.settings(after.guild.id)
-            notice_ids = {
-                changed.get(f"channel:{key}")
-                for key in ("announcements", "updates", "rules", "guide",
-                            "support_panel", "partners")
-            }
-            if after.id in notice_ids and before.overwrites != after.overwrites:
-                await protect_announcement_channels(self, after.guild)
-        except Exception:
-            log.exception("DDH announcement permission repair failed after edit")
-
-    async def on_guild_role_create(self, role):
-        if role.guild.id != self.settings.guild_id:
-            return
-        try:
-            await protect_announcement_channels(self, role.guild)
-        except Exception:
-            log.exception("DDH announcement permission update failed for new role")
+            try:
+                await publish_release(self, guild)
+            except Exception:
+                log.exception("DDH automatic release notice failed; no server settings were changed")
 
     async def on_member_join(self, member):
         await self.operations.membership(member.guild, member, joined=True)
@@ -337,53 +327,33 @@ class Dialian(discord.Client):
     async def maintenance_once(self):
         guild = self.get_guild(self.settings.guild_id)
         if guild and await self.store.get(guild.id, "setup_complete", False):
+            # Finish only work a member or owner previously requested, such
+            # as an interrupted ticket. Do NOT restore channels or policies.
             for name, action in (
                 ("ticket recovery", self.tickets.recover),
-                ("scheduled notice", lambda g: publish_due(self, g)),
-                ("remove old update signup", lambda g: retire_update_alerts_panel(self, g)),
-                ("redact old release metadata", lambda g: redact_legacy_release_links(self, g)),
-                ("automatic release", lambda g: publish_release(self, g)),
+                ("owner-enabled scheduled notice", lambda g: publish_due(self, g)),
+                ("previously requested new-version announcement",
+                 lambda g: publish_release(self, g)),
             ):
                 try:
                     await action(guild)
                 except Exception:
                     log.exception("DDH %s failed; will retry", name)
         now = datetime.now(timezone.utc)
-        if (guild and await self.store.get(guild.id, "setup_complete", False)
-                and (self.last_panel_check is None
-                     or (now - self.last_panel_check).total_seconds() >= 1800)):
-            try:
-                await repair_missing_panels(self, guild)
-                self.last_panel_check = now
-            except Exception:
-                log.exception("DDH safe panel repair failed; will retry")
-        if (guild and await self.store.get(guild.id, "setup_complete", False)
-                and (self.last_announcement_check is None
-                     or (now - self.last_announcement_check).total_seconds() >= 300)):
-            try:
-                await protect_announcement_channels(self, guild)
-                self.last_announcement_check = now
-            except Exception:
-                log.exception("DDH announcement lockdown failed; will retry")
         if guild:
-            # Gateway events are backed up by a cursor over Discord audit history.
             try:
                 await self.operations.catch_up(guild)
             except Exception:
                 log.exception("DDH Discord audit catch-up failed; will retry")
-            if (await self.store.get(guild.id, "setup_complete", False)
-                    and (self.last_policy_check is None
-                         or (now - self.last_policy_check).total_seconds() >= 300)
-                    and not self.mutation_lock.locked()):
-                await self.operations.check(guild)
-                self.last_policy_check = now
             await self.operations.flush(guild)
         today = now.date()
         if self.last_backup_day != today:
             try:
                 await backup(self.settings.database)
                 if guild:
-                    await self.store.purge_delivered_events(guild.id, (now - timedelta(days=30)).isoformat())
+                    await self.store.purge_delivered_events(
+                        guild.id, (now - timedelta(days=30)).isoformat()
+                    )
                 self.last_backup_day = today
             except Exception:
                 log.exception("DDH backup failed; will retry")

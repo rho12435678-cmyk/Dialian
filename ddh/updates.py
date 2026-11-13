@@ -196,18 +196,11 @@ async def publish_release(bot, guild):
 
         member = (await roles_for(guild, bot.store, keys=("member",)))["member"]
         # A mention inside an embed does not create a Discord notification.
+        # The owner may have intentionally disabled role mentions. Never
+        # change channel permissions to override their decision. Discord
+        # will decide whether the mention can notify under current settings.
         if not channel.permissions_for(guild.me).mention_everyone:
-            if not guild.me.guild_permissions.manage_channels:
-                raise PermissionError(
-                    "Dialian needs role-mention permission in the update channel"
-                )
-            overwrite = channel.overwrites_for(guild.me)
-            overwrite.mention_everyone = True
-            await channel.set_permissions(
-                guild.me, overwrite=overwrite,
-                reason="DDH 공식 공지: 봇만 멤버 역할 멘션 가능",
-            )
-
+            log.info("Member-role mention not permitted; owner settings preserved")
         message = await channel.send(
             content=member.mention,
             embed=release_embed(previous, revision, member_role=member, marker=marker),

@@ -23,6 +23,7 @@ from ddh.content import (GUIDE_VERSION, guide, publish_guide, publish_panels,
 from ddh.operations import inspect_automod, inspect_layout
 from ddh.permissions import operator_migration
 from ddh.verification import verify_member
+from ddh.visibility import apply_visibility, visibility_plan
 from ddh.layout import LEGACY_MIGRATION_KEY, cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, due_date, publish_due
 from ddh.server import UserError, preflight, provision, roles_for
@@ -289,14 +290,14 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         setup.assert_not_awaited()
         security.assert_not_awaited()
         release.assert_awaited_once_with(self.bot, self.guild)
-        self.assertEqual(len((await self.channel("guide")).messages), 1)
+        self.assertEqual(len((await self.channel("guide")).messages), 0)  # no automatic panel restoration
         self.assertFalse(await publish_due(self.bot, self.guild, datetime(2026, 11, 12, 9, 1, tzinfo=timezone.utc)))
 
     async def test_server_mutations_require_actual_owner(self):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup", "visibility"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
@@ -634,6 +635,111 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await verify_member(self.bot, self.guild, self.visitor.id)
         self.visitor.add_roles.assert_not_awaited()
 
+    async def test_one_time_visibility_only_exposes_rules_guide_verification(self):
+        verification = await self.guild.create_text_channel("인증-verify")
+        # Before the requested one-time change, unverified users still see chat.
+        self.assertTrue((await self.channel("general")).permissions_for(self.visitor).view_channel)
+        before = {channel.id: channel.overwrites for channel in self.guild.channels}
+        preview = await apply_visibility(self.bot, self.guild)
+        self.assertIn("규칙 · 가이드 · 인증-verify", preview)
+        self.assertEqual(before, {
+            channel.id: channel.overwrites for channel in self.guild.channels
+        })
+        result = await apply_visibility(self.bot, self.guild, apply=True)
+        self.assertIn("완료", result)
+        allowed = {
+            (await self.channel("rules")).id,
+            (await self.channel("guide")).id,
+            verification.id,
+        }
+        non_member_role = self.guild.make_role(
+            "외부 홍보 역할",
+            permissions=discord.Permissions(view_channel=True),
+        )
+        visitor_with_role = self.guild.member(957, [non_member_role])
+        for channel in self.guild.channels:
+            if isinstance(channel, discord.CategoryChannel):
+                continue
+            self.assertEqual(
+                channel.permissions_for(self.visitor).view_channel,
+                channel.id in allowed,
+                f"미인증자에게 보이는 채널: {channel.name}",
+            )
+            self.assertEqual(
+                channel.permissions_for(visitor_with_role).view_channel,
+                channel.id in allowed,
+                f"추가 역할만 보유한 미인증자에게 보이는 채널: {channel.name}",
+            )
+        self.assertTrue((await self.channel("general")).permissions_for(self.member).view_channel)
+        self.assertFalse((await self.channel("audit")).permissions_for(self.member).view_channel)
+        self.assertTrue((await self.channel("audit")).permissions_for(self.staff).view_channel)
+        self.assertEqual(
+            await self.bot.store.get(self.guild.id, "channel:verification"),
+            verification.id,
+        )
+        _, pending = await visibility_plan(self.bot, self.guild)
+        errors = []
+        for ch, future in pending[:2]:
+            before = {target.id: p.view_channel for target, p in ch.overwrites.items()}
+            after = {target.id: p.view_channel for target, p in future.items()}
+            errors.append((ch.name, {
+                k: (before.get(k), after.get(k))
+                for k in set(before) | set(after)
+                if before.get(k) != after.get(k)
+            }))
+        self.assertEqual(len(pending), 0, errors)
+
+    async def test_owner_visibility_changes_are_not_reverted_by_background_jobs(self):
+        verification = await self.guild.create_text_channel("인증")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        updates = await self.channel("updates")
+        # The owner intentionally makes a previously restricted channel
+        # visible. The bot is not permitted to undo this manual decision.
+        edited = dict(updates.overwrites)
+        visitor_policy = discord.PermissionOverwrite(view_channel=True)
+        edited[self.guild.default_role] = visitor_policy
+        await updates.edit(overwrites=edited)
+        before = updates.overwrites
+        with (
+            patch.object(self.bot, "get_guild", return_value=self.guild),
+            patch("ddh.bot.publish_release", new_callable=AsyncMock),
+            patch("ddh.bot.publish_due", new_callable=AsyncMock),
+            patch.object(self.bot.tickets, "recover", new_callable=AsyncMock),
+            patch.object(self.bot.operations, "catch_up", new_callable=AsyncMock),
+            patch.object(self.bot.operations, "flush", new_callable=AsyncMock),
+        ):
+            await self.bot.on_ready()
+            await self.bot.maintenance_once()
+        self.assertEqual(updates.overwrites, before)
+        self.assertTrue(updates.permissions_for(self.visitor).view_channel)
+        self.assertFalse((await self.channel("general")).permissions_for(self.visitor).view_channel)
+        self.assertTrue(verification.permissions_for(self.visitor).view_channel)
+
+    async def test_non_public_custom_role_overwrite_cannot_bypass_visibility(self):
+        verification = await self.guild.create_text_channel("인증")
+        public = await self.channel("general")
+        custom = self.guild.make_role("임시역할", permissions=discord.Permissions(view_channel=True))
+        before = dict(public.overwrites)
+        before[custom] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        await public.edit(overwrites=before)
+        unverified = self.guild.member(903, [custom])
+        self.assertTrue(public.permissions_for(unverified).view_channel)
+        await apply_visibility(self.bot, self.guild, apply=True)
+        self.assertFalse(public.permissions_for(unverified).view_channel)
+        self.assertTrue(public.permissions_for(self.member).view_channel)
+        self.assertTrue(public.permissions_for(self.staff).view_channel)
+        self.assertTrue(verification.permissions_for(unverified).view_channel)
+
+    async def test_ambiguous_verification_channel_refuses_to_mutate(self):
+        await self.guild.create_text_channel("인증-one")
+        await self.guild.create_text_channel("인증-two")
+        before = {channel.id: channel.overwrites for channel in self.guild.channels}
+        with self.assertRaisesRegex(UserError, "verification_channel"):
+            await apply_visibility(self.bot, self.guild, apply=True)
+        self.assertEqual(before, {
+            channel.id: channel.overwrites for channel in self.guild.channels
+        })
+
     async def test_public_permission_matrix_uses_discord_resolution(self):
         general = await self.channel("general")
         rules = await self.channel("rules")
@@ -957,7 +1063,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         # exercise the real Discord bot role's permission-repair branch.
         with patch.object(channel, "permissions_for", return_value=discord.Permissions.none()):
             self.assertTrue(await publish_release(self.bot, self.guild))
-        self.assertTrue(channel.overwrites_for(self.guild.me).mention_everyone)
+        self.assertFalse(channel.overwrites_for(self.guild.me).mention_everyone)
         self.assertFalse(channel.permissions_for(self.member).mention_everyone)
 
     async def test_layout_applies_only_requested_changes_and_never_reapplies(self):
@@ -1100,7 +1206,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 
