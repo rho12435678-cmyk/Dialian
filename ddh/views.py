@@ -5,6 +5,7 @@ import discord
 
 from ddh.blueprint import FIELDS, KINDS
 from ddh.server import UserError, is_staff, require_guild
+from ddh.tickets import PORTFOLIO_LINK
 
 from ddh.verification import verify_member
 
@@ -187,12 +188,16 @@ class TicketModal(discord.ui.Modal):
         specs = {
             "partner": [("서버 이름", 100), ("초대 링크", 300), ("서버 소개·제휴 제안", 1000)],
             "feedback": [("제목", 100), ("내용", 1000)],
-            "developer": [("Roblox 사용자명·프로필", 300), ("포트폴리오 링크", 1000),
+            "developer": [("Roblox 사용자명·프로필", 300), (PORTFOLIO_LINK, 1000),
                           ("경력·도구·본인 담당 부분", 1000), ("소개·활동 가능 시간", 500)],
         }[kind]
         for label, length in specs:
-            self.add_item(discord.ui.TextInput(label=label, max_length=length,
-                                              style=discord.TextStyle.paragraph if length > 300 else discord.TextStyle.short))
+            portfolio = kind == "developer" and label == PORTFOLIO_LINK
+            self.add_item(discord.ui.TextInput(
+                label=label, max_length=length, required=not portfolio,
+                placeholder="링크가 없으면 비워 두고 열린 티켓에 작업물을 첨부해 주세요." if portfolio else None,
+                style=discord.TextStyle.paragraph if length > 300 else discord.TextStyle.short,
+            ))
 
     async def on_submit(self, interaction):
         require_guild(interaction.guild, self.bot.settings)
@@ -201,7 +206,10 @@ class TicketModal(discord.ui.Modal):
         if self.fields:
             fields["_fields"] = self.fields
         channel = await self.bot.tickets.create(interaction.guild, interaction.user, self.kind, fields)
-        await reply(interaction, f"문의 티켓: {channel.mention}\n이미 진행 중인 같은 종류의 문의가 있으면 해당 티켓으로 연결됩니다.")
+        message = f"문의 티켓: {channel.mention}\n이미 진행 중인 같은 종류의 문의가 있으면 해당 티켓으로 연결됩니다."
+        if self.kind == "developer":
+            message += "\n포트폴리오 작업물은 티켓에 직접 첨부할 수 있습니다."
+        await reply(interaction, message)
 
     async def on_error(self, interaction, error):
         await report_error(interaction, error)
