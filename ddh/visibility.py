@@ -131,7 +131,15 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
             for role in guild.roles:
                 if role.id in protected_roles:
                     continue
-                _set_view(overwrites, role, False)
+                # An @everyone deny already overrides the guild-wide role
+                # permission. Change only EXISTING channel-level allows:
+                # new roles with no custom grant need no overwrite and must
+                # not trigger another owner-visible migration preview.
+                current_key = next(
+                    (item for item in overwrites if item.id == role.id), None,
+                )
+                if current_key is not None and overwrites[current_key].view_channel is True:
+                    _set_view(overwrites, role, False)
 
             # Direct per-user grants can also bypass an @everyone deny.
             for target, override in list(overwrites.items()):
