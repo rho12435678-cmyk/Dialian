@@ -154,7 +154,10 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
         if original_bot_visible:
             _set_view(overwrites, guild.me, True)
         for role in (operator, administrator):
-            if original_staff[role.id]:
+            # The three welcome channels are open through @everyone; adding
+            # explicit staff allows based on the *new* public state would
+            # make a needless second migration after the first apply.
+            if original_staff[role.id] and not public_welcome:
                 _set_view(overwrites, role, True)
 
         if len(overwrites) > 100:
