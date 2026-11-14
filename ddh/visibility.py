@@ -5,7 +5,7 @@ After the owner applies it, subsequent manual permission edits are respected.
 """
 import discord
 
-from ddh.server import UserError, require_guild, roles_for
+from ddh.server import UserError, channel_for, require_guild, roles_for
 
 _ALLOWED_NAME_PARTS = ("인증", "verify", "verification")
 
@@ -82,17 +82,10 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
     operator = roles["staff"]
     administrator = roles["admin"]
 
-    rules = guild.get_channel(await bot.store.get(guild.id, "channel:rules", 0))
-    guide = guild.get_channel(await bot.store.get(guild.id, "channel:guide", 0))
     verification = await find_verification_channel(
         guild, bot.store, verification_channel,
     )
-    if not all(isinstance(channel, discord.TextChannel) for channel in (rules, guide)):
-        raise UserError("규칙·가이드 채널의 기존 연결 정보가 없습니다. 먼저 채널 ID를 확인해 주세요.")
-
-    permitted_ids = {rules.id, guide.id, verification.id}
-    if len(permitted_ids) != 3:
-        raise UserError("규칙·가이드·인증이 서로 다른 3개 채널인지 확인해 주세요.")
+    permitted_ids = {verification.id}
 
     protected_roles = {
         guild.default_role.id, member.id, operator.id, administrator.id,
@@ -154,7 +147,7 @@ async def visibility_plan(bot, guild, *, verification_channel=None):
         if original_bot_visible:
             _set_view(overwrites, guild.me, True)
         for role in (operator, administrator):
-            # The three welcome channels are open through @everyone; adding
+            # The verification channel are open through @everyone; adding
             # explicit staff allows based on the *new* public state would
             # make a needless second migration after the first apply.
             if original_staff[role.id] and not public_welcome:
@@ -177,24 +170,30 @@ async def apply_visibility(bot, guild, *, apply=False, verification_channel=None
     )
     if not apply:
         return (
-            f"미인증자에게 보일 채널: 규칙 · 가이드 · {verification.name}\n"
+            f"미인증자에게 보일 채널: {verification.name}\n"
             f"권한 변경 예정: {len(planned)}개 채널/카테고리\n"
             "다른 채널은 멤버 역할 인증 후 공개 영역만 열람합니다. "
             "운영 전용·비공개 문의는 공개하지 않습니다.\n"
+            "규칙·가이드의 인증 버튼만 제거하고 인증 채널의 인증 패널을 갱신합니다.\n"
             "적용은 서버 소유자가 /ddh visibility apply:True로 승인해야 합니다. "
             "적용 이후 Dialian은 수동 변경을 자동으로 되돌리지 않습니다."
         )
+    # Resolve both cleanup targets before changing any channel permissions.
+    for key in ("rules", "guide"):
+        await channel_for(guild, bot.store, key)
     if not guild.me.guild_permissions.manage_channels:
         raise UserError("Dialian 봇에 채널 관리 권한이 없어 적용할 수 없습니다.")
     changed = 0
     for channel, overwrites in planned:
         await channel.edit(
             overwrites=overwrites,
-            reason="DDH 서버 소유자 요청: 미인증자는 규칙·가이드·인증만 표시",
+            reason="DDH 서버 소유자 요청: 미인증자는 인증 채널만 표시",
         )
         changed += 1
     await bot.store.set(guild.id, "channel:verification", verification.id)
+    from ddh.content import configure_verification_entry
+    await configure_verification_entry(bot, guild, verification)
     return (
-        f"공개 인증 진입 채널 3개 확인 · 변경 {changed}개 완료.\n"
+        f"공개 인증 진입 채널 1개 확인 · 변경 {changed}개 완료.\n"
         "이후 서버 소유자가 변경한 채널과 권한은 자동으로 되돌리지 않습니다."
     )

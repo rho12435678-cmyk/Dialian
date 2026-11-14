@@ -116,7 +116,7 @@ async def guide(guild, store):
     card.add_field(
         name="🚀 처음 들어왔다면 이 순서대로!",
         value=(
-            f"**① 규칙 읽고 참여하기** — {await link('rules')}의 버튼을 눌러 멤버 역할 받기\n"
+            f"**① 인증 후 규칙 확인하기** — {await link('verification')}에서 인증하고 {await link('rules')} 읽기\n"
             f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
             f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
             f"**④ 함께할 사람 찾기** — {await link('hiring')}·{await link('commissions')}에서 "
@@ -152,13 +152,8 @@ async def guide(guild, store):
 async def publish_guide(bot, guild):
     """Create or edit one guide embed; never spam duplicate guide messages."""
     channel = await channel_for(guild, bot.store, "guide")
-    from ddh.views import RulesView
-
-    # Give members a second, persistent path to certification when the
-    # native Discord Server Guide changes where the rules panel is shown.
     message = await upsert_panel(
         channel, bot.store, "guide", await guide(guild, bot.store),
-        view=RulesView(bot),
     )
     await bot.store.set(guild.id, "guide:version", GUIDE_VERSION)
     return message
@@ -167,8 +162,7 @@ async def publish_guide(bot, guild):
 def _panel_has_required_buttons(message, key):
     """Check actual Discord component IDs, not just an embed's footer marker."""
     expected = {
-        "rules": {"ddh:rules:v1"},
-        "guide": {"ddh:rules:v1"},
+        "verification": {"ddh:rules:v1"},
         "support": {
             "ddh:partner:v1", "ddh:feedback:v1",
             "ddh:developer:v1", "ddh:report:v1",
@@ -208,21 +202,11 @@ async def repair_legacy_verification_panels(bot, guild):
 
     marker = "DDH:verification:v1"
     saved_id = await bot.store.get(guild.id, "message:verification")
-    channel_ids = {
-        await bot.store.get(guild.id, "channel:verification"),
-        await bot.store.get(guild.id, "channel:rules"),
-        await bot.store.get(guild.id, "channel:guide"),
-    }
-    channels = [
-        channel for channel in guild.channels
-        if isinstance(channel, discord.TextChannel)
-        and (
-            channel.id in channel_ids
-            or "인증" in channel.name
-            or "verify" in channel.name.lower()
-            or "verification" in channel.name.lower()
-        )
-    ]
+    from ddh.visibility import find_verification_channel
+    try:
+        channels = [await find_verification_channel(guild, bot.store)]
+    except UserError:
+        return False
     changed = False
     for channel in channels:
         messages = []
@@ -248,7 +232,7 @@ async def repair_legacy_verification_panels(bot, guild):
                 embed.footer.text == marker for embed in message.embeds
             ):
                 continue
-            if not _panel_has_required_buttons(message, "rules"):
+            if not _panel_has_required_buttons(message, "verification"):
                 await message.edit(
                     embed=message.embeds[0],
                     view=RulesView(bot),
@@ -295,7 +279,7 @@ async def repair_missing_panels(bot, guild):
 
 
 async def publish_panels(bot, guild):
-    from ddh.views import RulesView, SupportView
+    from ddh.views import SupportView
 
     rules = embed("DDH에 오신 것을 환영합니다",
                   "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
@@ -305,7 +289,7 @@ async def publish_panels(bot, guild):
                   "**5. 거래는 당사자끼리 협의하기** — DDH는 외주 제작팀이나 결제 중개 서비스가 아닙니다. "
                   "개발자 역할은 거래 이행이나 실력을 보증하지 않습니다.\n"
                   "**6. 문제가 생기면 신고하기** — 사기·도용·규칙 위반은 거래·도용 신고 버튼으로 비공개로 알려 주세요.\n\n"
-                  "먼저 Discord 서버 규칙 동의를 완료한 뒤 아래 **멤버 인증** 버튼을 누르세요. "
+                  "멤버 인증은 **인증 채널**에서만 진행합니다. "
                   f"계정 생성 후 {bot.settings.verification_min_days}일 이상인 계정은 조건 확인 후 "
                   "멤버 역할을 받습니다. 인증이 거절되면 표시되는 이유를 확인해 주세요.")
     support = embed("DDH 문의·신청",
@@ -317,7 +301,7 @@ async def publish_panels(bot, guild):
                     "신청 내용은 신청자와 운영진만 보는 티켓에 저장됩니다. "
                     "종료 시 대화 채널이 삭제되고 신청·처리 기록은 내부 DB에 남습니다.\n"
                     "진행 중인 티켓은 종류별로 1개까지 열 수 있습니다.")
-    await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules, view=RulesView(bot))
+    await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules)
     await publish_guide(bot, guild)
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
     await bot.store.set(guild.id, "panels:version", PANELS_VERSION)
@@ -326,3 +310,37 @@ async def publish_panels(bot, guild):
     # Hiring, looking-for-work, commissions, and portfolio channels are Forums.
     # Their channel descriptions act as posting guidelines. Forum channels do
     # not support sending a standalone text message as an onboarding panel.
+
+
+async def configure_verification_entry(bot, guild, verification):
+    """Explicit owner request only: remove auth controls, keeping all message text."""
+    from ddh.views import RulesView
+
+    for key in ("rules", "guide"):
+        channel = await channel_for(guild, bot.store, key)
+        async for message in channel.history(limit=None):
+            if message.author.id != guild.me.id:
+                continue
+            view = discord.ui.View.from_message(message, timeout=None)
+            removed = False
+            for item in list(view.children):
+                custom_id = getattr(item, "custom_id", "") or ""
+                if custom_id == "ddh:rules:v1" or custom_id.startswith("ddh:verification:"):
+                    view.remove_item(item)
+                    removed = True
+            if removed:
+                await message.edit(view=view if view.children else None)
+
+    await upsert_panel(
+        verification, bot.store, "verification",
+        embed("DDH 멤버 인증", "DDH는 Roblox 개발자와 게임 제작자를 연결하는 커뮤니티입니다.\n\n"
+              "**인증 전 확인**\n"
+              "• 서로 존중하고 괴롭힘·도배·무단 광고를 하지 마세요.\n"
+              "• 본인 작품만 게시하고 도용·사칭을 하지 마세요.\n"
+              "• 개인정보를 보호하고 거래 조건은 당사자끼리 확인하세요.\n\n"
+              "위 내용에 동의하면 아래 버튼을 눌러 주세요. 인증 후 멤버 역할이 지급되고 "
+              "규칙·가이드와 활동 채널이 열립니다.\n"
+              f"계정 생성 후 {bot.settings.verification_min_days}일 이상이어야 하며, "
+              "Discord 기본 규칙 동의가 필요한 경우 먼저 완료해 주세요."),
+        view=RulesView(bot),
+    )

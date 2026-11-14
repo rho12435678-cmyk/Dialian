@@ -107,7 +107,7 @@ class DDHCommands(app_commands.Group):
             )
         await reply(interaction, result)
 
-    @app_commands.command(name="visibility", description="소유자 확인 후 미인증자에게 규칙·가이드·인증만 표시")
+    @app_commands.command(name="visibility", description="소유자 확인 후 미인증자에게 인증 채널만 표시")
     @app_commands.describe(
         apply="True: 이 요청에 한 번만 채널 보기 권한 변경",
         verification_channel="이미 사용 중인 인증 텍스트 채널",

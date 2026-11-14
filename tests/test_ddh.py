@@ -554,8 +554,12 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rules_view_acknowledges_before_database_checks(self):
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         interaction.user = self.visitor
+        verification = await self.guild.create_text_channel("인증-verify")
+        await self.bot.store.set(self.guild.id, "channel:verification", verification.id)
+        interaction.channel_id = verification.id
         original = self.bot.tickets.ready
         async def check_ack(guild):
             interaction.response.defer.assert_awaited_once_with(
@@ -569,27 +573,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.defer.assert_awaited_once()
         self.visitor.add_roles.assert_awaited_once()
 
-    async def test_missing_live_verification_button_is_repaired_on_startup(self):
+    async def test_panel_refresh_does_not_restore_rules_or_guide_buttons(self):
         await publish_panels(self.bot, self.guild)
-        rules = await self.channel("rules")
-        guide_channel = await self.channel("guide")
-        rules_message = rules.messages[0]
-        guide_message = guide_channel.messages[0]
-        # The older logic accepted the embed footer even if the button had
-        # gone missing; the new check must inspect live message components.
-        rules_message.view = None
-        guide_message.view = None
-        self.assertTrue(await repair_missing_panels(self.bot, self.guild))
-        self.assertEqual(rules.messages[0].id, rules_message.id)
-        self.assertEqual(guide_channel.messages[0].id, guide_message.id)
-        self.assertTrue(any(
-            component.custom_id == "ddh:rules:v1"
-            for component in rules_message.view.children
-        ))
-        self.assertTrue(any(
-            component.custom_id == "ddh:rules:v1"
-            for component in guide_message.view.children
-        ))
+        for key in ("rules", "guide"):
+            self.assertIsNone((await self.channel(key)).messages[0].view)
         self.assertFalse(await repair_missing_panels(self.bot, self.guild))
 
     async def test_verification_allows_basic_existing_member_role_permissions(self):
@@ -603,6 +590,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verification_error_is_recorded_for_owner_and_success_clears(self):
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         with patch("ddh.views.report_error", new_callable=AsyncMock):
             await RulesView(self.bot).on_error(
@@ -613,21 +601,23 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.store.get(self.guild.id, "verification:last_error"),
         )
         interaction.user = self.visitor
-        interaction.channel_id = (await self.channel("rules")).id
+        verification = await self.guild.create_text_channel("인증-verify")
+        await self.bot.store.set(self.guild.id, "channel:verification", verification.id)
+        interaction.channel_id = verification.id
         await RulesView(self.bot).accept.callback(interaction)
         self.assertIsNone(
             await self.bot.store.get(self.guild.id, "verification:last_error"),
         )
 
-    async def test_official_verification_button_works_from_server_guide_location(self):
+    async def test_stale_verification_button_rejected_outside_verification_channel(self):
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         interaction.user = self.visitor
         interaction.channel_id = 992211330012345678  # Server Guide resource view
-        await RulesView(self.bot).accept.callback(interaction)
-        self.visitor.add_roles.assert_awaited_once_with(
-            self.roles["member"], reason="DDH 규칙 동의 및 계정 인증",
-        )
+        with self.assertRaisesRegex(UserError, "인증 채널"):
+            await RulesView(self.bot).accept.callback(interaction)
+        self.visitor.add_roles.assert_not_awaited()
 
     async def test_verification_rejects_underage_account_without_role_grant(self):
         self.visitor.created_at = datetime.now(timezone.utc) - timedelta(days=1)
@@ -635,23 +625,41 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await verify_member(self.bot, self.guild, self.visitor.id)
         self.visitor.add_roles.assert_not_awaited()
 
-    async def test_one_time_visibility_only_exposes_rules_guide_verification(self):
+    async def test_entry_migration_preserves_embeds_text_and_unrelated_buttons(self):
+        verification = await self.guild.create_text_channel("인증-verify")
+        card = discord.Embed(title="소유자가 수정한 안내", description="보존할 본문")
+        messages = []
+        for key in ("rules", "guide"):
+            view = RulesView(self.bot)
+            view.add_item(discord.ui.Button(label="별도 링크", url="https://example.com"))
+            channel = await self.channel(key)
+            message = await channel.send(embed=card, content="기존 메시지", view=view)
+            messages.append(message)
+        await apply_visibility(self.bot, self.guild, apply=True)
+        for message in messages:
+            self.assertEqual(message.embeds[0].to_dict(), card.to_dict())
+            self.assertEqual(message.content, "기존 메시지")
+            self.assertEqual([item.url for item in message.view.children], ["https://example.com"])
+        self.assertEqual(len(verification.messages), 1)
+        self.assertEqual(verification.messages[0].view.children[0].custom_id, "ddh:rules:v1")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        self.assertEqual(len(verification.messages), 1)
+        for key in ("rules", "guide"):
+            self.assertTrue((await self.channel(key)).permissions_for(self.member).view_channel)
+
+    async def test_one_time_visibility_only_exposes_verification(self):
         verification = await self.guild.create_text_channel("인증-verify")
         # Before the requested one-time change, unverified users still see chat.
         self.assertTrue((await self.channel("general")).permissions_for(self.visitor).view_channel)
         before = {channel.id: channel.overwrites for channel in self.guild.channels}
         preview = await apply_visibility(self.bot, self.guild)
-        self.assertIn("규칙 · 가이드 · 인증-verify", preview)
+        self.assertIn("미인증자에게 보일 채널: 인증-verify", preview)
         self.assertEqual(before, {
             channel.id: channel.overwrites for channel in self.guild.channels
         })
         result = await apply_visibility(self.bot, self.guild, apply=True)
         self.assertIn("완료", result)
-        allowed = {
-            (await self.channel("rules")).id,
-            (await self.channel("guide")).id,
-            verification.id,
-        }
+        allowed = {verification.id}
         non_member_role = self.guild.make_role(
             "외부 홍보 역할",
             permissions=discord.Permissions(view_channel=True),
@@ -911,6 +919,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         role = self.roles["member"]
         role._permissions = discord.Permissions(manage_roles=True).value
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         interaction.channel_id = (await self.channel("rules")).id
         interaction.user = self.visitor
