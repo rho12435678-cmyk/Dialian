@@ -146,6 +146,13 @@ async def guide(guild, store):
         ),
         inline=False,
     )
+    card.add_field(
+        name="거래 채널 이용 권한",
+        value="구인·의뢰: 인증된 멤버와 개발자 모두 게시·댓글 가능\n"
+              "포트폴리오: 승인된 개발자가 작품을 게시하고 인증된 멤버는 열람·댓글 가능\n"
+              "실제 거래 조건과 연락은 당사자끼리 협의해 주세요.",
+        inline=False,
+    )
     return card
 
 

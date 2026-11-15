@@ -193,6 +193,7 @@ async def apply_visibility(bot, guild, *, apply=False, verification_channel=None
     await bot.store.set(guild.id, "channel:verification", verification.id)
     from ddh.content import configure_verification_entry
     await configure_verification_entry(bot, guild, verification)
+    await bot.store.set(guild.id, "visibility:verification_only", True)
     return (
         f"공개 인증 진입 채널 1개 확인 · 변경 {changed}개 완료.\n"
         "이후 서버 소유자가 변경한 채널과 권한은 자동으로 되돌리지 않습니다."

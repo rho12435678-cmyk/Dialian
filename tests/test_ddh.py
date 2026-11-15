@@ -1186,12 +1186,87 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.on_raw_member_remove(SimpleNamespace(guild_id=self.guild.id, user=self.visitor))
         self.assertFalse(audit.messages)
         self.assertEqual(len(await self.bot.store.pending_events(self.guild.id, "audit")), 2)
-        self.assertIn("채널 권한 불일치 · 로그-logs", await inspect_layout(self.guild, self.bot.store))
+        self.assertTrue(any("채널 권한 불일치 · 로그-logs" in item for item in await inspect_layout(self.guild, self.bot.store)))
         await audit.edit(overwrites=original)
         await self.bot.operations.flush(self.guild)
         self.assertIn("입장", audit.messages[-1].embeds[0].description)
         self.assertIn("퇴장", audit.messages[-1].embeds[0].description)
         self.assertFalse(await self.bot.store.pending_events(self.guild.id, "audit"))
+
+    async def test_approval_allows_basic_member_permissions_but_rejects_admin(self):
+        self.roles["member"]._permissions = discord.Permissions(
+            view_channel=True, send_messages=True, use_application_commands=True,
+        ).value
+        channel = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
+        self.assertEqual(await self.bot.tickets.review(
+            self.guild, channel, self.staff, True, "승인",
+        ), "승인")
+        self.assertIn(self.roles["developer"], self.member.roles)
+        other = self.guild.member(877, [self.roles["member"]])
+        channel = await self.bot.tickets.create(self.guild, other, "developer", self.payload())
+        self.roles["developer"]._permissions = discord.Permissions(manage_roles=True).value
+        with self.assertRaises(UserError):
+            await self.bot.tickets.review(self.guild, channel, self.staff, True, "거부될 권한")
+        other.add_roles.assert_not_awaited()
+
+    async def test_owner_customizations_do_not_trigger_template_drift(self):
+        await self.guild.create_text_channel("인증-verify")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        channel = await self.channel("general")
+        original = dict(channel.overwrites)
+        changed = dict(original)
+        changed[self.roles["member"]] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        await channel.edit(overwrites=changed, name="소유자의-채팅")
+        self.roles["member"]._permissions = discord.Permissions(use_application_commands=True).value
+        self.roles["staff"]._permissions = discord.Permissions(administrator=True).value
+        warnings = await inspect_layout(self.guild, self.bot.store)
+        self.assertFalse(any("불일치" in item or "공개 채널" in item or "운영자 역할 과도한" in item for item in warnings))
+        self.assertEqual(channel.overwrites, changed)
+        exposed = dict(changed)
+        exposed[self.guild.default_role] = discord.PermissionOverwrite(view_channel=True)
+        await channel.edit(overwrites=exposed)
+        self.assertIn("미인증자 공개 채널 확인 · 소유자의-채팅", await inspect_layout(self.guild, self.bot.store))
+        self.assertEqual(channel.overwrites, exposed)
+
+    async def test_diagnostics_detect_custom_role_bypass_without_mutation(self):
+        await self.guild.create_text_channel("인증-verify")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        role = self.guild.make_role("외부 역할")
+        channel = await self.channel("general")
+        changed = dict(channel.overwrites)
+        changed[role] = discord.PermissionOverwrite(view_channel=True)
+        await channel.edit(overwrites=changed)
+        self.assertTrue(any("미인증 추가 역할 접근 확인" in item for item in
+                            await inspect_layout(self.guild, self.bot.store)))
+        self.assertEqual(channel.overwrites, changed)
+
+    async def test_audit_names_and_permission_changes_are_readable(self):
+        entry = SimpleNamespace(
+            guild=self.guild, id=991, user_id=self.staff.id, user=self.staff,
+            action=discord.AuditLogAction.role_update,
+            target=self.roles["member"], created_at=datetime.now(timezone.utc),
+            before=SimpleNamespace(permissions=discord.Permissions(send_messages=True)),
+            after=SimpleNamespace(permissions=discord.Permissions(manage_roles=True)),
+        )
+        await self.bot.operations.audit(entry)
+        text = (await self.channel("security_log")).messages[-1].embeds[0].description
+        self.assertIn(self.staff.name, text)
+        self.assertIn(self.roles["member"].name, text)
+        self.assertIn("추가 manage_roles", text)
+        self.assertIn("제거 send_messages", text)
+
+    async def test_all_market_access_after_verification_gate(self):
+        await self.guild.create_text_channel("인증-verify")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        developer = self.guild.member(898, [self.roles["member"], self.roles["developer"]])
+        for key in ("hiring", "commissions", "portfolio"):
+            channel = await self.channel(key)
+            self.assertFalse(channel.permissions_for(self.visitor).view_channel)
+            for person in (self.member, developer):
+                self.assertTrue(channel.permissions_for(person).view_channel)
+                self.assertTrue(channel.permissions_for(person).send_messages_in_threads)
+                self.assertEqual(channel.permissions_for(person).send_messages,
+                                 key != "portfolio" or person is developer)
 
     async def test_audit_event_is_deduplicated_across_gateway_and_poll(self):
         entry = SimpleNamespace(guild=self.guild, id=901, user_id=self.staff.id,
