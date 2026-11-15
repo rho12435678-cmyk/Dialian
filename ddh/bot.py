@@ -6,6 +6,8 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+from ddh import __version__
+from ddh.activity import repair_activity
 from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary
 from ddh.cleanup import cleanup_legacy
@@ -127,6 +129,16 @@ class DDHCommands(app_commands.Group):
             )
         await reply(interaction, summary)
 
+    @app_commands.command(name="activity", description="포트폴리오 분리 및 커뮤니티 게시·댓글·파일 권한 정리")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def activity(self, interaction: discord.Interaction, apply: bool = False):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.mutation_lock:
+            summary = await repair_activity(self.bot, interaction.guild, apply=apply)
+        await reply(interaction, summary)
+
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -192,12 +204,14 @@ class DDHCommands(app_commands.Group):
             failure = await self.bot.store.get(interaction.guild.id, "security:last_error")
         details = f"\n최근 보안 오류: {failure}" if failure else ""
         if interaction.user.id == interaction.guild.owner_id:
+            details += f"\n실행 코드: {(self.bot.release_sha or '확인 불가')[:12]}"
+        if interaction.user.id == interaction.guild.owner_id:
             verification_error = await self.bot.store.get(
                 interaction.guild.id, "verification:last_error",
             )
             if verification_error:
                 details += f"\n최근 인증 오류: {verification_error}"
-        await reply(interaction, f"Dialian · DDH\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
+        await reply(interaction, f"Dialian · DDH v{__version__}\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
                     f"정기 안내: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")

@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import discord
 
 from config import Settings
+from ddh.activity import repair_activity, FORUM_KEYS
+from ddh import __version__
 from ddh.announcements import protect_announcement_channels
 from ddh.backups import backup, restore_dry_run, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
@@ -297,7 +299,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup", "visibility"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup", "visibility", "activity"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
@@ -355,13 +357,13 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.bot.store.get(guild.id, "news_format_pending"))
 
     async def test_compact_bilingual_layout_and_announce_support(self):
-        self.assertEqual(len(CATEGORIES), 6)
+        self.assertEqual(len(CATEGORIES), 7)
         names = {ch.name for ch in CHANNELS}
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
         self.assertNotIn("english-chat", names)
         self.assertEqual({ch.key for ch in CHANNELS if ch.forum and ch.category == "community"},
-                         {"questions", "ideas"})
+                         {"questions", "ideas", "pictures"})
         self.assertEqual((await self.channel("support_panel")).type, discord.ChannelType.news)
         self.assertEqual((await self.channel("partners")).type, discord.ChannelType.news)
         self.assertEqual((await self.channel("portfolio")).type, discord.ChannelType.forum)
@@ -1298,10 +1300,102 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(restored.execute("SELECT owner_id FROM tickets").fetchone()[0], 77)
 
+    async def test_activity_access_matrix_and_no_automatic_restore(self):
+        await self.guild.create_text_channel("인증-verify")
+        for key in FORUM_KEYS:
+            await (await self.channel(key)).edit(overwrites={self.guild.default_role: discord.PermissionOverwrite(view_channel=False)})
+        before = {c.id: c.overwrites for c in self.guild.channels}
+        await repair_activity(self.bot, self.guild)
+        self.assertEqual(before, {c.id: c.overwrites for c in self.guild.channels})
+        await repair_activity(self.bot, self.guild, apply=True)
+        developer = self.guild.member(801, [self.roles["member"], self.roles["developer"]])
+        field_member = self.guild.member(802, [self.roles["member"], self.roles["field:gfx"]])
+        unverified_dev = self.guild.member(803, [self.roles["developer"]])
+        for key in FORUM_KEYS:
+            channel = await self.channel(key)
+            self.assertIsInstance(channel, discord.ForumChannel)
+            self.assertEqual(channel.slowmode_delay, 0)
+            self.assertEqual(channel.default_thread_slowmode_delay, 0)
+            for member in (self.member, developer, field_member):
+                effective = channel.permissions_for(member)
+                self.assertTrue(effective.view_channel)
+                self.assertTrue(effective.send_messages_in_threads)
+                thread_permissions = discord.Thread.permissions_for(SimpleNamespace(parent=channel), member)
+                self.assertTrue(thread_permissions.attach_files)
+                self.assertTrue(thread_permissions.embed_links)
+                self.assertEqual(effective.send_messages, key != "portfolio" or member is not self.member)
+            self.assertFalse(channel.permissions_for(self.visitor).view_channel)
+            self.assertFalse(channel.permissions_for(unverified_dev).view_channel)
+        portfolio = await self.channel("portfolio")
+        self.assertNotEqual(portfolio.category_id, (await self.channel("hiring")).category_id)
+        self.assertTrue((await self.channel("general")).permissions_for(self.member).send_messages)
+        self.assertTrue((await self.channel("lounge")).permissions_for(self.member).connect)
+        self.assertFalse((await self.channel("announcements")).permissions_for(self.member).send_messages)
+        self.assertFalse((await self.channel("audit")).permissions_for(self.member).view_channel)
+        counts = len(self.guild.channels)
+        await repair_activity(self.bot, self.guild, apply=True)
+        self.assertEqual(counts, len(self.guild.channels))
+        await portfolio.edit(name="소유자-포폴")
+        with patch.object(self.bot, "get_guild", return_value=self.guild), patch("ddh.bot.publish_release", new_callable=AsyncMock):
+            await self.bot.on_ready()
+        self.assertEqual(portfolio.name, "소유자-포폴")
+
+    async def test_activity_converts_text_without_losing_history_and_recovers(self):
+        await self.guild.create_text_channel("인증-verify")
+        old_forum = await self.channel("pictures")
+        self.guild.channels.remove(old_forum)
+        old = await self.guild.create_text_channel("사진-pics", category=self.guild.get_channel(old_forum.category_id))
+        message = await old.send(content="기존 작품 글")
+        await self.bot.store.set(self.guild.id, "channel:pictures", old.id)
+        original = self.bot.store.set
+        async def fail_once(guild_id, key, value):
+            if key == "channel:pictures":
+                raise RuntimeError("interrupted before channel ID saved")
+            return await original(guild_id, key, value)
+        with patch.object(self.bot.store, "set", side_effect=fail_once), self.assertRaises(RuntimeError):
+            await repair_activity(self.bot, self.guild, apply=True)
+        count = len(self.guild.channels)
+        await repair_activity(self.bot, self.guild, apply=True)
+        self.assertEqual(count, len(self.guild.channels))
+        self.assertIsInstance(await self.channel("pictures"), discord.ForumChannel)
+        self.assertIn(old, self.guild.channels)
+        self.assertEqual(old.messages[0], message)
+        self.assertFalse(old.permissions_for(self.member).send_messages)
+        self.assertTrue(old.permissions_for(self.member).view_channel)
+
+    async def test_activity_removes_privileged_member_grants_only(self):
+        await self.guild.create_text_channel("인증-verify")
+        self.roles["member"]._permissions = discord.Permissions(manage_roles=True, send_messages=True).value
+        self.roles["staff"]._permissions = discord.Permissions(administrator=True).value
+        await repair_activity(self.bot, self.guild, apply=True)
+        self.assertFalse(self.roles["member"].permissions.manage_roles)
+        self.assertTrue(self.roles["member"].permissions.send_messages)
+        self.assertTrue(self.roles["staff"].permissions.administrator)
+
+    async def test_activity_preflight_refuses_missing_tracked_channel(self):
+        await self.guild.create_text_channel("인증-verify")
+        self.guild.channels.remove(await self.channel("ideas"))
+        before = {c.id: c.overwrites for c in self.guild.channels}
+        with self.assertRaises(UserError):
+            await repair_activity(self.bot, self.guild, apply=True)
+        self.assertEqual(before, {c.id: c.overwrites for c in self.guild.channels})
+
+    async def test_status_shows_version_and_private_revision(self):
+        interaction = SimpleNamespace(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id))
+        self.bot.release_sha = "a" * 40
+        group = DDHCommands(self.bot)
+        with patch("ddh.bot.reply", new_callable=AsyncMock) as reply:
+            await group.status.callback(group, interaction)
+            self.assertIn(__version__, reply.call_args.args[1])
+            self.assertIn("a" * 12, reply.call_args.args[1])
+            interaction.user = self.member
+            await group.status.callback(group, interaction)
+            self.assertNotIn("a" * 12, reply.call_args.args[1])
+
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

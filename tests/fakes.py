@@ -87,6 +87,10 @@ class ChannelMethods:
             self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=kwargs["overwrites"]))
         if "topic" in kwargs:
             self.topic = kwargs["topic"]
+        if "slowmode_delay" in kwargs:
+            self.slowmode_delay = kwargs["slowmode_delay"]
+        if "default_thread_slowmode_delay" in kwargs:
+            self.default_thread_slowmode_delay = kwargs["default_thread_slowmode_delay"]
         if "type" in kwargs:
             self._type = kwargs["type"].value
         return self

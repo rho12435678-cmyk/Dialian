@@ -111,6 +111,8 @@ def forum_tags(spec):
         names = ("게임", "커뮤니티", "협업", "기타")
     elif spec.key == "commissions":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "모집완료")
+    elif spec.key == "pictures":
+        names = ("작품", "제작과정", "피드백")
     elif spec.key == "portfolio":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "의뢰가능")
     else:
