@@ -8,10 +8,9 @@ from uuid import uuid4
 import discord
 
 from ddh.backups import latest_backup, verify_snapshot
-from ddh.blueprint import (CATEGORIES, CHANNELS, ROLES, overwrites,
-                           role_permissions, strict_readonly_overwrites)
+from ddh.blueprint import CATEGORIES, CHANNELS, ROLES
 from ddh.security import rule_trigger_type, specifications
-from ddh.server import REQUIRED_PERMISSIONS, forum_permissions
+from ddh.server import REQUIRED_PERMISSIONS, unsafe_role_permissions
 
 log = logging.getLogger(__name__)
 
@@ -56,15 +55,10 @@ async def inspect_layout(guild, store):
     for key, role in roles.items():
         if role is None:
             findings.append(f"역할 누락 · {ROLES[key][0]}")
-        elif key == "staff":
-            # The owner-created operator role is intentionally not overwritten.
-            # Still warn if it has powers that could bypass controlled workflows.
-            if role.permissions.administrator or role.permissions.manage_roles:
-                findings.append("운영자 역할 과도한 권한 확인 · Administrator/역할 관리")
-            if not role.permissions.manage_messages:
-                findings.append("운영자 역할 메시지 관리 권한 확인")
-        elif role.permissions != role_permissions(key):
-            findings.append(f"역할 권한 불일치 · {ROLES[key][0]}")
+        elif key not in ("staff", "admin") and unsafe_role_permissions(role):
+            findings.append(f"자동 지급 역할의 관리 권한 확인 · {role.name}")
+    if unsafe_role_permissions(guild.default_role):
+        findings.append("@everyone 관리 권한 확인")
     orphaned = [
         role for role in guild.roles
         if role.name in ("운영진・Staff", "DDH 운영진")
@@ -79,19 +73,12 @@ async def inspect_layout(guild, store):
     for permission in REQUIRED_PERMISSIONS:
         if not getattr(guild.me.guild_permissions, permission):
             findings.append(f"봇 권한 누락 · {permission}")
-    if all(roles[key] for key in ("staff", "admin", "developer")):
-        if not roles["staff"] > roles["admin"] > roles["developer"]:
-            findings.append("역할 순서 확인 · Staff > Admin > Developer")
     if any(role and role >= guild.me.top_role for key, role in roles.items() if key not in ("staff", "admin")):
         findings.append("봇 역할 순서 확인 · 인증·신청 지급 대상 역할보다 Dialian을 위로 이동")
     for spec in CATEGORIES:
         channel = guild.get_channel(state.get(f"category:{spec.key}", 0))
         if not isinstance(channel, discord.CategoryChannel):
             findings.append(f"카테고리 누락 · {spec.name}")
-        elif roles["staff"] and roles["admin"]:
-            policy = "private" if spec.private else "readonly"
-            if channel.overwrites != overwrites(guild, roles, policy):
-                findings.append(f"카테고리 권한 불일치 · {spec.name}")
     for spec in CHANNELS:
         channel = guild.get_channel(state.get(f"channel:{spec.key}", 0))
         expected = discord.ForumChannel if spec.forum else discord.VoiceChannel if spec.voice else discord.TextChannel
@@ -102,17 +89,34 @@ async def inspect_layout(guild, store):
             findings.append(f"공지 형식 확인 · {spec.name}")
         if spec.forum and not channel.available_tags:
             findings.append(f"포럼 태그 누락 · {spec.name}")
-        if roles["staff"] and roles["admin"] and (spec.policy not in roles or roles[spec.policy]):
-            policy = (
-                forum_permissions(guild, roles, spec.policy)
-                if spec.forum else
-                strict_readonly_overwrites(
-                    guild, roles, updates=spec.key == "updates",
-                ) if spec.policy == "readonly" else
-                overwrites(guild, roles, spec.policy, voice=spec.voice)
-            )
-            if channel.overwrites != policy:
-                findings.append(f"채널 권한 불일치 · {spec.name}")
+        if spec.policy == "readonly":
+            for key in ("member", "developer", "partner"):
+                role = roles.get(key)
+                if role and channel.permissions_for(role).send_messages:
+                    findings.append(f"공지 채널 일반 역할 게시 허용 확인 · {channel.name} · {role.name}")
+        # Check confidentiality, not equality with the initial template.
+        if spec.policy in ("private", "log"):
+            permitted = {state.get("role:staff"), state.get("role:admin"), guild.me.id}
+            if not private_channel(channel, guild, permitted):
+                findings.append(f"채널 권한 불일치 · {channel.name} · 비공개 접근 범위 확인")
+    if state.get("visibility:verification_only"):
+        verification_id = state.get("channel:verification")
+        for channel in guild.channels:
+            if isinstance(channel, discord.CategoryChannel):
+                continue
+            public = channel.permissions_for(guild.default_role).view_channel
+            trusted = {state.get("role:member"), state.get("role:staff"),
+                       state.get("role:admin"), guild.me.top_role.id}
+            if channel.id != verification_id:
+                for role in guild.roles:
+                    if role.id in trusted or role.id == guild.default_role.id:
+                        continue
+                    if channel.permissions_for(role).view_channel:
+                        findings.append(f"미인증 추가 역할 접근 확인 · {channel.name} · {role.name}")
+            if channel.id != verification_id and public:
+                findings.append(f"미인증자 공개 채널 확인 · {channel.name}")
+            elif channel.id == verification_id and not public:
+                findings.append("인증 채널 접근 차단 확인")
     for ticket in await store.tickets(guild.id, "open"):
         channel = guild.get_channel(ticket["channel_id"])
         permitted = {state.get("role:staff"), state.get("role:admin"), guild.me.id, ticket["owner_id"]}
@@ -217,15 +221,37 @@ class Operations:
         if label is None:
             return
         target_id = getattr(entry.target, "id", None)
-        actor = str(entry.user_id) if entry.user_id else "확인 불가"
-        details = f"{label} · 실행자 `{actor}` · 대상 `{target_id or '확인 불가'}` · 감사 ID `{entry.id}`"
+        actor = getattr(entry, "user", None)
+        target = entry.target
+        details = (
+            f"{label} · 실행자 {safe_name(getattr(actor, 'name', None) or '확인 불가')} "
+            f"(`{entry.user_id or '확인 불가'}`) · 대상 "
+            f"{safe_name(getattr(target, 'name', None) or '확인 불가')} "
+            f"(`{target_id or '확인 불가'}`) · 감사 ID `{entry.id}`"
+        )
         high_risk = action in RISKY_ACTIONS
-        if action == "role_update":
-            before = getattr(entry.before, "permissions", None)
-            after = getattr(entry.after, "permissions", None)
-            if before is not None and after is not None:
-                details += f" · 권한 비트 `{before.value} → {after.value}`"
-                high_risk = True
+        before = getattr(entry, "before", None)
+        after = getattr(entry, "after", None)
+        for field, title in (("name", "이름"), ("slowmode_delay", "슬로우모드(초)")):
+            old, new = getattr(before, field, None), getattr(after, field, None)
+            if old != new:
+                details += f"\n{title}: {safe_name(old)} → {safe_name(new)}"
+        for field, title in (("permissions", "역할 권한"), ("allow", "채널 허용"), ("deny", "채널 거부")):
+            old, new = getattr(before, field, None), getattr(after, field, None)
+            if isinstance(old, discord.Permissions) and isinstance(new, discord.Permissions):
+                added = [name for name, enabled in new if enabled and not getattr(old, name)]
+                removed = [name for name, enabled in old if enabled and not getattr(new, name)]
+                if added or removed:
+                    details += f"\n{title}: 추가 {', '.join(added) or '없음'} / 제거 {', '.join(removed) or '없음'}"
+                    high_risk = True
+        if action == "member_role_update":
+            for diff, title in ((before, "회수 역할"), (after, "지급 역할")):
+                changed = getattr(diff, "roles", ())
+                if changed:
+                    details += "\n" + title + ": " + ", ".join(
+                        f"{safe_name(role.name)} (`{role.id}`)" for role in changed[:8]
+                    )
+        details = details[:900]
         kind = "audit-risk" if high_risk else "audit"
         added = await self.record(guild, details, key=f"audit:{entry.id}", kind=kind,
                                   sink="security_log" if high_risk else "audit",

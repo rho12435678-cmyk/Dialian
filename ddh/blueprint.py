@@ -56,6 +56,7 @@ CATEGORIES = (
     Category("support", "📨 문의・Support", aliases=("📨 문의", "📨 문의 • Support")),
     Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels", "💬 커뮤니티 • Chat")),
     Category("jobs", "💼 거래・Market", aliases=("🤝 구인·구직", "💼 거래 • Market")),
+    Category("creators", "🎨 개발자 포트폴리오"),
     Category("voice", "🔊 음성・Voice", aliases=("🔊 음성 채널", "Voice Channels", "🔊 음성 • Voice")),
     Category("ops", "🔒 운영・Staff", True, aliases=("🛠 운영", "🔒 운영 • Staff")),
 )
@@ -95,7 +96,8 @@ CHANNELS = (
 
     Channel("general", "채팅-chat", "community",
             aliases=("자유채팅", "general")),
-    Channel("pictures", "사진-pics", "community", topic="Roblox 작업 이미지·스크린샷 공유"),
+    Channel("pictures", "작품공유-showcase", "community", forum=True,
+            aliases=("사진-pics", "작품공유", "작품-공유"), topic="Roblox 작업 이미지·영상·제작 과정 공유"),
     Channel("questions", "질문-question", "community", forum=True,
             aliases=("개발질문", "질문-help"),
             topic="개발 질문: 환경 / 기대 동작 / 오류 / 시도한 방법. 토큰과 개인정보는 지워 주세요."),
@@ -108,7 +110,7 @@ CHANNELS = (
     Channel("commissions", "의뢰-commissions", "jobs", forum=True,
             aliases=("제작의뢰",),
             topic="작업 의뢰: 분야 / 요구사항 / 예산 / 납기 / 연락 방법. DDH는 결제와 거래를 중개하지 않습니다."),
-    Channel("portfolio", "포트폴리오-portfolio", "jobs", "developer", forum=True,
+    Channel("portfolio", "포트폴리오-portfolio", "creators", "developer", forum=True,
             aliases=("포트폴리오",),
             topic="개발자 전용 포트폴리오: 분야 태그 / 본인 작업 / 가격·의뢰 가능 여부 / 연락 방법. 회원은 댓글과 DM으로 문의 가능합니다."),
 

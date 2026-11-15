@@ -58,9 +58,15 @@ class Message:
         self.view = view
 
     async def edit(self, **kwargs):
-        self.embeds = [kwargs["embed"]] if kwargs.get("embed") else []
-        self.view = kwargs.get("view")
+        if "embed" in kwargs:
+            self.embeds = [kwargs["embed"]] if kwargs["embed"] else []
+        if "view" in kwargs:
+            self.view = kwargs["view"]
         return self
+
+    @property
+    def components(self):
+        return [discord.components._component_factory(row) for row in self.view.to_components()] if self.view else []
 
     async def delete(self, **kwargs):
         if self in self.channel.messages:
@@ -81,6 +87,10 @@ class ChannelMethods:
             self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=kwargs["overwrites"]))
         if "topic" in kwargs:
             self.topic = kwargs["topic"]
+        if "slowmode_delay" in kwargs:
+            self.slowmode_delay = kwargs["slowmode_delay"]
+        if "default_thread_slowmode_delay" in kwargs:
+            self.default_thread_slowmode_delay = kwargs["default_thread_slowmode_delay"]
         if "type" in kwargs:
             self._type = kwargs["type"].value
         return self

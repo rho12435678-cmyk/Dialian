@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import discord
 
 from config import Settings
+from ddh.activity import repair_activity, FORUM_KEYS
+from ddh import __version__
 from ddh.announcements import protect_announcement_channels
 from ddh.backups import backup, restore_dry_run, verify_snapshot
 from ddh.blueprint import CATEGORIES, CHANNELS, FIELDS, overwrites
@@ -297,7 +299,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup", "visibility"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup", "visibility", "activity"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
@@ -355,13 +357,13 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.bot.store.get(guild.id, "news_format_pending"))
 
     async def test_compact_bilingual_layout_and_announce_support(self):
-        self.assertEqual(len(CATEGORIES), 6)
+        self.assertEqual(len(CATEGORIES), 7)
         names = {ch.name for ch in CHANNELS}
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
         self.assertNotIn("english-chat", names)
         self.assertEqual({ch.key for ch in CHANNELS if ch.forum and ch.category == "community"},
-                         {"questions", "ideas"})
+                         {"questions", "ideas", "pictures"})
         self.assertEqual((await self.channel("support_panel")).type, discord.ChannelType.news)
         self.assertEqual((await self.channel("partners")).type, discord.ChannelType.news)
         self.assertEqual((await self.channel("portfolio")).type, discord.ChannelType.forum)
@@ -554,8 +556,12 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rules_view_acknowledges_before_database_checks(self):
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         interaction.user = self.visitor
+        verification = await self.guild.create_text_channel("인증-verify")
+        await self.bot.store.set(self.guild.id, "channel:verification", verification.id)
+        interaction.channel_id = verification.id
         original = self.bot.tickets.ready
         async def check_ack(guild):
             interaction.response.defer.assert_awaited_once_with(
@@ -569,27 +575,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.defer.assert_awaited_once()
         self.visitor.add_roles.assert_awaited_once()
 
-    async def test_missing_live_verification_button_is_repaired_on_startup(self):
+    async def test_panel_refresh_does_not_restore_rules_or_guide_buttons(self):
         await publish_panels(self.bot, self.guild)
-        rules = await self.channel("rules")
-        guide_channel = await self.channel("guide")
-        rules_message = rules.messages[0]
-        guide_message = guide_channel.messages[0]
-        # The older logic accepted the embed footer even if the button had
-        # gone missing; the new check must inspect live message components.
-        rules_message.view = None
-        guide_message.view = None
-        self.assertTrue(await repair_missing_panels(self.bot, self.guild))
-        self.assertEqual(rules.messages[0].id, rules_message.id)
-        self.assertEqual(guide_channel.messages[0].id, guide_message.id)
-        self.assertTrue(any(
-            component.custom_id == "ddh:rules:v1"
-            for component in rules_message.view.children
-        ))
-        self.assertTrue(any(
-            component.custom_id == "ddh:rules:v1"
-            for component in guide_message.view.children
-        ))
+        for key in ("rules", "guide"):
+            self.assertIsNone((await self.channel(key)).messages[0].view)
         self.assertFalse(await repair_missing_panels(self.bot, self.guild))
 
     async def test_verification_allows_basic_existing_member_role_permissions(self):
@@ -603,6 +592,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verification_error_is_recorded_for_owner_and_success_clears(self):
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         with patch("ddh.views.report_error", new_callable=AsyncMock):
             await RulesView(self.bot).on_error(
@@ -613,21 +603,23 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.store.get(self.guild.id, "verification:last_error"),
         )
         interaction.user = self.visitor
-        interaction.channel_id = (await self.channel("rules")).id
+        verification = await self.guild.create_text_channel("인증-verify")
+        await self.bot.store.set(self.guild.id, "channel:verification", verification.id)
+        interaction.channel_id = verification.id
         await RulesView(self.bot).accept.callback(interaction)
         self.assertIsNone(
             await self.bot.store.get(self.guild.id, "verification:last_error"),
         )
 
-    async def test_official_verification_button_works_from_server_guide_location(self):
+    async def test_stale_verification_button_rejected_outside_verification_channel(self):
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         interaction.user = self.visitor
         interaction.channel_id = 992211330012345678  # Server Guide resource view
-        await RulesView(self.bot).accept.callback(interaction)
-        self.visitor.add_roles.assert_awaited_once_with(
-            self.roles["member"], reason="DDH 규칙 동의 및 계정 인증",
-        )
+        with self.assertRaisesRegex(UserError, "인증 채널"):
+            await RulesView(self.bot).accept.callback(interaction)
+        self.visitor.add_roles.assert_not_awaited()
 
     async def test_verification_rejects_underage_account_without_role_grant(self):
         self.visitor.created_at = datetime.now(timezone.utc) - timedelta(days=1)
@@ -635,23 +627,41 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await verify_member(self.bot, self.guild, self.visitor.id)
         self.visitor.add_roles.assert_not_awaited()
 
-    async def test_one_time_visibility_only_exposes_rules_guide_verification(self):
+    async def test_entry_migration_preserves_embeds_text_and_unrelated_buttons(self):
+        verification = await self.guild.create_text_channel("인증-verify")
+        card = discord.Embed(title="소유자가 수정한 안내", description="보존할 본문")
+        messages = []
+        for key in ("rules", "guide"):
+            view = RulesView(self.bot)
+            view.add_item(discord.ui.Button(label="별도 링크", url="https://example.com"))
+            channel = await self.channel(key)
+            message = await channel.send(embed=card, content="기존 메시지", view=view)
+            messages.append(message)
+        await apply_visibility(self.bot, self.guild, apply=True)
+        for message in messages:
+            self.assertEqual(message.embeds[0].to_dict(), card.to_dict())
+            self.assertEqual(message.content, "기존 메시지")
+            self.assertEqual([item.url for item in message.view.children], ["https://example.com"])
+        self.assertEqual(len(verification.messages), 1)
+        self.assertEqual(verification.messages[0].view.children[0].custom_id, "ddh:rules:v1")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        self.assertEqual(len(verification.messages), 1)
+        for key in ("rules", "guide"):
+            self.assertTrue((await self.channel(key)).permissions_for(self.member).view_channel)
+
+    async def test_one_time_visibility_only_exposes_verification(self):
         verification = await self.guild.create_text_channel("인증-verify")
         # Before the requested one-time change, unverified users still see chat.
         self.assertTrue((await self.channel("general")).permissions_for(self.visitor).view_channel)
         before = {channel.id: channel.overwrites for channel in self.guild.channels}
         preview = await apply_visibility(self.bot, self.guild)
-        self.assertIn("규칙 · 가이드 · 인증-verify", preview)
+        self.assertIn("미인증자에게 보일 채널: 인증-verify", preview)
         self.assertEqual(before, {
             channel.id: channel.overwrites for channel in self.guild.channels
         })
         result = await apply_visibility(self.bot, self.guild, apply=True)
         self.assertIn("완료", result)
-        allowed = {
-            (await self.channel("rules")).id,
-            (await self.channel("guide")).id,
-            verification.id,
-        }
+        allowed = {verification.id}
         non_member_role = self.guild.make_role(
             "외부 홍보 역할",
             permissions=discord.Permissions(view_channel=True),
@@ -911,6 +921,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         role = self.roles["member"]
         role._permissions = discord.Permissions(manage_roles=True).value
         interaction = AsyncMock()
+        interaction.response.is_done = Mock(return_value=True)
         interaction.guild = self.guild
         interaction.channel_id = (await self.channel("rules")).id
         interaction.user = self.visitor
@@ -1177,12 +1188,87 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.on_raw_member_remove(SimpleNamespace(guild_id=self.guild.id, user=self.visitor))
         self.assertFalse(audit.messages)
         self.assertEqual(len(await self.bot.store.pending_events(self.guild.id, "audit")), 2)
-        self.assertIn("채널 권한 불일치 · 로그-logs", await inspect_layout(self.guild, self.bot.store))
+        self.assertTrue(any("채널 권한 불일치 · 로그-logs" in item for item in await inspect_layout(self.guild, self.bot.store)))
         await audit.edit(overwrites=original)
         await self.bot.operations.flush(self.guild)
         self.assertIn("입장", audit.messages[-1].embeds[0].description)
         self.assertIn("퇴장", audit.messages[-1].embeds[0].description)
         self.assertFalse(await self.bot.store.pending_events(self.guild.id, "audit"))
+
+    async def test_approval_allows_basic_member_permissions_but_rejects_admin(self):
+        self.roles["member"]._permissions = discord.Permissions(
+            view_channel=True, send_messages=True, use_application_commands=True,
+        ).value
+        channel = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
+        self.assertEqual(await self.bot.tickets.review(
+            self.guild, channel, self.staff, True, "승인",
+        ), "승인")
+        self.assertIn(self.roles["developer"], self.member.roles)
+        other = self.guild.member(877, [self.roles["member"]])
+        channel = await self.bot.tickets.create(self.guild, other, "developer", self.payload())
+        self.roles["developer"]._permissions = discord.Permissions(manage_roles=True).value
+        with self.assertRaises(UserError):
+            await self.bot.tickets.review(self.guild, channel, self.staff, True, "거부될 권한")
+        other.add_roles.assert_not_awaited()
+
+    async def test_owner_customizations_do_not_trigger_template_drift(self):
+        await self.guild.create_text_channel("인증-verify")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        channel = await self.channel("general")
+        original = dict(channel.overwrites)
+        changed = dict(original)
+        changed[self.roles["member"]] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        await channel.edit(overwrites=changed, name="소유자의-채팅")
+        self.roles["member"]._permissions = discord.Permissions(use_application_commands=True).value
+        self.roles["staff"]._permissions = discord.Permissions(administrator=True).value
+        warnings = await inspect_layout(self.guild, self.bot.store)
+        self.assertFalse(any("불일치" in item or "공개 채널" in item or "운영자 역할 과도한" in item for item in warnings))
+        self.assertEqual(channel.overwrites, changed)
+        exposed = dict(changed)
+        exposed[self.guild.default_role] = discord.PermissionOverwrite(view_channel=True)
+        await channel.edit(overwrites=exposed)
+        self.assertIn("미인증자 공개 채널 확인 · 소유자의-채팅", await inspect_layout(self.guild, self.bot.store))
+        self.assertEqual(channel.overwrites, exposed)
+
+    async def test_diagnostics_detect_custom_role_bypass_without_mutation(self):
+        await self.guild.create_text_channel("인증-verify")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        role = self.guild.make_role("외부 역할")
+        channel = await self.channel("general")
+        changed = dict(channel.overwrites)
+        changed[role] = discord.PermissionOverwrite(view_channel=True)
+        await channel.edit(overwrites=changed)
+        self.assertTrue(any("미인증 추가 역할 접근 확인" in item for item in
+                            await inspect_layout(self.guild, self.bot.store)))
+        self.assertEqual(channel.overwrites, changed)
+
+    async def test_audit_names_and_permission_changes_are_readable(self):
+        entry = SimpleNamespace(
+            guild=self.guild, id=991, user_id=self.staff.id, user=self.staff,
+            action=discord.AuditLogAction.role_update,
+            target=self.roles["member"], created_at=datetime.now(timezone.utc),
+            before=SimpleNamespace(permissions=discord.Permissions(send_messages=True)),
+            after=SimpleNamespace(permissions=discord.Permissions(manage_roles=True)),
+        )
+        await self.bot.operations.audit(entry)
+        text = (await self.channel("security_log")).messages[-1].embeds[0].description
+        self.assertIn(self.staff.name, text)
+        self.assertIn(self.roles["member"].name, text)
+        self.assertIn("추가 manage_roles", text)
+        self.assertIn("제거 send_messages", text)
+
+    async def test_all_market_access_after_verification_gate(self):
+        await self.guild.create_text_channel("인증-verify")
+        await apply_visibility(self.bot, self.guild, apply=True)
+        developer = self.guild.member(898, [self.roles["member"], self.roles["developer"]])
+        for key in ("hiring", "commissions", "portfolio"):
+            channel = await self.channel(key)
+            self.assertFalse(channel.permissions_for(self.visitor).view_channel)
+            for person in (self.member, developer):
+                self.assertTrue(channel.permissions_for(person).view_channel)
+                self.assertTrue(channel.permissions_for(person).send_messages_in_threads)
+                self.assertEqual(channel.permissions_for(person).send_messages,
+                                 key != "portfolio" or person is developer)
 
     async def test_audit_event_is_deduplicated_across_gateway_and_poll(self):
         entry = SimpleNamespace(guild=self.guild, id=901, user_id=self.staff.id,
@@ -1214,10 +1300,102 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(restored.execute("SELECT owner_id FROM tickets").fetchone()[0], 77)
 
+    async def test_activity_access_matrix_and_no_automatic_restore(self):
+        await self.guild.create_text_channel("인증-verify")
+        for key in FORUM_KEYS:
+            await (await self.channel(key)).edit(overwrites={self.guild.default_role: discord.PermissionOverwrite(view_channel=False)})
+        before = {c.id: c.overwrites for c in self.guild.channels}
+        await repair_activity(self.bot, self.guild)
+        self.assertEqual(before, {c.id: c.overwrites for c in self.guild.channels})
+        await repair_activity(self.bot, self.guild, apply=True)
+        developer = self.guild.member(801, [self.roles["member"], self.roles["developer"]])
+        field_member = self.guild.member(802, [self.roles["member"], self.roles["field:gfx"]])
+        unverified_dev = self.guild.member(803, [self.roles["developer"]])
+        for key in FORUM_KEYS:
+            channel = await self.channel(key)
+            self.assertIsInstance(channel, discord.ForumChannel)
+            self.assertEqual(channel.slowmode_delay, 0)
+            self.assertEqual(channel.default_thread_slowmode_delay, 0)
+            for member in (self.member, developer, field_member):
+                effective = channel.permissions_for(member)
+                self.assertTrue(effective.view_channel)
+                self.assertTrue(effective.send_messages_in_threads)
+                thread_permissions = discord.Thread.permissions_for(SimpleNamespace(parent=channel), member)
+                self.assertTrue(thread_permissions.attach_files)
+                self.assertTrue(thread_permissions.embed_links)
+                self.assertEqual(effective.send_messages, key != "portfolio" or member is not self.member)
+            self.assertFalse(channel.permissions_for(self.visitor).view_channel)
+            self.assertFalse(channel.permissions_for(unverified_dev).view_channel)
+        portfolio = await self.channel("portfolio")
+        self.assertNotEqual(portfolio.category_id, (await self.channel("hiring")).category_id)
+        self.assertTrue((await self.channel("general")).permissions_for(self.member).send_messages)
+        self.assertTrue((await self.channel("lounge")).permissions_for(self.member).connect)
+        self.assertFalse((await self.channel("announcements")).permissions_for(self.member).send_messages)
+        self.assertFalse((await self.channel("audit")).permissions_for(self.member).view_channel)
+        counts = len(self.guild.channels)
+        await repair_activity(self.bot, self.guild, apply=True)
+        self.assertEqual(counts, len(self.guild.channels))
+        await portfolio.edit(name="소유자-포폴")
+        with patch.object(self.bot, "get_guild", return_value=self.guild), patch("ddh.bot.publish_release", new_callable=AsyncMock):
+            await self.bot.on_ready()
+        self.assertEqual(portfolio.name, "소유자-포폴")
+
+    async def test_activity_converts_text_without_losing_history_and_recovers(self):
+        await self.guild.create_text_channel("인증-verify")
+        old_forum = await self.channel("pictures")
+        self.guild.channels.remove(old_forum)
+        old = await self.guild.create_text_channel("사진-pics", category=self.guild.get_channel(old_forum.category_id))
+        message = await old.send(content="기존 작품 글")
+        await self.bot.store.set(self.guild.id, "channel:pictures", old.id)
+        original = self.bot.store.set
+        async def fail_once(guild_id, key, value):
+            if key == "channel:pictures":
+                raise RuntimeError("interrupted before channel ID saved")
+            return await original(guild_id, key, value)
+        with patch.object(self.bot.store, "set", side_effect=fail_once), self.assertRaises(RuntimeError):
+            await repair_activity(self.bot, self.guild, apply=True)
+        count = len(self.guild.channels)
+        await repair_activity(self.bot, self.guild, apply=True)
+        self.assertEqual(count, len(self.guild.channels))
+        self.assertIsInstance(await self.channel("pictures"), discord.ForumChannel)
+        self.assertIn(old, self.guild.channels)
+        self.assertEqual(old.messages[0], message)
+        self.assertFalse(old.permissions_for(self.member).send_messages)
+        self.assertTrue(old.permissions_for(self.member).view_channel)
+
+    async def test_activity_removes_privileged_member_grants_only(self):
+        await self.guild.create_text_channel("인증-verify")
+        self.roles["member"]._permissions = discord.Permissions(manage_roles=True, send_messages=True).value
+        self.roles["staff"]._permissions = discord.Permissions(administrator=True).value
+        await repair_activity(self.bot, self.guild, apply=True)
+        self.assertFalse(self.roles["member"].permissions.manage_roles)
+        self.assertTrue(self.roles["member"].permissions.send_messages)
+        self.assertTrue(self.roles["staff"].permissions.administrator)
+
+    async def test_activity_preflight_refuses_missing_tracked_channel(self):
+        await self.guild.create_text_channel("인증-verify")
+        self.guild.channels.remove(await self.channel("ideas"))
+        before = {c.id: c.overwrites for c in self.guild.channels}
+        with self.assertRaises(UserError):
+            await repair_activity(self.bot, self.guild, apply=True)
+        self.assertEqual(before, {c.id: c.overwrites for c in self.guild.channels})
+
+    async def test_status_shows_version_and_private_revision(self):
+        interaction = SimpleNamespace(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id))
+        self.bot.release_sha = "a" * 40
+        group = DDHCommands(self.bot)
+        with patch("ddh.bot.reply", new_callable=AsyncMock) as reply:
+            await group.status.callback(group, interaction)
+            self.assertIn(__version__, reply.call_args.args[1])
+            self.assertIn("a" * 12, reply.call_args.args[1])
+            interaction.user = self.member
+            await group.status.callback(group, interaction)
+            self.assertNotIn("a" * 12, reply.call_args.args[1])
+
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

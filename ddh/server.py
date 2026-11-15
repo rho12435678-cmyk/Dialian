@@ -16,6 +16,17 @@ class UserError(Exception):
     """An actionable message safe to show to the user."""
 
 
+def unsafe_role_permissions(role):
+    """Basic community permissions are allowed; privileged grants are not."""
+    unsafe = (
+        "administrator", "manage_guild", "manage_roles", "manage_channels",
+        "manage_messages", "manage_webhooks", "manage_threads",
+        "kick_members", "ban_members", "moderate_members", "mention_everyone",
+        "manage_nicknames", "manage_events", "manage_expressions", "view_audit_log",
+        "mute_members", "deafen_members", "move_members",
+    )
+    return [name for name in unsafe if getattr(role.permissions, name, False)]
+
 def require_guild(guild, settings):
     if guild is None or guild.id != settings.guild_id:
         raise UserError("이 기능은 설정된 DDH 서버에서만 사용할 수 있습니다.")
@@ -100,6 +111,8 @@ def forum_tags(spec):
         names = ("게임", "커뮤니티", "협업", "기타")
     elif spec.key == "commissions":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "모집완료")
+    elif spec.key == "pictures":
+        names = ("작품", "제작과정", "피드백")
     elif spec.key == "portfolio":
         names = ("GFX", "UI", "복장", "VFX", "모델링", "빌딩", "애니메이션", "스크립팅", "의뢰가능")
     else:

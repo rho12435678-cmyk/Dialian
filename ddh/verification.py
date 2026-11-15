@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
-from ddh.server import UserError, require_guild
+from ddh.server import UserError, require_guild, unsafe_role_permissions
 
 
 async def verify_member(bot, guild, member_id, *, reviewer=None):
@@ -36,14 +36,7 @@ async def verify_member(bot, guild, member_id, *, reviewer=None):
         # Only administrative powers could make verification a privilege
         # escalation, so allow basic permissions instead of rejecting any
         # nonzero permission bit.
-        unsafe = (
-            "administrator", "manage_guild", "manage_roles", "manage_channels",
-            "manage_messages", "manage_webhooks", "manage_threads",
-            "kick_members", "ban_members", "moderate_members",
-            "mention_everyone", "manage_nicknames", "manage_events",
-            "manage_expressions", "view_audit_log",
-        )
-        risky = [name for name in unsafe if getattr(role.permissions, name, False)]
+        risky = unsafe_role_permissions(role)
         if risky:
             raise UserError(
                 "멤버 역할에 과도한 관리자 권한이 있습니다: "

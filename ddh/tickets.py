@@ -9,7 +9,7 @@ import discord
 from ddh.blueprint import FIELDS, KINDS, overwrites
 from ddh.content import embed, upsert_panel
 from ddh.operations import private_channel
-from ddh.server import UserError, is_staff, require_guild, roles_for, ticket_category
+from ddh.server import UserError, is_staff, require_guild, roles_for, ticket_category, unsafe_role_permissions
 
 log = logging.getLogger(__name__)
 PORTFOLIO_LINK = "포트폴리오 링크"
@@ -78,7 +78,7 @@ class Tickets:
                 raise UserError("Discord 규칙 확인과 멤버 인증을 완료한 뒤 문의를 열어 주세요.")
             roles = await roles_for(guild, self.store)
             if roles["member"] not in member.roles and not await is_staff(member, self.store):
-                raise UserError("먼저 시작·규칙 채널에서 규칙에 동의해 주세요.")
+                raise UserError("먼저 인증 채널에서 멤버 인증을 완료해 주세요.")
             existing = await self.store.active(guild.id, member.id, kind)
             if existing:
                 return await self.materialize(guild, existing, member, roles)
@@ -186,8 +186,10 @@ class Tickets:
         keys = ["member", "partner"] if ticket["kind"] == "partner" else [
             "member", "developer", *[f"field:{f}" for f in json.loads(ticket["fields"])["_fields"]]]
         grants = [roles[key] for key in keys]
-        if any(r >= guild.me.top_role or r.managed or r.permissions.value != 0 for r in grants):
+        if any(r >= guild.me.top_role or r.managed or unsafe_role_permissions(r) for r in grants):
             raise UserError("지급할 역할의 권한·순서를 점검해 주세요. 봇 역할이 대상 역할보다 높아야 합니다.")
+        if not guild.me.guild_permissions.manage_roles:
+            raise UserError("Dialian에 역할 관리 권한이 필요합니다.")
         await member.add_roles(*grants, reason=f"DDH 신청 #{ticket['id']} 승인 · {ticket['reviewer_id']}")
         await self.store.update_ticket(ticket["id"], guild.id, decision="approved")
         await self.review_notice(guild, channel, ticket, "승인", ticket["reason"], ticket["reviewer_id"])
