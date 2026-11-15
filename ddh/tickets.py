@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import discord
 
 from ddh.blueprint import FIELDS, KINDS, overwrites
+from ddh.channels import fetch_supported_channels
 from ddh.content import embed, upsert_panel
 from ddh.operations import private_channel
 from ddh.server import UserError, is_staff, require_guild, roles_for, ticket_category, unsafe_role_permissions
@@ -94,7 +95,7 @@ class Tickets:
         from ddh.views import TicketActions
 
         marker = f"DDH ticket:{ticket['id']} owner:{ticket['owner_id']} kind:{ticket['kind']}"
-        channels = await guild.fetch_channels()
+        channels = await fetch_supported_channels(guild)
         channel = next((c for c in channels if isinstance(c, discord.TextChannel) and
                         (c.id == ticket["channel_id"] or c.topic == marker)), None)
         if channel is None and ticket["state"] == "open":
@@ -235,7 +236,7 @@ class Tickets:
                     await self.materialize(guild, ticket, member, roles)
                 except discord.NotFound:
                     # Preserve a created orphan privately if the applicant left.
-                    channels = await guild.fetch_channels()
+                    channels = await fetch_supported_channels(guild)
                     channel = next((c for c in channels if c.id == ticket["channel_id"] or
                                     getattr(c, "topic", "") == f"DDH ticket:{ticket['id']} owner:{ticket['owner_id']} kind:{ticket['kind']}"), None)
                     if channel:
