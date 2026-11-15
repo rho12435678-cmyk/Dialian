@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 REPOSITORY = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 NONCE = re.compile(r"[0-9a-f]{24}\Z")
+RELEASE_NOTICES_KEY = "release:enabled"
 
 
 def _git(*args):
@@ -163,7 +164,7 @@ async def redact_legacy_release_links(bot, guild):
 
 
 async def publish_release(bot, guild):
-    """Post one automatic member-ping update per deployed revision."""
+    """Post once per deployment only while the owner's release switch is on."""
     require_guild(guild, bot.settings)
     revision = bot.release_sha
     if not revision or not SHA.fullmatch(revision):
@@ -172,6 +173,10 @@ async def publish_release(bot, guild):
         return False
 
     async with bot.update_lock:
+        # Default off, including existing installations that predate this
+        # switch. Restarting/upgrading must not publish or ping during repairs.
+        if not await bot.store.get(guild.id, RELEASE_NOTICES_KEY, False):
+            return False
         previous = await bot.store.get(guild.id, "release:last_revision")
         if previous == revision:
             return False

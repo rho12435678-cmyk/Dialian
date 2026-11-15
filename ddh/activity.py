@@ -2,6 +2,7 @@
 import discord
 
 from ddh.blueprint import CHANNELS, access, overwrites
+from ddh.channels import fetch_supported_channels
 from ddh.server import UserError, require_guild, roles_for, forum_tags, unsafe_role_permissions
 from ddh.visibility import apply_visibility, find_verification_channel
 
@@ -94,6 +95,8 @@ async def repair_activity(bot, guild, *, apply=False):
         raise UserError("봇에 채널 관리 권한이 필요합니다.")
     if repairs and not guild.me.guild_permissions.manage_roles:
         raise UserError("일반 역할의 과도한 권한 정리에 역할 관리 권한이 필요합니다. 아직 변경하지 않았습니다.")
+    # Read before mutations; a failed REST request must not partially apply a plan.
+    live_channels = await fetch_supported_channels(guild)
     for role, permissions in repairs:
         await role.edit(permissions=permissions, reason=REASON)
     # Gate existing channels before writing the final activity policies; Discord
@@ -113,7 +116,7 @@ async def repair_activity(bot, guild, *, apply=False):
             # and use a marker to recover a creation interrupted before saving.
             await bot.store.set(guild.id, f"activity:archive:{key}", channel.id)
             marker = f"{spec.topic}\n이전 대화 기록: <#{channel.id}>"
-            existing = [c for c in await guild.fetch_channels()
+            existing = [c for c in live_channels
                         if isinstance(c, discord.ForumChannel) and c.topic == marker]
             if len(existing) > 1:
                 raise UserError(f"{key}: 복구할 새 포럼이 중복되었습니다.")

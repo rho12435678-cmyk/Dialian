@@ -32,7 +32,7 @@ from ddh.server import UserError, preflight, provision, roles_for
 from ddh.security import rule_trigger_type, specifications
 from ddh.store import Store
 from ddh.tickets import validate_payload
-from ddh.updates import publish_release, redact_legacy_release_links, release_embed
+from ddh.updates import RELEASE_NOTICES_KEY, publish_release, redact_legacy_release_links, release_embed
 from ddh.views import ReportModal, RulesView, SupportView, TicketActions, TicketModal
 from fakes import Guild, Text
 
@@ -299,9 +299,9 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "cleanup", "visibility", "activity"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "updates", "cleanup", "visibility", "activity"):
             with self.subTest(command=command), self.assertRaises(UserError):
-                kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command == "notices" else {}
+                kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command in ("notices", "updates") else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
         group.owner(SimpleNamespace(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id)))
 
@@ -993,7 +993,53 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await publish_due(self.bot, self.guild, now))
         self.assertEqual(len((await self.channel("announcements")).messages), 1)
 
+    async def test_release_default_pause_and_owner_switch_survive_restart(self):
+        self.bot.release_sha = "1" * 40
+        pending = {"revision": self.bot.release_sha, "nonce": "a" * 24}
+        await self.bot.store.set(self.guild.id, "release:pending", pending)
+        channel = await self.channel("updates")
+        with patch("ddh.updates.channel_for", new_callable=AsyncMock) as lookup:
+            with patch.object(self.bot, "get_guild", return_value=self.guild):
+                await self.bot.on_ready()
+            self.assertFalse(await publish_release(self.bot, self.guild))
+            lookup.assert_not_awaited()
+        self.assertEqual(channel.messages, [])
+        self.assertEqual(await self.bot.store.get(self.guild.id, "release:pending"), pending)
+        group = DDHCommands(self.bot)
+        interaction = SimpleNamespace(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id),
+                                      response=SimpleNamespace(defer=AsyncMock()))
+        with patch("ddh.bot.reply", new_callable=AsyncMock):
+            await group.updates.callback(group, interaction, enabled=True)
+        self.assertTrue(await publish_release(self.bot, self.guild))
+        self.assertFalse(await publish_release(self.bot, self.guild))
+        with patch("ddh.bot.reply", new_callable=AsyncMock):
+            await group.updates.callback(group, interaction, enabled=False)
+        restarted = Dialian(self.settings)
+        self.addAsyncCleanup(restarted.close)
+        await restarted.store.initialize()
+        restarted.release_sha = "2" * 40
+        self.assertFalse(await publish_release(restarted, self.guild))
+        self.assertEqual(len(channel.messages), 1)
+        self.assertEqual(await restarted.store.get(self.guild.id, "release:last_revision"), "1" * 40)
+
+    async def test_unknown_channel_does_not_block_activity_or_ticket_creation(self):
+        await self.guild.create_text_channel("인증-verify")
+        old_forum = await self.channel("pictures")
+        self.guild.channels.remove(old_forum)
+        old = await self.guild.create_text_channel("사진-pics", category=self.guild.get_channel(old_forum.category_id))
+        await self.bot.store.set(self.guild.id, "channel:pictures", old.id)
+        self.guild._state = Mock()
+        self.guild._state.http.get_all_guild_channels = AsyncMock(return_value=[{"id": "9999", "type": 20}])
+        with patch.object(self.guild, "fetch_channels", side_effect=discord.InvalidData("Unknown channel type 20")):
+            await repair_activity(self.bot, self.guild, apply=True)
+            ticket = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
+        self.assertIsInstance(await self.channel("pictures"), discord.ForumChannel)
+        self.assertIn(old, self.guild.channels)
+        self.assertIsInstance(ticket, discord.TextChannel)
+        self.assertFalse(ticket.permissions_for(self.visitor).view_channel)
+
     async def test_update_release_announces_once_per_deployed_revision(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = "1" * 40
         self.assertTrue(await publish_release(self.bot, self.guild))
         channel = await self.channel("updates")
@@ -1011,6 +1057,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.bot.release_sha, channel.messages[1].embeds[0].footer.text)
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = "3" * 40
         await publish_release(self.bot, self.guild)
         self.bot.release_sha = "4" * 40
@@ -1026,6 +1073,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.channel("updates")).messages), 2)
 
     async def test_retires_old_signup_panel_preserving_actual_release_posts(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
         card = discord.Embed(title="기존 업데이트 알림 신청")
         card.set_footer(text="DDH:update-alerts:v1")
@@ -1042,6 +1090,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.bot.store.get(self.guild.id, "updates:panel_retired"))
 
     async def test_old_release_links_are_redacted_without_touching_other_notices(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
         old = discord.Embed(
             title="기존 업데이트", description="https://github.com/example/repo",
@@ -1067,6 +1116,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await publish_release(self.bot, self.guild))
 
     async def test_bot_startup_posts_release_without_slash_command(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = "b" * 40
         with patch.object(self.bot, "get_guild", return_value=self.guild):
             await self.bot.on_ready()
@@ -1076,6 +1126,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel.messages[0].content, self.roles["member"].mention)
 
     async def test_update_role_ping_permission_fixed_without_changing_member_perms(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
         denied = channel.overwrites_for(self.guild.me)
         denied.mention_everyone = False
@@ -1395,7 +1446,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "updates", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

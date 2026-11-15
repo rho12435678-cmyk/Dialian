@@ -20,7 +20,7 @@ from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
-from ddh.updates import deployed_revision, publish_release
+from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 from ddh.visibility import apply_visibility
@@ -191,12 +191,26 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, f"자동 공지 {'켜짐' if enabled else '꺼짐'} · "
                     f"한국 시간 {self.bot.settings.notice_hour}시 / {self.bot.settings.notice_interval_days}일 간격")
 
+    @app_commands.command(name="updates", description="소유자가 업데이트 공지·멤버 멘션 자동 게시 켜기 또는 끄기")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def updates(self, interaction: discord.Interaction, enabled: bool):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.update_lock:
+            await self.bot.store.set(interaction.guild.id, RELEASE_NOTICES_KEY, enabled)
+        await reply(interaction, (
+            "업데이트 자동 공지·멤버 멘션을 켰습니다. 다음 점검 주기부터 미게시 버전을 한 번 공지합니다."
+            if enabled else "업데이트 자동 공지·멤버 멘션을 껐습니다. 재시작 후에도 유지됩니다."
+        ))
+
     @app_commands.command(name="status", description="Dialian 연결·구성 상태 확인")
     @app_commands.guild_only()
     async def status(self, interaction: discord.Interaction):
         require_guild(interaction.guild, self.bot.settings)
         ready = await self.bot.store.get(interaction.guild.id, "setup_complete", False)
         notices = await self.bot.store.get(interaction.guild.id, OWNER_NOTICES_KEY, False)
+        updates = await self.bot.store.get(interaction.guild.id, RELEASE_NOTICES_KEY, False)
         security = await self.bot.store.get(interaction.guild.id, "security_complete", False)
         news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         failure = None
@@ -213,7 +227,7 @@ class DDHCommands(app_commands.Group):
                 details += f"\n최근 인증 오류: {verification_error}"
         await reply(interaction, f"Dialian · DDH v{__version__}\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
-                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
+                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n업데이트 공지·멘션: {'켜짐' if updates else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
