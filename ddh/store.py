@@ -59,6 +59,28 @@ class Store:
                     ON tickets(guild_id, owner_id, kind) WHERE state IN ('creating','open');
             """)
             await db.commit()
+            # Upgrade the old CHECK constraint atomically, retaining ticket
+            # IDs, in-flight recovery state and the one-active-ticket index.
+            schema = (await (await db.execute(
+                "SELECT sql FROM sqlite_master WHERE name='tickets'")).fetchone())[0]
+            if "'commission'" not in schema:
+                await db.execute("BEGIN IMMEDIATE")
+                await db.execute("ALTER TABLE tickets RENAME TO tickets_previous")
+                await db.execute(schema.replace("'feedback'", "'feedback','commission'"))
+                await db.execute("INSERT INTO tickets SELECT * FROM tickets_previous")
+                await db.execute("DROP TABLE tickets_previous")
+                await db.execute("CREATE UNIQUE INDEX one_active_kind ON tickets(guild_id,owner_id,kind) "
+                                 "WHERE state IN ('creating','open')")
+                await db.commit()
+            columns = {row[1] for row in await (await db.execute("PRAGMA table_info(tickets)")).fetchall()}
+            for column, definition in (("assigned_id", "INTEGER"), ("stage", "TEXT NOT NULL DEFAULT 'received'")):
+                if column not in columns:
+                    await db.execute(f"ALTER TABLE tickets ADD COLUMN {column} {definition}")
+            await db.execute("""CREATE TABLE IF NOT EXISTS payout_accounts (
+                guild_id INTEGER NOT NULL, developer_id INTEGER NOT NULL,
+                bank TEXT NOT NULL, account TEXT NOT NULL, holder TEXT NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY(guild_id,developer_id))""")
+            await db.commit()
         if os.name == "posix":
             self.path.chmod(0o600)
 
@@ -115,7 +137,7 @@ class Store:
         return [dict(row) for row in rows]
 
     async def update_ticket(self, ticket_id, guild_id, **values):
-        if not values or set(values) - {"channel_id", "state", "decision", "reviewer_id", "reason", "close_reason", "closed_by"}:
+        if not values or set(values) - {"channel_id", "state", "decision", "reviewer_id", "reason", "close_reason", "closed_by", "assigned_id", "stage"}:
             raise ValueError("Invalid ticket update")
         values["updated_at"] = utcnow()
         columns = ",".join(f"{key}=?" for key in values)
@@ -129,6 +151,25 @@ class Store:
             rows = await (await db.execute(
                 "SELECT key,value FROM settings WHERE guild_id=?", (guild_id,))).fetchall()
         return {row["key"]: json.loads(row["value"]) for row in rows}
+
+    async def account(self, guild_id, developer_id):
+        async with self.connect() as db:
+            row = await (await db.execute("SELECT * FROM payout_accounts WHERE guild_id=? AND developer_id=?",
+                                         (guild_id, developer_id))).fetchone()
+        return dict(row) if row else None
+
+    async def save_account(self, guild_id, developer_id, bank, account, holder):
+        async with self.connect() as db:
+            await db.execute("INSERT INTO payout_accounts VALUES (?,?,?,?,?,?) "
+                             "ON CONFLICT(guild_id,developer_id) DO UPDATE SET bank=excluded.bank, "
+                             "account=excluded.account, holder=excluded.holder, updated_at=excluded.updated_at",
+                             (guild_id, developer_id, bank, account, holder, utcnow()))
+            await db.commit()
+
+    async def delete_account(self, guild_id, developer_id):
+        async with self.connect() as db:
+            await db.execute("DELETE FROM payout_accounts WHERE guild_id=? AND developer_id=?", (guild_id, developer_id))
+            await db.commit()
 
     async def record_event(self, guild_id, key, sink, kind, body, when):
         async with self.connect() as db:

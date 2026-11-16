@@ -9,7 +9,7 @@ import discord
 from ddh.blueprint import FIELDS, KINDS, overwrites
 from ddh.channels import fetch_supported_channels
 from ddh.content import embed, upsert_panel
-from ddh.operations import private_channel
+from ddh.operations import person, private_channel
 from ddh.server import UserError, is_staff, require_guild, roles_for, ticket_category, unsafe_role_permissions
 
 log = logging.getLogger(__name__)
@@ -19,6 +19,9 @@ PORTFOLIO_LINK = "포트폴리오 링크"
 def validate_payload(kind, fields):
     if kind not in KINDS:
         raise UserError("지원하지 않는 문의 종류입니다.")
+    if kind == "commission":
+        from ddh.commissions import validate_commission
+        return validate_commission(fields)
     required = {
         "partner": ("서버 이름", "초대 링크", "서버 소개·제휴 제안"),
         "feedback": ("제목", "내용"),
@@ -46,10 +49,6 @@ def validate_payload(kind, fields):
             raise UserError("http:// 또는 https://로 시작하는 링크를 입력해 주세요.")
 
 
-def can_close(ticket, member, staff):
-    return ticket["state"] == "open" and (staff or ticket["owner_id"] == member.id)
-
-
 class Tickets:
     def __init__(self, bot):
         self.bot = bot
@@ -69,6 +68,8 @@ class Tickets:
     async def create(self, guild, member, kind, fields):
         await self.ready(guild)
         validate_payload(kind, fields)
+        if kind == "commission" and not await self.store.get(guild.id, "commissions:enabled", False):
+            raise UserError("소유자가 의뢰 티켓 패널을 준비 중입니다.")
         async with self.bot.mutation_lock:
             await self.ready(guild)
             try:
@@ -103,6 +104,8 @@ class Tickets:
             raise UserError("이전 티켓 채널이 삭제되었습니다. 문의를 다시 신청해 주세요.")
         permitted = {roles["staff"].id, roles["admin"].id, guild.me.id, member.id}
         expected = overwrites(guild, roles, "private", owner=member)
+        if ticket.get("assigned_id"):
+            permitted.add(ticket["assigned_id"])
         if channel is None:
             category = await ticket_category(guild, self.store)
             channel = await guild.create_text_channel(
@@ -121,17 +124,23 @@ class Tickets:
         card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
                      f"신청자: <@{ticket['owner_id']}>\n운영진이 확인 후 답변합니다. "
                      f"{attachment_guide} 비밀번호·토큰은 보내지 마세요.\n"
-                     "승인/반려는 운영진 전용입니다. 종료하면 처리 기록은 DB와 운영 로그에 남고 대화 채널은 삭제됩니다.")
+                     + ("일반 신청자는 티켓을 종료할 수 없습니다. 의뢰 종료 후 대화는 읽기 전용으로 보관됩니다."
+                      if ticket["kind"] == "commission" else "승인·반려·종료는 운영진 전용입니다. 종료 시 신청·처리 기록은 DB에 남고 채널은 삭제됩니다."))
         fields = json.loads(ticket["fields"])
         for key, value in fields.items():
-            if key == "_fields":
+            if key == "_field":
+                card.add_field(name="의뢰 분야", value=FIELDS[value], inline=False)
+            elif key == "_fields":
                 card.add_field(name="지원 분야", value=" / ".join(FIELDS[f] for f in value), inline=False)
             elif key != PORTFOLIO_LINK or value:
                 card.add_field(name=key, value=value or "미입력", inline=False)
-        await upsert_panel(channel, self.store, f"ticket:{ticket['id']}", card, view=TicketActions(self.bot))
+        await upsert_panel(channel, self.store, f"ticket:{ticket['id']}", card, view=None if ticket["kind"] == "commission" else TicketActions(self.bot))
+        if ticket["kind"] == "commission":
+            from ddh.commissions import status_panel
+            await status_panel(self.bot, guild, channel, ticket)
         if ticket["state"] == "creating":
             await self.store.update_ticket(ticket["id"], guild.id, state="open")
-            await self.audit(guild, f"문의 #{ticket['id']} 생성 · {KINDS[ticket['kind']]} · 신청자 ID {member.id} · {channel.mention}")
+            await self.audit(guild, f"**{KINDS[ticket['kind']]} 접수 · #{ticket['id']}**\n신청자: {person(member)}\n{channel.mention}")
         return channel
 
     async def current(self, guild, channel_id):
@@ -143,12 +152,13 @@ class Tickets:
 
     async def review(self, guild, channel, reviewer, approved, reason):
         await self.ready(guild)
+        reviewer = await guild.fetch_member(reviewer.id)
         if not await is_staff(reviewer, self.store):
             raise UserError("운영진만 신청을 심사할 수 있습니다.")
         async with self.bot.mutation_lock:
             ticket = await self.current(guild, channel.id)
-            if ticket["kind"] == "feedback":
-                raise UserError("피드백에는 승인·반려가 필요 없습니다. 답변 후 종료해 주세요.")
+            if ticket["kind"] not in ("partner", "developer"):
+                raise UserError("개발자·파트너 신청만 승인·반려할 수 있습니다.")
             if ticket["decision"] == "approving" and not approved:
                 raise UserError("역할 지급이 진행 중입니다. 승인 버튼으로 재시도하거나 자동 복구를 기다려 주세요.")
             if ticket["decision"] not in ("pending", "approving"):
@@ -167,7 +177,7 @@ class Tickets:
             return "반려"
 
     async def review_notice(self, guild, channel, ticket, label, reason, reviewer_id):
-        await self.audit(guild, f"신청 #{ticket['id']} {label} · 심사자 ID {reviewer_id}")
+        await self.audit(guild, f"**신청 #{ticket['id']} {label}**\n심사자: <@{reviewer_id}>\n사유: {reason}")
         try:
             await channel.send(embed=embed(f"신청 {label}", reason), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
@@ -200,18 +210,29 @@ class Tickets:
         await self.ready(guild)
         async with self.bot.mutation_lock:
             ticket = await self.current(guild, channel.id)
-            staff = await is_staff(actor, self.store)
-            if not can_close(ticket, actor, staff):
-                raise UserError("신청자 또는 운영진만 티켓을 종료할 수 있습니다.")
+            from ddh.commissions import manager
+            await manager(self.bot, guild, actor, ticket)
             if ticket["decision"] == "approving":
                 raise UserError("역할 지급이 진행 중입니다. 운영진이 역할 권한을 확인하고 승인을 완료한 뒤 종료해 주세요.")
             roles = await roles_for(guild, self.store)
             # Journal before deleting: an interrupted close is completed on restart.
             await self.store.update_ticket(ticket["id"], guild.id, state="closing", close_reason=reason, closed_by=actor.id)
             ticket["closed_by"] = actor.id
+            ticket["close_reason"] = reason
             await self.finish_close(guild, channel, ticket, roles)
 
     async def finish_close(self, guild, channel, ticket, roles):
+        if ticket["kind"] == "commission":
+            from ddh.blueprint import access
+            from ddh.commissions import ensure_private
+            await ensure_private(self.bot, guild, channel, ticket)
+            policy = channel.overwrites
+            for target in list(policy):
+                if target.id in (ticket["owner_id"], ticket.get("assigned_id")):
+                    policy[target] = access(write=False)
+            await channel.edit(name=f"종료-의뢰-{ticket['id']:04d}", overwrites=policy, reason="DDH 의뢰 종료·대화 기록 보존")
+            await self.complete_close(guild, ticket)
+            return
         await channel.edit(
             name=f"closed-{ticket['kind']}-{ticket['id']:04d}",
             overwrites=overwrites(guild, roles, "private"),
@@ -222,7 +243,7 @@ class Tickets:
         await self.complete_close(guild, ticket)
 
     async def complete_close(self, guild, ticket):
-        await self.audit(guild, f"문의 #{ticket['id']} 종료 · 처리자 ID {ticket['closed_by'] or '자동 복구'} · 채널 ID {ticket['channel_id']}",
+        await self.audit(guild, f"**티켓 #{ticket['id']} 종료**\n처리자: {'<@' + str(ticket['closed_by']) + '>' if ticket['closed_by'] else '자동 복구'}\n사유: {ticket.get('close_reason') or '기록 없음'}",
                          key=f"ticket:closed:{ticket['id']}")
         await self.store.update_ticket(ticket["id"], guild.id, state="closed")
 

@@ -9,7 +9,7 @@ from discord.ext import tasks
 from ddh import __version__
 from ddh.activity import repair_activity
 from ddh.backups import backup
-from ddh.blueprint import LAYOUT_VERSION, layout_summary
+from ddh.blueprint import LAYOUT_VERSION, layout_summary, overwrites
 from ddh.cleanup import cleanup_legacy
 from ddh.content import publish_panels
 from ddh.layout import cosmetic_layout
@@ -24,6 +24,8 @@ from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 from ddh.visibility import apply_visibility
+from ddh.commission_views import AccountModal, CommissionActions
+from ddh.commissions import assign, install
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +141,57 @@ class DDHCommands(app_commands.Group):
             summary = await repair_activity(self.bot, interaction.guild, apply=apply)
         await reply(interaction, summary)
 
+    @app_commands.command(name="commissions", description="소유자가 문의 패널에 작품 의뢰 티켓을 적용하고 기존 의뢰 포럼 보관")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def commissions(self, interaction: discord.Interaction):
+        self.owner(interaction)
+        await self.bot.tickets.ready(interaction.guild)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.mutation_lock:
+            result = await install(self.bot, interaction.guild)
+        await reply(interaction, result)
+
+    @app_commands.command(name="logs", description="소유자가 운영·보안 로그 채널의 비공개 권한과 안내를 적용")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def logs(self, interaction: discord.Interaction):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.mutation_lock:
+            roles = await roles_for(interaction.guild, self.bot.store)
+            targets = [(await channel_for(interaction.guild, self.bot.store, key), topic) for key, topic in (
+                ("audit", "운영 기록 · 입퇴장 / 문의·의뢰 / 담당자 / 진행 상황 / 일반 설정 변경"),
+                ("security_log", "보안 확인 · 권한 변경 / 제재 / 주요 설정 변경 / 활동 급증 · 정상 관리자 작업도 포함"))]
+            for channel, topic in targets:
+                await channel.edit(overwrites=overwrites(interaction.guild, roles, "log"), topic=topic,
+                                   reason="DDH 소유자 요청: 운영·보안 로그 비공개 권한 정리")
+        await self.bot.operations.flush(interaction.guild)
+        await reply(interaction, "기존 운영·보안 로그 채널을 운영진 전용 읽기 권한으로 정리했습니다. 앞으로 활동과 보안 변경을 구분하여 기록합니다.")
+
+    @app_commands.command(name="assign", description="운영진이 이 의뢰 티켓에 해당 분야 개발자 배정")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_messages=True)
+    async def assign_developer(self, interaction: discord.Interaction, developer: discord.Member):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await assign(self.bot, interaction.guild, interaction.channel, interaction.user, developer)
+        await reply(interaction, "담당 개발자를 배정했습니다. 개발자는 이 티켓에서 견적·계좌 안내와 진행 상태를 관리할 수 있습니다.")
+
+    @app_commands.command(name="account", description="개발자 본인의 입금 계좌 비공개 등록·수정")
+    @app_commands.guild_only()
+    async def account(self, interaction: discord.Interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.send_modal(AccountModal(self.bot))
+
+    @app_commands.command(name="account-remove", description="본인이 저장한 개발자 입금 계좌 삭제")
+    @app_commands.guild_only()
+    async def remove_account(self, interaction: discord.Interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.bot.store.delete_account(interaction.guild.id, interaction.user.id)
+        await reply(interaction, "저장된 본인 계좌를 삭제했습니다. 이미 티켓에 보낸 계좌 안내와 보관 기간 내 백업에는 남아 있을 수 있습니다.")
+
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -252,10 +305,12 @@ class Dialian(discord.Client):
         self.update_lock = asyncio.Lock()
 
     async def setup_hook(self):
+        if self.settings.database.exists():
+            await backup(self.settings.database)
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)

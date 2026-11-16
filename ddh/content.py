@@ -1,7 +1,6 @@
 """Community copy and durable, restart-safe panels."""
 import discord
 
-from ddh.blueprint import FIELDS
 from ddh.server import UserError, channel_for
 
 ORANGE = 0xF39C12
@@ -72,8 +71,8 @@ async def retire_update_alerts_panel(bot, guild):
     return bool(messages)
 
 
-PANELS_VERSION = "2026-11-verify-and-public-notice-v2"
-GUIDE_VERSION = "2026-11-owner-layout-guide-v2"
+PANELS_VERSION = "2026-11-commission-tickets-v3"
+GUIDE_VERSION = "2026-11-commission-guide-v3"
 
 
 async def guide(guild, store):
@@ -119,8 +118,8 @@ async def guide(guild, store):
             f"**① 인증 후 규칙 확인하기** — {await link('verification')}에서 인증하고 {await link('rules')} 읽기\n"
             f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
             f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
-            f"**④ 함께할 사람 찾기** — {await link('hiring')}·{await link('commissions')}에서 "
-            f"협업·주문제작 의뢰 확인, 개발자는 {await link('portfolio')}에서 작품·구직 정보 공유"
+            f"**④ 함께할 사람 찾기** — {await link('hiring')}에서 팀원을 찾고 {await link('support_panel')}의 작품 의뢰 버튼으로 "
+            f"작업을 요청하세요. 개발자는 {await link('portfolio')}에서 작품·구직 정보 공유"
         ),
         inline=False,
     )
@@ -137,8 +136,8 @@ async def guide(guild, store):
     card.add_field(
         name="🛡️ 안전하고 편리한 활동을 위해",
         value=(
-            "DDH는 직접 주문을 접수하거나 결제·납품을 대신 처리하지 않습니다. "
-            "의뢰·협업 조건은 당사자들이 DM에서 합의하세요.\n"
+            "의뢰는 DDH 비공개 티켓으로 접수하며 결제·제작·납품은 담당 개발자와 직접 진행합니다. "
+            "제작 의뢰의 금액·납기·수정 조건은 담당 개발자와 비공개 티켓에서 합의하세요.\n"
             "작업 범위, 보상, 일정, 수정·환불 조건을 미리 명확히 하고, "
             "비밀번호·인증코드·토큰 같은 개인정보는 공유하지 마세요.\n"
             "도배, 작품 도용, 괴롭힘, 무단 서버 홍보는 허용되지 않습니다. "
@@ -148,7 +147,7 @@ async def guide(guild, store):
     )
     card.add_field(
         name="거래 채널 이용 권한",
-        value="구인·의뢰: 인증된 멤버와 개발자 모두 게시·댓글 가능\n"
+        value="구인: 인증된 멤버와 개발자 모두 게시·댓글 가능\n제작 의뢰: 문의 채널에서 분야별 티켓 접수\n"
               "포트폴리오: 승인된 개발자가 작품을 게시하고 인증된 멤버는 열람·댓글 가능\n"
               "실제 거래 조건과 연락은 당사자끼리 협의해 주세요.",
         inline=False,
@@ -172,7 +171,7 @@ def _panel_has_required_buttons(message, key):
         "verification": {"ddh:rules:v1"},
         "support": {
             "ddh:partner:v1", "ddh:feedback:v1",
-            "ddh:developer:v1", "ddh:report:v1",
+            "ddh:developer:v1", "ddh:report:v1", "ddh:commission:v1",
         },
     }.get(key, set())
     if not expected:
@@ -286,8 +285,6 @@ async def repair_missing_panels(bot, guild):
 
 
 async def publish_panels(bot, guild):
-    from ddh.views import SupportView
-
     rules = embed("DDH에 오신 것을 환영합니다",
                   "**1. 서로 존중하기** — 괴롭힘·혐오·도배·타 서버 초대 광고를 금지합니다.\n"
                   "**2. 본인 작품만 게시하기** — 도용·사칭을 금지하며 공동작업은 본인의 담당 부분을 밝혀 주세요.\n"
@@ -299,22 +296,13 @@ async def publish_panels(bot, guild):
                   "멤버 인증은 **인증 채널**에서만 진행합니다. "
                   f"계정 생성 후 {bot.settings.verification_min_days}일 이상인 계정은 조건 확인 후 "
                   "멤버 역할을 받습니다. 인증이 거절되면 표시되는 이유를 확인해 주세요.")
-    support = embed("DDH 문의·신청",
-                    "**파트너 문의**: 서버 소개와 제휴 제안\n"
-                    "**서버 피드백**: 서버 개선 제안·오류 제보\n"
-                    "**거래·도용 신고**: 의뢰 분쟁, 사칭, 작품 도용 등 문제를 비공개 접수\n"
-                    "**개발자 신청**: 분야를 선택한 뒤 링크를 입력하거나 열린 티켓에 작업물 첨부\n\n"
-                    f"지원 분야: {' / '.join(FIELDS.values())}\n"
-                    "신청 내용은 신청자와 운영진만 보는 티켓에 저장됩니다. "
-                    "종료 시 대화 채널이 삭제되고 신청·처리 기록은 내부 DB에 남습니다.\n"
-                    "진행 중인 티켓은 종류별로 1개까지 열 수 있습니다.")
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules)
     await publish_guide(bot, guild)
-    await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", support, view=SupportView(bot))
+    await publish_support(bot, guild)
     await bot.store.set(guild.id, "panels:version", PANELS_VERSION)
     # The old alert opt-in panel is retired. Release posts are automatic.
     await retire_update_alerts_panel(bot, guild)
-    # Hiring, looking-for-work, commissions, and portfolio channels are Forums.
+    # Hiring and portfolio channels are Forums; commissions use private tickets.
     # Their channel descriptions act as posting guidelines. Forum channels do
     # not support sending a standalone text message as an onboarding panel.
 
@@ -351,3 +339,17 @@ async def configure_verification_entry(bot, guild, verification):
               "Discord 기본 규칙 동의가 필요한 경우 먼저 완료해 주세요."),
         view=RulesView(bot),
     )
+
+
+async def publish_support(bot, guild):
+    from ddh.views import SupportView
+    card = embed("DDH 문의·신청 및 작품 의뢰",
+        "**작품 의뢰** — 분야 선택 → 신청서 → 비공개 티켓 → 담당 개발자 배정\n"
+        "GFX · UI · 복장 · 스크립팅 · VFX · 빌딩 · 모델링 · 애니메이션\n"
+        "인력이 없는 분야는 배정 대기이며, 제작이 확정된 것이 아닙니다.\n\n"
+        "**개발자 신청** — 분야 선택 후 작업물을 티켓에 첨부할 수 있습니다.\n"
+        "**파트너 문의 / 서버 피드백 / 거래·도용 신고**도 아래에서 접수하세요.\n\n"
+        "의뢰는 신청자·운영진·배정된 개발자만 열람합니다. 다른 문의는 신청자·운영진만 열람합니다.\n"
+        "일반 신청자는 티켓을 종료할 수 없습니다. 의뢰는 담당 개발자·운영진, 기타 문의는 운영진이 종료합니다.\n"
+        "종료된 의뢰는 읽기 전용으로 보관하며, 기타 문의는 종료 시 채널이 삭제됩니다. 종류별 진행 중 티켓은 1개씩 가능합니다.")
+    await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", card, view=SupportView(bot))

@@ -7,7 +7,7 @@ FIELDS = {
     "gfx": "GFX", "ui": "UI", "clothing": "복장", "scripting": "스크립터",
     "vfx": "VFX", "building": "빌더", "modeling": "모델러", "animation": "애니메이터",
 }
-KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청"}
+KINDS = {"partner": "파트너 문의", "feedback": "서버 피드백", "developer": "개발자 신청", "commission": "작품 제작 의뢰"}
 LAYOUT_VERSION = "2026-11-owner-controlled-v4"
 
 # Preserve field-specific verification and ticket approvals, but expose just
@@ -107,9 +107,6 @@ CHANNELS = (
     Channel("hiring", "구인-hiring", "jobs", forum=True,
             aliases=("구인",),
             topic="팀원 모집: 프로젝트 / 역할 / 예산·보상 / 기간 / 연락 방법"),
-    Channel("commissions", "의뢰-commissions", "jobs", forum=True,
-            aliases=("제작의뢰",),
-            topic="작업 의뢰: 분야 / 요구사항 / 예산 / 납기 / 연락 방법. DDH는 결제와 거래를 중개하지 않습니다."),
     Channel("portfolio", "포트폴리오-portfolio", "creators", "developer", forum=True,
             aliases=("포트폴리오",),
             topic="개발자 전용 포트폴리오: 분야 태그 / 본인 작업 / 가격·의뢰 가능 여부 / 연락 방법. 회원은 댓글과 DM으로 문의 가능합니다."),

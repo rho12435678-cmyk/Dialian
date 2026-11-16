@@ -6,7 +6,7 @@ from ddh.channels import fetch_supported_channels
 from ddh.server import UserError, require_guild, roles_for, forum_tags, unsafe_role_permissions
 from ddh.visibility import apply_visibility, find_verification_channel
 
-FORUM_KEYS = ("hiring", "commissions", "portfolio", "questions", "ideas", "pictures")
+FORUM_KEYS = ("hiring", "portfolio", "questions", "ideas", "pictures")
 REASON = "DDH 소유자 요청: 개발자 포트폴리오 분리 및 활동 권한 정리"
 CATEGORY_NAME = "🎨 개발자 포트폴리오"
 
@@ -85,7 +85,7 @@ async def repair_activity(bot, guild, *, apply=False):
         return (
             "포트폴리오를 🎨 개발자 포트폴리오 카테고리로 분리합니다.\n"
             "포트폴리오: 개발자·분야 역할 게시, 인증된 멤버 열람·댓글\n"
-            "구인·의뢰·질문·아이디어·작품 공유: 인증된 멤버 모두 게시·댓글·파일 첨부\n"
+            "구인·질문·아이디어·작품 공유: 인증된 멤버 모두 게시·댓글·파일 첨부\n"
             f"기존 텍스트에서 새 포럼 생성 {new_forums}개 (이전 글은 읽기 전용 채널로 보존)\n"
             f"일반 자동 지급 역할의 과도한 관리 권한 제거 {len(repairs)}개\n"
             "일반 채팅·음성 이용 권한과 공지 읽기 전용·Staff 비공개 권한도 정리합니다.\n"
@@ -152,7 +152,7 @@ async def repair_activity(bot, guild, *, apply=False):
         await channel.edit(**params)
     await bot.store.set(guild.id, "activity:configured", True)
     return (
-        "포트폴리오 분리 및 6개 포럼 게시·댓글·파일 권한 적용 완료.\n"
+        "포트폴리오 분리 및 5개 포럼 게시·댓글·파일 권한 적용 완료.\n"
         "기존 텍스트 글은 보관 채널에 보존했습니다. 일반 채팅·음성/공지/Staff 접근도 정리했습니다.\n"
         f"일반 지급 역할의 과도한 관리 권한 {len(repairs)}개 정리. 운영자·관리자 역할은 유지했습니다.\n"
         "다음 재시작에서 이 설정을 자동으로 다시 적용하지 않습니다."
