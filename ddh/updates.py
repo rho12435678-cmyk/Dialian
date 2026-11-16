@@ -20,6 +20,12 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 NONCE = re.compile(r"[0-9a-f]{24}\Z")
 RELEASE_NOTICES_KEY = "release:enabled"
+# Owner requested no update announcement at all, including previously enabled installations.
+RELEASE_ANNOUNCEMENTS_ALLOWED = False
+
+
+def release_announcements_allowed():
+    return RELEASE_ANNOUNCEMENTS_ALLOWED
 
 
 def _git(*args):
@@ -166,6 +172,8 @@ async def redact_legacy_release_links(bot, guild):
 async def publish_release(bot, guild):
     """Post once per deployment only while the owner's release switch is on."""
     require_guild(guild, bot.settings)
+    if not release_announcements_allowed():
+        return False
     revision = bot.release_sha
     if not revision or not SHA.fullmatch(revision):
         return False

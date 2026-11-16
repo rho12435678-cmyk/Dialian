@@ -20,7 +20,7 @@ from ddh.security import configure_security
 from ddh.server import UserError, channel_for, is_admin, preflight, provision, require_guild, roles_for
 from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
-from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release
+from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release, release_announcements_allowed
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 from ddh.visibility import apply_visibility
@@ -244,11 +244,13 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, f"자동 공지 {'켜짐' if enabled else '꺼짐'} · "
                     f"한국 시간 {self.bot.settings.notice_hour}시 / {self.bot.settings.notice_interval_days}일 간격")
 
-    @app_commands.command(name="updates", description="소유자가 업데이트 공지·멤버 멘션 자동 게시 켜기 또는 끄기")
+    @app_commands.command(name="updates", description="업데이트 공지 게시 중지 상태 확인·저장")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def updates(self, interaction: discord.Interaction, enabled: bool):
         self.owner(interaction)
+        if enabled and not release_announcements_allowed():
+            raise UserError("소유자 요청으로 이 버전의 업데이트 공지·멘션 게시를 완전히 중지했습니다.")
         await interaction.response.defer(ephemeral=True, thinking=True)
         async with self.bot.update_lock:
             await self.bot.store.set(interaction.guild.id, RELEASE_NOTICES_KEY, enabled)
@@ -263,7 +265,7 @@ class DDHCommands(app_commands.Group):
         require_guild(interaction.guild, self.bot.settings)
         ready = await self.bot.store.get(interaction.guild.id, "setup_complete", False)
         notices = await self.bot.store.get(interaction.guild.id, OWNER_NOTICES_KEY, False)
-        updates = await self.bot.store.get(interaction.guild.id, RELEASE_NOTICES_KEY, False)
+        updates = release_announcements_allowed() and await self.bot.store.get(interaction.guild.id, RELEASE_NOTICES_KEY, False)
         security = await self.bot.store.get(interaction.guild.id, "security_complete", False)
         news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         failure = None
