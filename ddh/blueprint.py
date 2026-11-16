@@ -56,6 +56,7 @@ CATEGORIES = (
     Category("support", "📨 문의・Support", aliases=("📨 문의", "📨 문의 • Support")),
     Category("community", "💬 커뮤니티・Chat", aliases=("💬 커뮤니티", "Text Channels", "💬 커뮤니티 • Chat")),
     Category("jobs", "💼 거래・Market", aliases=("🤝 구인·구직", "💼 거래 • Market")),
+    Category("commissions", "🛒 제작 의뢰・Commissions"),
     Category("creators", "🎨 개발자 포트폴리오"),
     Category("voice", "🔊 음성・Voice", aliases=("🔊 음성 채널", "Voice Channels", "🔊 음성 • Voice")),
     Category("ops", "🔒 운영・Staff", True, aliases=("🛠 운영", "🔒 운영 • Staff")),
@@ -91,6 +92,8 @@ CHANNELS = (
     # Announcement channels with permanent bot buttons, no regular user posts.
     Channel("support_panel", "문의-support", "support", "readonly",
             aliases=("문의·신청",), news=True),
+    Channel("commission_panel", "의뢰안내-commission", "commissions", "readonly",
+            topic="작품 의뢰 신청 방법 · 가격 안내 · 개발자 선택 · 비공개 의뢰 접수"),
     Channel("partners", "파트너-partners", "support", "readonly",
             aliases=("파트너-소개",), news=True),
 
@@ -176,6 +179,15 @@ def overwrites(guild, roles, policy="member", *, voice=False, owner=None, closed
         result[writer] = access(voice=voice)
     if owner is not None:
         result[owner] = access(write=not closed)
+    return result
+
+
+def commission_hub_overwrites(guild, roles):
+    result = {target: discord.PermissionOverwrite.from_pair(*value.pair())
+              for target, value in strict_readonly_overwrites(guild, roles).items()}
+    trusted = {roles["member"].id, roles["staff"].id, roles["admin"].id, guild.me.id}
+    for target, overwrite in result.items():
+        overwrite.view_channel = target.id in trusted
     return result
 
 

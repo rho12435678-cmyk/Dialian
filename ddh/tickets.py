@@ -123,7 +123,7 @@ class Tickets:
                     ticket.update(assigned_id=None, stage="received")
                 else:
                     expected[developer] = access()
-            category = await ticket_category(guild, self.store)
+            category = await ticket_category(guild, self.store, kind=ticket["kind"])
             channel = await guild.create_text_channel(
                 f"{ticket['kind']}-{ticket['id']:04d}", category=category, topic=marker,
                 overwrites=expected,

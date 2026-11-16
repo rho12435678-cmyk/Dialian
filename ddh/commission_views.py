@@ -7,6 +7,18 @@ from ddh.server import UserError, require_guild
 from ddh.views import DecisionModal, GuardedView, reply, report_error
 
 
+class CommissionEntryView(GuardedView):
+    @discord.ui.button(label='작품 의뢰 시작', style=discord.ButtonStyle.primary, custom_id='ddh:commission:v1')
+    async def commission(self, interaction, button):
+        hub_id = await self.bot.store.get(interaction.guild.id, 'channel:commission_panel')
+        hub = interaction.guild.get_channel(hub_id) if hub_id else None
+        if hub and interaction.channel_id != hub.id:
+            await reply(interaction, f'작품 의뢰 접수는 {hub.mention}으로 이동했습니다. 신청 방법·가격 안내를 확인하고 「작품 의뢰 시작」을 눌러 주세요.')
+            return
+        await interaction.response.send_message('원하는 개발 분야를 선택해 주세요.',
+            view=CommissionFieldView(self.bot, interaction.user.id), ephemeral=True)
+
+
 class CommissionFieldSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(placeholder='의뢰할 개발 분야 선택', options=[
@@ -103,7 +115,7 @@ class CommissionModal(discord.ui.Modal):
         self.bot, self.field, self.developer_id = bot, field, developer_id
         for index, label in enumerate(form_labels(field)):
             self.add_item(discord.ui.TextInput(label=label, max_length=100 if index == 0 else 900,
-                                              required=index != 4, style=discord.TextStyle.paragraph if index else discord.TextStyle.short))
+                                              required=index < 2, placeholder="링크가 없으면 비워 두고 티켓에 이미지·파일을 첨부해 주세요." if index == 2 else None, style=discord.TextStyle.paragraph if index else discord.TextStyle.short))
 
     async def on_submit(self, interaction):
         require_guild(interaction.guild, self.bot.settings)

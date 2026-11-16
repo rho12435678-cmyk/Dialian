@@ -9,7 +9,7 @@ from ddh.content import embed, upsert_panel
 from ddh.operations import person, private_channel
 from ddh.server import UserError, channel_for, is_staff, require_guild, roles_for
 
-# Five inputs fit Discord's modal limit. The field is kept as hidden metadata.
+# Three short inputs per field; references may be attached after opening the ticket.
 BRIEFS = {
     "gfx": ("장면·인물·분위기", "해상도·사용처·참고 이미지"),
     "ui": ("화면 목록·기능·디자인 스타일", "기기·해상도·소스 파일·구현 범위"),
@@ -27,13 +27,13 @@ STAGES = {"received": "접수·담당자 대기", "assigned": "담당자 배정"
 def form_labels(field):
     if field not in BRIEFS:
         raise UserError("지원하는 개발 분야를 선택해 주세요.")
-    return ("프로젝트·의뢰 제목", *BRIEFS[field], "예산·희망 납기", "사용 범위·추가 요청")
+    return ("프로젝트·의뢰 제목", *BRIEFS[field])
 
 
 def validate_commission(fields):
     labels = form_labels(fields.get("_field"))
     if set(fields) - {"_field", "_developer", *labels} or not {"_field", *labels} <= set(fields) or any(not isinstance(fields[label], str) or not fields[label].strip() for label in labels[:-1]):
-        raise UserError("의뢰 제목, 분야별 작업 조건, 예산·납기를 작성해 주세요.")
+        raise UserError("의뢰 제목과 원하는 작업 내용을 작성해 주세요.")
     selected = fields.get("_developer")
     if selected is not None and (type(selected) is not int or selected <= 0):
         raise UserError("목록에서 담당 개발자를 선택해 주세요.")
@@ -204,19 +204,23 @@ async def progress(bot, guild, channel, actor, stage):
 async def install(bot, guild):
     """Only the explicit owner command installs the panel and archives forum."""
     from ddh.content import publish_support
+    from ddh.commission_hub import configure_hub
+    require_guild(guild, bot.settings)
     roles = await roles_for(guild, bot.store)
-    support = await channel_for(guild, bot.store, 'support_panel')
+    await channel_for(guild, bot.store, 'support_panel')
     old_id = await bot.store.get(guild.id, 'channel:commissions')
     old = guild.get_channel(old_id) if old_id else None
     if old:
         if not isinstance(old, discord.ForumChannel):
             raise UserError("기존 의뢰 포럼 연결이 달라졌습니다. 소유자가 채널 연결을 확인해 주세요.")
+    hub = await configure_hub(bot, guild, roles)
+    if old:
         policy = overwrites(guild, roles, 'readonly')
         policy[guild.default_role].view_channel = False
         policy[roles['member']] = access(write=False)
         await old.edit(name=old.name if old.name.startswith('보관-') else ('보관-' + old.name)[:100],
-                       topic=f"기존 의뢰 기록 보관 · 새 의뢰는 {support.mention}의 작품 의뢰 버튼을 이용하세요.",
+                       topic=f"기존 의뢰 기록 보관 · 새 의뢰는 {hub.mention}의 작품 의뢰 시작 버튼을 이용하세요.",
                        overwrites=policy, reason='DDH 소유자 요청: 의뢰 티켓으로 전환')
     await publish_support(bot, guild)
     await bot.store.set(guild.id, 'commissions:enabled', True)
-    return "문의 채널에 분야별 의뢰 패널을 적용했습니다. 기존 의뢰 포럼은 기록을 보존하고 읽기 전용으로 전환했습니다."
+    return f"{hub.mention}에 신청 방법·가격·진행 안내와 의뢰 버튼을 모았습니다. 진행 중 의뢰도 전용 카테고리로 이동했고, 문의 채널은 일반 문의만 받습니다."

@@ -14,7 +14,7 @@ from ddh.bot import Dialian
 from ddh.blueprint import FIELDS, access
 from ddh.commissions import (assign, available_developers, form_labels, install, progress, quote, save_account, validate_commission)
 from ddh.commission_views import (CommissionModal, CommissionActions, CommissionFieldView,
-                                  CommissionDeveloperView, CommissionDeveloperSelect)
+                                  CommissionDeveloperView, CommissionDeveloperSelect, CommissionEntryView)
 from ddh.operations import inspect_layout
 from ddh.server import UserError, provision, roles_for
 from ddh.store import Store
@@ -45,6 +45,92 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def ticket(self):
         return await self.bot.tickets.create(self.guild, self.member, 'commission', self.payload())
+
+    async def test_all_forms_have_only_three_fields_with_optional_references(self):
+        for field in FIELDS:
+            modal = CommissionModal(self.bot, field)
+            self.assertEqual(len(modal.children), 3)
+            self.assertEqual([item.required for item in modal.children], [True, True, False])
+            labels = {item.label for item in modal.children}
+            self.assertNotIn('예산·희망 납기', labels)
+            self.assertNotIn('사용 범위·추가 요청', labels)
+            payload = self.payload(field)
+            payload[form_labels(field)[-1]] = ''
+            validate_commission(payload)
+            payload[form_labels(field)[1]] = ''
+            with self.assertRaises(UserError):
+                validate_commission(payload)
+
+    async def test_hub_has_instructions_pricing_and_members_only_read_access(self):
+        hub = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:commission_panel'))
+        category = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'category:commissions'))
+        self.assertEqual(hub.category_id, category.id)
+        self.assertTrue(hub.permissions_for(self.member).view_channel)
+        self.assertFalse(hub.permissions_for(self.member).send_messages)
+        self.assertFalse(hub.permissions_for(self.visitor).view_channel)
+        self.assertFalse(category.permissions_for(self.visitor).view_channel)
+        from ddh.announcements import protect_announcement_channels
+        await protect_announcement_channels(self.bot, self.guild)
+        self.assertFalse(hub.permissions_for(self.visitor).view_channel)
+        card = hub.messages[0].embeds[0]
+        text = str(card.to_dict())
+        for label in ('신청 방법', '가격 안내', '접수 후 진행', '이용 안내'):
+            self.assertIn(label, text)
+        self.assertIn('공통 고정 가격표는 없습니다', text)
+        self.assertLess(len(card), 6000)
+        self.assertTrue(CommissionEntryView(self.bot).is_persistent())
+        support = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:support_panel'))
+        self.assertIn(hub.mention, support.messages[0].embeds[0].description)
+        self.assertNotIn('ddh:commission:v1', {item.custom_id for item in support.messages[0].view.children})
+
+    async def test_hub_install_moves_only_active_commissions_without_syncing_private_permissions(self):
+        channel = await self.ticket()
+        await assign(self.bot, self.guild, channel, self.staff, self.gfx)
+        old_category = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'category:ops'))
+        await channel.edit(category=old_category)
+        note = await channel.send('기존 의뢰 대화')
+        policy = channel.overwrites
+        support_ticket = await self.bot.tickets.create(self.guild, self.other, 'feedback', {'제목': '문의', '내용': '도움'})
+        with patch.object(channel, 'edit', wraps=channel.edit) as edit:
+            await install(self.bot, self.guild)
+        self.assertFalse(edit.call_args.kwargs['sync_permissions'])
+        self.assertEqual(channel.overwrites, policy)
+        self.assertIn(note, channel.messages)
+        self.assertEqual(channel.category_id, await self.bot.store.get(self.guild.id, 'category:commissions'))
+        self.assertEqual(support_ticket.category_id, old_category.id)
+        self.assertFalse(channel.permissions_for(self.other).view_channel)
+        self.assertTrue(channel.permissions_for(self.gfx).view_channel)
+
+    async def test_missing_hub_is_created_once_and_restart_preserves_owner_changes(self):
+        hub = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:commission_panel'))
+        category = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'category:commissions'))
+        self.guild.channels.remove(hub)
+        self.guild.channels.remove(category)
+        await self.bot.store.set(self.guild.id, 'channel:commission_panel', None)
+        await self.bot.store.set(self.guild.id, 'category:commissions', None)
+        await install(self.bot, self.guild)
+        count = len(self.guild.channels)
+        hub = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:commission_panel'))
+        hub.name = '소유자가-꾸민-의뢰안내'
+        await install(self.bot, self.guild)
+        self.assertEqual(len(self.guild.channels), count)
+        self.assertEqual(len(hub.messages), 1)
+        self.assertEqual(hub.name, '소유자가-꾸민-의뢰안내')
+        with patch.object(self.bot, 'get_guild', return_value=self.guild):
+            await self.bot.on_ready()
+        self.assertEqual(hub.name, '소유자가-꾸민-의뢰안내')
+        self.assertEqual(len(hub.messages), 1)
+        updates = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:updates'))
+        self.assertEqual(updates.messages, [])
+
+    async def test_old_support_button_redirects_to_hub(self):
+        support = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:support_panel'))
+        hub = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:commission_panel'))
+        interaction = SimpleNamespace(guild=self.guild, channel_id=support.id, user=self.member)
+        view = CommissionEntryView(self.bot)
+        with patch('ddh.commission_views.reply', new_callable=AsyncMock) as response:
+            await view.commission.callback(interaction)
+        self.assertIn(hub.mention, response.call_args.args[1])
 
     async def test_field_picker_lists_two_gfx_developers_from_rest_then_opens_form(self):
         second = self.guild.member(31, [self.roles['member'], self.roles['field:gfx']])
@@ -170,7 +256,7 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
         labels = set()
         for field in FIELDS:
             form = CommissionModal(self.bot, field)
-            self.assertEqual(len(form.children), 5)
+            self.assertEqual(len(form.children), 3)
             self.assertLessEqual(len(form.title), 45)
             self.assertTrue(all(len(item.label) <= 45 for item in form.children))
             labels.add(form.children[1].label)
@@ -288,7 +374,9 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(old.permissions_for(self.member).send_messages_in_threads)
         support = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:support_panel'))
         self.assertEqual(len(support.messages), 1)
-        self.assertIn('ddh:commission:v1', {i.custom_id for i in support.messages[0].view.children})
+        self.assertNotIn('ddh:commission:v1', {i.custom_id for i in support.messages[0].view.children})
+        hub = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:commission_panel'))
+        self.assertIn('ddh:commission:v1', {i.custom_id for i in hub.messages[0].view.children})
         updates = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:updates'))
         self.assertEqual(updates.messages, [])
 
