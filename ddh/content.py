@@ -10,7 +10,7 @@ def embed(title, description):
     return discord.Embed(title=title, description=description, colour=ORANGE)
 
 
-async def upsert_panel(channel, store, key, card, *, view=None):
+async def upsert_panel(channel, store, key, card, *, view=None, content=None, allowed_mentions=None):
     marker = f"DDH:{key}:v1"
     card.set_footer(text=marker)
     saved = await store.get(channel.guild.id, f"message:{key}")
@@ -27,10 +27,11 @@ async def upsert_panel(channel, store, key, card, *, view=None):
             if candidate.author.id == channel.guild.me.id and any(e.footer.text == marker for e in candidate.embeds):
                 message = candidate
                 break
+    extra = {"content": content} if content is not None else {}
     if message:
-        await message.edit(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await message.edit(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none(), **extra)
     else:
-        message = await channel.send(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
+        message = await channel.send(embed=card, view=view, allowed_mentions=allowed_mentions or discord.AllowedMentions.none(), **extra)
     await store.set(channel.guild.id, f"message:{key}", message.id)
     return message
 
@@ -344,9 +345,9 @@ async def configure_verification_entry(bot, guild, verification):
 async def publish_support(bot, guild):
     from ddh.views import SupportView
     card = embed("DDH 문의·신청 및 작품 의뢰",
-        "**작품 의뢰** — 분야 선택 → 신청서 → 비공개 티켓 → 담당 개발자 배정\n"
+        "**작품 의뢰** — 분야 선택 → 담당 개발자 선택 → 신청서 → 비공개 티켓\n"
         "GFX · UI · 복장 · 스크립팅 · VFX · 빌딩 · 모델링 · 애니메이션\n"
-        "인력이 없는 분야는 배정 대기이며, 제작이 확정된 것이 아닙니다.\n\n"
+        "선택한 개발자가 티켓에서 신청서를 확인하고 직접 상담·제작합니다. 인력이 없으면 운영진 배정을 요청할 수 있습니다.\n\n"
         "**개발자 신청** — 분야 선택 후 작업물을 티켓에 첨부할 수 있습니다.\n"
         "**파트너 문의 / 서버 피드백 / 거래·도용 신고**도 아래에서 접수하세요.\n\n"
         "의뢰는 신청자·운영진·배정된 개발자만 열람합니다. 다른 문의는 신청자·운영진만 열람합니다.\n"

@@ -32,19 +32,46 @@ def form_labels(field):
 
 def validate_commission(fields):
     labels = form_labels(fields.get("_field"))
-    if set(fields) != {"_field", *labels} or any(not isinstance(fields[label], str) or not fields[label].strip() for label in labels[:-1]):
+    if set(fields) - {"_field", "_developer", *labels} or not {"_field", *labels} <= set(fields) or any(not isinstance(fields[label], str) or not fields[label].strip() for label in labels[:-1]):
         raise UserError("의뢰 제목, 분야별 작업 조건, 예산·납기를 작성해 주세요.")
+    selected = fields.get("_developer")
+    if selected is not None and (type(selected) is not int or selected <= 0):
+        raise UserError("목록에서 담당 개발자를 선택해 주세요.")
     if any(len(str(value)) > 1000 for value in fields.values()):
         raise UserError("입력 내용이 너무 깁니다.")
 
 
+def eligible_developer(member, roles, field=None):
+    has_field = roles[f"field:{field}"] in member.roles if field else (
+        roles["developer"] in member.roles or any(roles[f"field:{key}"] in member.roles for key in FIELDS))
+    return (not member.bot and not member.pending and not member.is_timed_out()
+            and roles["member"] in member.roles and has_field)
+
+
+async def available_developers(bot, guild, field, *, requester_id):
+    require_guild(guild, bot.settings)
+    form_labels(field)
+    roles = await roles_for(guild, bot.store)
+    # Member cache is intentionally disabled in this bot. Fetch the full REST
+    # roster, including offline developers, rather than using Role.members.
+    try:
+        candidates = [member async for member in guild.fetch_members(limit=None)
+                      if member.id != requester_id and eligible_developer(member, roles, field)]
+    except discord.ClientException as error:
+        raise UserError("개발자 목록 조회에 Server Members Intent가 필요합니다. 운영진에게 확인을 요청해 주세요.") from error
+    except discord.HTTPException as error:
+        raise UserError("개발자 목록을 불러오지 못했습니다. 잠시 후 분야를 다시 선택해 주세요.") from error
+    return sorted(candidates, key=lambda member: (member.display_name.casefold(), member.id))
+
+
 async def developer_member(bot, guild, user_id, field=None):
     require_guild(guild, bot.settings)
-    member = await guild.fetch_member(user_id)
+    try:
+        member = await guild.fetch_member(user_id)
+    except discord.NotFound as error:
+        raise UserError("선택한 개발자가 서버에 없습니다. 분야와 개발자를 다시 선택해 주세요.") from error
     roles = await roles_for(guild, bot.store)
-    eligible = roles[f"field:{field}"] in member.roles if field else (
-        roles["developer"] in member.roles or any(roles[f"field:{key}"] in member.roles for key in FIELDS))
-    if member.bot or member.pending or member.is_timed_out() or roles["member"] not in member.roles or not eligible:
+    if not eligible_developer(member, roles, field):
         raise UserError("인증을 완료한 해당 분야 개발자만 사용할 수 있습니다.")
     return member
 
@@ -119,11 +146,16 @@ async def status_panel(bot, guild, channel, ticket):
     card = embed(f"{FIELDS[field]} 의뢰 #{ticket['id']} · 진행 현황",
                  f"**신청자:** <@{ticket['owner_id']}>\n**담당 개발자:** {assignee}\n"
                  f"**상태:** {STAGES.get(ticket.get('stage'), STAGES['received'])}\n\n"
-                 "운영진이 `/ddh assign`으로 해당 분야 개발자를 배정합니다. 인력이 없는 분야는 대기하며 제작이 확정된 것이 아닙니다.\n"
-                 "담당자는 `/ddh account`로 본인 계좌를 등록한 뒤 아래에서 견적·계좌를 안내할 수 있습니다.\n"
+                 + ("선택한 담당 개발자가 신청서·첨부 자료를 확인하고 손님과 이 티켓에서 직접 상담·제작을 진행합니다.\n"
+                  if ticket.get("assigned_id") else "현재 담당자 대기 상태입니다. 운영진이 `/ddh assign`으로 배정할 수 있으며 제작은 아직 확정되지 않았습니다.\n")
+                 + "담당자는 `/ddh account`로 본인 계좌를 등록한 뒤 아래에서 견적·계좌를 안내할 수 있습니다.\n"
                  "금액·일정·수정 범위는 티켓에서 합의해 주세요. 입금 여부는 담당자가 직접 확인합니다.\n"
                  "신청자는 종료할 수 없으며 운영진·담당 개발자에게 종료를 요청할 수 있습니다.")
-    await upsert_panel(channel, bot.store, f"commission:{ticket['id']}", card, view=CommissionActions(bot))
+    assigned_id = ticket.get("assigned_id")
+    await upsert_panel(channel, bot.store, f"commission:{ticket['id']}", card, view=CommissionActions(bot),
+                       content=f"<@{assigned_id}> · 신청서를 확인하고 손님과 상담을 진행해 주세요." if assigned_id else "담당자 배정 대기",
+                       allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
+                           users=[discord.Object(id=assigned_id)] if assigned_id else False))
 
 
 async def quote(bot, guild, channel, actor, amount, terms):

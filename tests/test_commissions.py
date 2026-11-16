@@ -12,8 +12,9 @@ import discord
 from config import Settings
 from ddh.bot import Dialian
 from ddh.blueprint import FIELDS, access
-from ddh.commissions import (assign, form_labels, install, progress, quote, save_account, validate_commission)
-from ddh.commission_views import CommissionModal, CommissionActions
+from ddh.commissions import (assign, available_developers, form_labels, install, progress, quote, save_account, validate_commission)
+from ddh.commission_views import (CommissionModal, CommissionActions, CommissionFieldView,
+                                  CommissionDeveloperView, CommissionDeveloperSelect)
 from ddh.operations import inspect_layout
 from ddh.server import UserError, provision, roles_for
 from ddh.store import Store
@@ -44,6 +45,108 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def ticket(self):
         return await self.bot.tickets.create(self.guild, self.member, 'commission', self.payload())
+
+    async def test_field_picker_lists_two_gfx_developers_from_rest_then_opens_form(self):
+        second = self.guild.member(31, [self.roles['member'], self.roles['field:gfx']])
+        unverified = self.guild.member(32, [self.roles['field:gfx']])
+        self.guild.member(33, [self.roles['member'], self.roles['developer']])
+        await self.bot.store.set(self.guild.id, 'commissions:enabled', False)
+        candidates = await available_developers(self.bot, self.guild, 'gfx', requester_id=self.member.id)
+        self.assertEqual({member.id for member in candidates}, {self.gfx.id, second.id})
+        self.assertNotIn(unverified, candidates)
+        view = CommissionFieldView(self.bot, self.member.id)
+        selector = view.children[0]
+        selector._values = ['gfx']
+        interaction = SimpleNamespace(guild=self.guild, user=self.member,
+            response=SimpleNamespace(defer=AsyncMock(), send_modal=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()))
+        await selector.callback(interaction)
+        picker = interaction.followup.send.call_args.kwargs['view']
+        self.assertIsInstance(picker, CommissionDeveloperView)
+        select = next(item for item in picker.children if isinstance(item, CommissionDeveloperSelect))
+        self.assertEqual({option.value for option in select.options}, {str(self.gfx.id), str(second.id)})
+        select._values = [str(second.id)]
+        await select.callback(interaction)
+        form = interaction.response.send_modal.call_args.args[0]
+        self.assertEqual((form.field, form.developer_id), ('gfx', second.id))
+
+    async def test_selected_developer_access_and_form_contents_without_setup_flag(self):
+        await self.bot.store.set(self.guild.id, 'commissions:enabled', False)
+        payload = {**self.payload(), '_developer': self.gfx.id}
+        channel = await self.bot.tickets.create(self.guild, self.member, 'commission', payload)
+        ticket = await self.bot.store.channel_ticket(self.guild.id, channel.id)
+        self.assertEqual((ticket['assigned_id'], ticket['stage']), (self.gfx.id, 'assigned'))
+        for member in (self.member, self.gfx):
+            effective = channel.permissions_for(member)
+            self.assertTrue(effective.view_channel and effective.send_messages and effective.attach_files and effective.read_message_history)
+        self.assertFalse(channel.permissions_for(self.other).view_channel)
+        self.assertFalse(channel.permissions_for(self.visitor).view_channel)
+        form = channel.messages[0].embeds[0]
+        self.assertIn('예시 요구사항', str(form.to_dict()))
+        self.assertFalse(any(field.name == '_developer' for field in form.fields))
+        self.assertIn(f'<@{self.gfx.id}>', channel.messages[1].content)
+        self.assertIsNone(await self.bot.store.account(self.guild.id, self.gfx.id))  # bank is not an intake prerequisite
+        with self.assertRaises(UserError):
+            await self.bot.tickets.close(self.guild, channel, self.member, '고객은 종료 불가')
+        await self.bot.tickets.close(self.guild, channel, self.gfx, '개발자 처리')
+
+    async def test_developer_role_rechecked_after_selection_before_reserving(self):
+        await self.gfx.remove_roles(self.roles['field:gfx'])
+        for selection in (self.gfx.id, self.other.id, self.member.id, 999999):
+            with self.assertRaises(UserError):
+                await self.bot.tickets.create(self.guild, self.member, 'commission', {**self.payload(), '_developer': selection})
+        self.assertIsNone(await self.bot.store.active(self.guild.id, self.member.id, 'commission'))
+        for selection in (True, '23', -1):
+            with self.assertRaises(UserError):
+                validate_commission({**self.payload(), '_developer': selection})
+
+    async def test_picker_pages_and_no_staff_assignment_when_roster_request_fails(self):
+        developers = [self.guild.member(100 + i, [self.roles['member'], self.roles['field:gfx']]) for i in range(26)]
+        picker = CommissionDeveloperView(self.bot, self.member.id, 'gfx', developers)
+        interaction = SimpleNamespace(user=self.member, response=SimpleNamespace(edit_message=AsyncMock()))
+        self.assertEqual(len(next(i for i in picker.children if isinstance(i, CommissionDeveloperSelect)).options), 25)
+        await picker.turn_page(interaction, 1)
+        self.assertEqual(len(next(i for i in picker.children if isinstance(i, CommissionDeveloperSelect)).options), 1)
+        self.assertTrue(picker.next_page.disabled)
+        empty = CommissionDeveloperView(self.bot, self.member.id, 'vfx', [])
+        self.assertFalse(any(isinstance(item, CommissionDeveloperSelect) for item in empty.children))
+        self.assertIn('운영진', empty.prompt())
+        async def failing_members(**kwargs):
+            raise discord.ClientException('intent unavailable')
+            yield
+        with patch.object(self.guild, 'fetch_members', failing_members):
+            with self.assertRaisesRegex(UserError, 'Server Members Intent'):
+                await available_developers(self.bot, self.guild, 'gfx', requester_id=self.member.id)
+
+    async def test_chosen_developer_leaving_after_reservation_becomes_staff_pending(self):
+        reserved = await self.bot.store.reserve(self.guild.id, self.member.id, 'commission',
+            {**self.payload(), '_developer': self.gfx.id}, assigned_id=self.gfx.id)
+        self.guild.members.pop(self.gfx.id)
+        await self.bot.tickets.recover(self.guild)
+        ticket = await self.bot.store.ticket(reserved['id'], self.guild.id)
+        self.assertEqual((ticket['state'], ticket['assigned_id'], ticket['stage']), ('open', None, 'received'))
+        channel = self.guild.get_channel(ticket['channel_id'])
+        self.assertTrue(channel.permissions_for(self.member).view_channel)
+        self.assertFalse(channel.permissions_for(self.other).view_channel)
+
+    async def test_selected_developer_survives_interrupted_creation_without_duplicate_ping(self):
+        original = self.bot.store.update_ticket
+        async def fail_open(ticket_id, guild_id, **values):
+            if values.get('state') == 'open':
+                raise RuntimeError('interrupted after posting forms')
+            return await original(ticket_id, guild_id, **values)
+        with patch.object(self.bot.store, 'update_ticket', side_effect=fail_open):
+            with self.assertRaises(RuntimeError):
+                await self.bot.tickets.create(self.guild, self.member, 'commission', {**self.payload(), '_developer': self.gfx.id})
+        pending = await self.bot.store.active(self.guild.id, self.member.id, 'commission')
+        self.assertEqual(pending['assigned_id'], self.gfx.id)
+        channel = self.guild.get_channel(pending['channel_id'])
+        with patch.object(channel, 'send', wraps=channel.send) as send:
+            await self.bot.tickets.recover(self.guild)
+        send.assert_not_called()
+        self.assertEqual(len(channel.messages), 2)
+        self.assertTrue(channel.permissions_for(self.gfx).view_channel)
+        self.assertEqual((await self.bot.store.ticket(pending['id'], self.guild.id))['state'], 'open')
 
     async def test_assignment_retry_revokes_previous_developer_and_stale_quote(self):
         channel = await self.ticket()

@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import discord
 
-from ddh.blueprint import FIELDS, KINDS, overwrites
+from ddh.blueprint import FIELDS, KINDS, access, overwrites
 from ddh.channels import fetch_supported_channels
 from ddh.content import embed, upsert_panel
 from ddh.operations import person, private_channel
@@ -68,8 +68,6 @@ class Tickets:
     async def create(self, guild, member, kind, fields):
         await self.ready(guild)
         validate_payload(kind, fields)
-        if kind == "commission" and not await self.store.get(guild.id, "commissions:enabled", False):
-            raise UserError("소유자가 의뢰 티켓 패널을 준비 중입니다.")
         async with self.bot.mutation_lock:
             await self.ready(guild)
             try:
@@ -87,7 +85,13 @@ class Tickets:
             last = await self.store.get(guild.id, f"ticket_cooldown:{member.id}")
             if last and datetime.now(timezone.utc).timestamp() - last < 60:
                 raise UserError("새 티켓은 1분에 한 번 만들 수 있습니다.")
-            ticket = await self.store.reserve(guild.id, member.id, kind, fields)
+            assigned_id = fields.get("_developer") if kind == "commission" else None
+            if assigned_id is not None:
+                from ddh.commissions import developer_member
+                if assigned_id == member.id:
+                    raise UserError("본인을 의뢰 담당자로 선택할 수 없습니다.")
+                await developer_member(self.bot, guild, assigned_id, fields["_field"])
+            ticket = await self.store.reserve(guild.id, member.id, kind, fields, assigned_id=assigned_id)
             await self.store.set(guild.id, f"ticket_cooldown:{member.id}", datetime.now(timezone.utc).timestamp())
             return await self.materialize(guild, ticket, member, roles)
 
@@ -107,6 +111,18 @@ class Tickets:
         if ticket.get("assigned_id"):
             permitted.add(ticket["assigned_id"])
         if channel is None:
+            if ticket.get("assigned_id"):
+                from ddh.commissions import developer_member
+                try:
+                    developer = await developer_member(self.bot, guild, ticket["assigned_id"], json.loads(ticket["fields"])["_field"])
+                except UserError:
+                    # If the chosen developer leaves/loses eligibility between
+                    # reservation and creation, retain the request for staff.
+                    permitted.discard(ticket["assigned_id"])
+                    await self.store.update_ticket(ticket["id"], guild.id, assigned_id=None, stage="received")
+                    ticket.update(assigned_id=None, stage="received")
+                else:
+                    expected[developer] = access()
             category = await ticket_category(guild, self.store)
             channel = await guild.create_text_channel(
                 f"{ticket['kind']}-{ticket['id']:04d}", category=category, topic=marker,
@@ -122,12 +138,14 @@ class Tickets:
             if ticket["kind"] == "developer" else "추가 자료는 이 채널에 첨부해 주세요."
         )
         card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
-                     f"신청자: <@{ticket['owner_id']}>\n운영진이 확인 후 답변합니다. "
+                     f"신청자: <@{ticket['owner_id']}>\n담당자가 신청서를 확인 후 답변합니다. "
                      f"{attachment_guide} 비밀번호·토큰은 보내지 마세요.\n"
                      + ("일반 신청자는 티켓을 종료할 수 없습니다. 의뢰 종료 후 대화는 읽기 전용으로 보관됩니다."
                       if ticket["kind"] == "commission" else "승인·반려·종료는 운영진 전용입니다. 종료 시 신청·처리 기록은 DB에 남고 채널은 삭제됩니다."))
         fields = json.loads(ticket["fields"])
         for key, value in fields.items():
+            if key == "_developer":
+                continue
             if key == "_field":
                 card.add_field(name="의뢰 분야", value=FIELDS[value], inline=False)
             elif key == "_fields":
@@ -140,7 +158,8 @@ class Tickets:
             await status_panel(self.bot, guild, channel, ticket)
         if ticket["state"] == "creating":
             await self.store.update_ticket(ticket["id"], guild.id, state="open")
-            await self.audit(guild, f"**{KINDS[ticket['kind']]} 접수 · #{ticket['id']}**\n신청자: {person(member)}\n{channel.mention}")
+            assigned = f"\n담당 개발자: <@{ticket['assigned_id']}>" if ticket.get("assigned_id") else ""
+            await self.audit(guild, f"**{KINDS[ticket['kind']]} 접수 · #{ticket['id']}**\n신청자: {person(member)}{assigned}\n{channel.mention}")
         return channel
 
     async def current(self, guild, channel_id):

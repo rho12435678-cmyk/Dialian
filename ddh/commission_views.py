@@ -2,7 +2,7 @@
 import discord
 
 from ddh.blueprint import FIELDS
-from ddh.commissions import form_labels, progress, quote, save_account
+from ddh.commissions import available_developers, form_labels, progress, quote, save_account
 from ddh.server import UserError, require_guild
 from ddh.views import DecisionModal, GuardedView, reply, report_error
 
@@ -15,7 +15,11 @@ class CommissionFieldSelect(discord.ui.Select):
     async def callback(self, interaction):
         if interaction.user.id != self.view.owner_id:
             raise UserError('본인의 의뢰 화면에서 선택해 주세요.')
-        await interaction.response.send_modal(CommissionModal(self.view.bot, self.values[0]))
+        require_guild(interaction.guild, self.view.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        developers = await available_developers(self.view.bot, interaction.guild, self.values[0], requester_id=interaction.user.id)
+        view = CommissionDeveloperView(self.view.bot, interaction.user.id, self.values[0], developers)
+        await interaction.followup.send(view.prompt(), view=view, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 class CommissionFieldView(GuardedView):
@@ -25,10 +29,78 @@ class CommissionFieldView(GuardedView):
         self.add_item(CommissionFieldSelect())
 
 
+class CommissionDeveloperSelect(discord.ui.Select):
+    def __init__(self, developers):
+        super().__init__(placeholder='상담·제작을 맡길 개발자 선택', row=0,
+            options=[discord.SelectOption(label=member.display_name[:100], value=str(member.id),
+                                          description=f"@{member.name}"[:100]) for member in developers])
+
+    async def callback(self, interaction):
+        view = self.view
+        if interaction.user.id != view.owner_id:
+            raise UserError('본인의 의뢰 화면에서 선택해 주세요.')
+        selected = int(self.values[0])
+        if selected not in {member.id for member in view.developers}:
+            raise UserError('목록에서 개발자를 다시 선택해 주세요.')
+        await interaction.response.send_modal(CommissionModal(view.bot, view.field, selected))
+
+
+class CommissionDeveloperView(GuardedView):
+    def __init__(self, bot, owner_id, field, developers):
+        super().__init__(bot, timeout=300)
+        self.owner_id, self.field, self.developers = owner_id, field, developers
+        self.page = 0
+        self.refresh()
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await reply(interaction, '본인의 의뢰 화면에서 선택해 주세요.')
+            return False
+        return await super().interaction_check(interaction)
+
+    def prompt(self):
+        if not self.developers:
+            return f'현재 선택 가능한 {FIELDS[self.field]} 개발자가 없습니다. 아래 버튼으로 운영진에게 배정을 요청할 수 있습니다.'
+        pages = (len(self.developers) + 24) // 25
+        return (f'**{FIELDS[self.field]} 담당 개발자 선택** · {len(self.developers)}명 · {self.page + 1}/{pages}페이지\n'
+                '담당자를 선택하고 신청서를 작성하면 해당 개발자와 대화할 비공개 티켓이 열립니다.')
+
+    def refresh(self):
+        for item in list(self.children):
+            if isinstance(item, CommissionDeveloperSelect):
+                self.remove_item(item)
+        subset = self.developers[self.page * 25:(self.page + 1) * 25]
+        if subset:
+            self.add_item(CommissionDeveloperSelect(subset))
+        self.previous.disabled = self.page == 0
+        self.next_page.disabled = (self.page + 1) * 25 >= len(self.developers)
+
+    async def turn_page(self, interaction, direction):
+        if interaction.user.id != self.owner_id:
+            raise UserError('본인의 의뢰 화면에서 선택해 주세요.')
+        self.page = min(max(self.page + direction, 0), max((len(self.developers) - 1) // 25, 0))
+        self.refresh()
+        await interaction.response.edit_message(content=self.prompt(), view=self, allowed_mentions=discord.AllowedMentions.none())
+
+    @discord.ui.button(label='이전', row=1)
+    async def previous(self, interaction, button):
+        await self.turn_page(interaction, -1)
+
+    @discord.ui.button(label='다음', row=1)
+    async def next_page(self, interaction, button):
+        await self.turn_page(interaction, 1)
+
+    @discord.ui.button(label='운영진에게 배정 요청', row=1, style=discord.ButtonStyle.secondary)
+    async def staff_assignment(self, interaction, button):
+        if interaction.user.id != self.owner_id:
+            raise UserError('본인의 의뢰 화면에서 선택해 주세요.')
+        await interaction.response.send_modal(CommissionModal(self.bot, self.field))
+
+
 class CommissionModal(discord.ui.Modal):
-    def __init__(self, bot, field):
+    def __init__(self, bot, field, developer_id=None):
         super().__init__(title=f'{FIELDS[field]} 작품 의뢰', timeout=600)
-        self.bot, self.field = bot, field
+        self.bot, self.field, self.developer_id = bot, field, developer_id
         for index, label in enumerate(form_labels(field)):
             self.add_item(discord.ui.TextInput(label=label, max_length=100 if index == 0 else 900,
                                               required=index != 4, style=discord.TextStyle.paragraph if index else discord.TextStyle.short))
@@ -38,8 +110,11 @@ class CommissionModal(discord.ui.Modal):
         await interaction.response.defer(ephemeral=True, thinking=True)
         fields = {item.label: item.value.strip() for item in self.children}
         fields['_field'] = self.field
+        fields['_developer'] = self.developer_id
         channel = await self.bot.tickets.create(interaction.guild, interaction.user, 'commission', fields)
-        await reply(interaction, f'의뢰 접수: {channel.mention}\n추가 이미지·파일은 티켓에 올려 주세요. 담당자 배정 전에는 제작이 확정되지 않습니다.')
+        ticket = await self.bot.store.channel_ticket(interaction.guild.id, channel.id)
+        assignment = f"담당 개발자: <@{ticket['assigned_id']}> · 이 티켓에서 신청서를 확인하고 상담·제작을 진행합니다." if ticket.get('assigned_id') else '운영진의 담당자 배정을 기다려 주세요.'
+        await reply(interaction, f'의뢰 티켓: {channel.mention}\n{assignment}\n추가 이미지·파일은 티켓에 올려 주세요. 이미 진행 중인 의뢰가 있으면 기존 티켓으로 연결됩니다.')
 
     async def on_error(self, interaction, error):
         await report_error(interaction, error)
