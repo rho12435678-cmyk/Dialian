@@ -299,14 +299,14 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         group = DDHCommands(self.bot)
         administrator = self.guild.member(83, [self.roles["admin"]], admin=True)
         interaction = SimpleNamespace(guild=self.guild, user=administrator)
-        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "updates", "cleanup", "visibility", "activity"):
+        for command in ("setup", "layout", "operator", "security", "panels", "verify", "notices", "updates", "cleanup", "visibility", "activity", "commissions", "logs"):
             with self.subTest(command=command), self.assertRaises(UserError):
                 kwargs = {"member": self.member} if command == "verify" else {"enabled": True} if command in ("notices", "updates") else {}
                 await getattr(group, command).callback(group, interaction, **kwargs)
         group.owner(SimpleNamespace(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id)))
 
     async def test_job_and_portfolio_channels_use_forum_types_and_tags(self):
-        for key in ("hiring", "commissions", "portfolio"):
+        for key in ("hiring", "portfolio"):
             channel = await self.channel(key)
             self.assertIsInstance(channel, discord.ForumChannel)
             self.assertGreaterEqual(len(channel.available_tags), 3)
@@ -322,7 +322,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(forum.permissions_for(viewer).send_messages)
         self.assertTrue(forum.permissions_for(gfx).send_messages)
         self.assertFalse(forum.permissions_for(self.visitor).send_messages)
-        commission = await self.channel("commissions")
+        commission = await self.channel("hiring")
         self.assertTrue(commission.permissions_for(viewer).send_messages)
 
     async def test_setup_adopts_existing_text_board_without_changing_its_type(self):
@@ -422,7 +422,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             channel.category_id,
             await self.bot.store.get(self.guild.id, "category:ops"),
         )
-        await self.bot.tickets.close(self.guild, channel, self.member, "resolved")
+        await self.bot.tickets.close(self.guild, channel, self.staff, "resolved")
         self.assertNotIn(channel, self.guild.channels)
         record = await self.bot.store.channel_ticket(self.guild.id, channel.id)
         self.assertEqual(record["state"], "closed")
@@ -861,11 +861,11 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_preserves_review_reason(self):
         channel = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
         await self.bot.tickets.review(self.guild, channel, self.staff, True, "작품 확인")
-        await self.bot.tickets.close(self.guild, channel, self.member, "답변 완료")
+        await self.bot.tickets.close(self.guild, channel, self.staff, "답변 완료")
         ticket = await self.bot.store.channel_ticket(self.guild.id, channel.id)
         self.assertEqual(ticket["reason"], "작품 확인")
         self.assertEqual(ticket["close_reason"], "답변 완료")
-        self.assertEqual(ticket["closed_by"], self.member.id)
+        self.assertEqual(ticket["closed_by"], self.staff.id)
 
     async def test_modified_developer_role_cannot_escalate_applicant(self):
         channel = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
@@ -908,7 +908,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.tickets.close(self.guild, channel, self.visitor, "no")
         channel.fail_edit = True
         with self.assertRaises(RuntimeError):
-            await self.bot.tickets.close(self.guild, channel, self.member, "완료")
+            await self.bot.tickets.close(self.guild, channel, self.staff, "완료")
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))["state"], "closing")
         channel.fail_edit = False
         await self.bot.tickets.recover(self.guild)
@@ -993,6 +993,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await publish_due(self.bot, self.guild, now))
         self.assertEqual(len((await self.channel("announcements")).messages), 1)
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_release_default_pause_and_owner_switch_survive_restart(self):
         self.bot.release_sha = "1" * 40
         pending = {"revision": self.bot.release_sha, "nonce": "a" * 24}
@@ -1022,6 +1023,27 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(channel.messages), 1)
         self.assertEqual(await restarted.store.get(self.guild.id, "release:last_revision"), "1" * 40)
 
+    async def test_release_fully_blocked_even_when_old_database_enabled_it(self):
+        await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
+        self.bot.release_sha = "d" * 40
+        with patch("ddh.updates.channel_for", new_callable=AsyncMock) as lookup:
+            with patch.object(self.bot, "get_guild", return_value=self.guild):
+                await self.bot.on_ready()
+                await self.bot.on_ready()
+            self.assertFalse(await publish_release(self.bot, self.guild))
+            self.bot.release_sha = "e" * 40
+            self.assertFalse(await publish_release(self.bot, self.guild))
+            lookup.assert_not_awaited()
+        self.assertEqual((await self.channel("updates")).messages, [])
+        self.assertIsNone(await self.bot.store.get(self.guild.id, "release:pending"))
+        group = DDHCommands(self.bot)
+        interaction = SimpleNamespace(guild=self.guild, user=SimpleNamespace(id=self.guild.owner_id))
+        with self.assertRaisesRegex(UserError, "완전히 중지"):
+            await group.updates.callback(group, interaction, enabled=True)
+        with patch("ddh.bot.reply", new_callable=AsyncMock) as response:
+            await group.status.callback(group, interaction)
+        self.assertIn("업데이트 공지·멘션: 꺼짐", response.call_args.args[1])
+
     async def test_unknown_channel_does_not_block_activity_or_ticket_creation(self):
         await self.guild.create_text_channel("인증-verify")
         old_forum = await self.channel("pictures")
@@ -1038,6 +1060,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(ticket, discord.TextChannel)
         self.assertFalse(ticket.permissions_for(self.visitor).view_channel)
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_update_release_announces_once_per_deployed_revision(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = "1" * 40
@@ -1056,6 +1079,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(channel.messages[1].embeds[0].footer.text.startswith("Dial Dev Hub · #"))
         self.assertNotIn(self.bot.release_sha, channel.messages[1].embeds[0].footer.text)
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = "3" * 40
@@ -1072,6 +1096,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await publish_release(self.bot, self.guild))
         self.assertEqual(len((await self.channel("updates")).messages), 2)
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_retires_old_signup_panel_preserving_actual_release_posts(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
@@ -1089,6 +1114,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await retire_update_alerts_panel(self.bot, self.guild))
         self.assertTrue(await self.bot.store.get(self.guild.id, "updates:panel_retired"))
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_old_release_links_are_redacted_without_touching_other_notices(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
@@ -1115,6 +1141,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(await publish_release(self.bot, self.guild))
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_bot_startup_posts_release_without_slash_command(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = "b" * 40
@@ -1125,6 +1152,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(channel.messages), 1)
         self.assertEqual(channel.messages[0].content, self.roles["member"].mention)
 
+    @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
     async def test_update_role_ping_permission_fixed_without_changing_member_perms(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
@@ -1242,7 +1270,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("채널 권한 불일치 · 로그-logs" in item for item in await inspect_layout(self.guild, self.bot.store)))
         await audit.edit(overwrites=original)
         await self.bot.operations.flush(self.guild)
-        self.assertIn("입장", audit.messages[-1].embeds[0].description)
+        self.assertIn("입장", audit.messages[-2].embeds[0].description)
         self.assertIn("퇴장", audit.messages[-1].embeds[0].description)
         self.assertFalse(await self.bot.store.pending_events(self.guild.id, "audit"))
 
@@ -1305,14 +1333,14 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         text = (await self.channel("security_log")).messages[-1].embeds[0].description
         self.assertIn(self.staff.name, text)
         self.assertIn(self.roles["member"].name, text)
-        self.assertIn("추가 manage_roles", text)
-        self.assertIn("제거 send_messages", text)
+        self.assertIn("추가: 역할 관리", text)
+        self.assertIn("제거: 메시지 보내기", text)
 
     async def test_all_market_access_after_verification_gate(self):
         await self.guild.create_text_channel("인증-verify")
         await apply_visibility(self.bot, self.guild, apply=True)
         developer = self.guild.member(898, [self.roles["member"], self.roles["developer"]])
-        for key in ("hiring", "commissions", "portfolio"):
+        for key in ("hiring", "portfolio"):
             channel = await self.channel(key)
             self.assertFalse(channel.permissions_for(self.visitor).view_channel)
             for person in (self.member, developer):
@@ -1446,7 +1474,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "updates", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "updates", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity", "commissions", "assign", "account", "account-remove", "logs"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

@@ -95,6 +95,11 @@ class RulesView(GuardedView):
 
 
 class SupportView(GuardedView):
+    @discord.ui.button(label="작품 의뢰", style=discord.ButtonStyle.primary, custom_id="ddh:commission:v1")
+    async def commission(self, interaction, button):
+        from ddh.commission_views import CommissionFieldView
+        await interaction.response.send_message("의뢰할 분야를 선택해 주세요. 담당자가 없는 분야는 배정 대기 상태로 접수됩니다.", view=CommissionFieldView(self.bot, interaction.user.id), ephemeral=True)
+
     @discord.ui.button(label="파트너 문의", style=discord.ButtonStyle.primary, custom_id="ddh:partner:v1")
     async def partner(self, interaction, button):
         await interaction.response.send_modal(TicketModal(self.bot, "partner"))
@@ -246,10 +251,11 @@ class TicketActions(GuardedView):
         staff = await is_staff(interaction.user, self.bot.store)
         if action != "close" and not staff:
             raise UserError("운영진만 신청을 심사할 수 있습니다.")
-        if action == "close" and not staff and interaction.user.id != ticket["owner_id"]:
-            raise UserError("신청자 또는 운영진만 티켓을 종료할 수 있습니다.")
+        if action == "close":
+            from ddh.commissions import manager
+            await manager(self.bot, interaction.guild, interaction.user, ticket)
         eligible = ticket["decision"] == "pending" or (action == "approve" and ticket["decision"] == "approving")
-        if action != "close" and (ticket["kind"] == "feedback" or not eligible):
+        if action != "close" and (ticket["kind"] not in ("partner", "developer") or not eligible):
             raise UserError("심사 대상이 아니거나 이미 처리된 신청입니다.")
         await interaction.response.send_modal(DecisionModal(self.bot, action, interaction.channel_id))
 

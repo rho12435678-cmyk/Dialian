@@ -1,6 +1,7 @@
 """Durable operational events and read-only policy checks for DDH."""
 import asyncio
 import logging
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -38,6 +39,36 @@ AUDIT_LABELS = {
 def safe_name(value):
     return discord.utils.escape_mentions(discord.utils.escape_markdown(" ".join(str(value).split())[:80]))
 
+
+
+def person(user):
+    if user is None:
+        return "확인되지 않은 사용자"
+    name = safe_name(getattr(user, "display_name", None) or getattr(user, "name", None) or "이름 확인 불가")
+    return f"{name} (<@{user.id}>)" if getattr(user, "id", None) else name
+
+
+PERMISSION_LABELS = {
+    "administrator": "관리자", "manage_guild": "서버 관리", "manage_roles": "역할 관리",
+    "manage_channels": "채널 관리", "manage_messages": "메시지 관리", "manage_threads": "스레드 관리",
+    "manage_webhooks": "웹훅 관리", "view_audit_log": "감사 로그 보기", "kick_members": "멤버 추방",
+    "ban_members": "멤버 차단", "moderate_members": "멤버 타임아웃", "view_channel": "채널 보기",
+    "send_messages": "메시지 보내기", "send_messages_in_threads": "스레드 메시지 보내기",
+    "attach_files": "파일 첨부", "embed_links": "링크 임베드", "read_message_history": "이전 메시지 보기",
+    "mention_everyone": "전체·역할 멘션", "connect": "음성 연결", "speak": "음성 발언",
+    "create_public_threads": "공개 스레드 생성", "create_private_threads": "비공개 스레드 생성",
+    "mute_members": "서버 음소거", "deafen_members": "서버 헤드셋 음소거", "move_members": "음성 이동",
+}
+
+
+def change_value(value):
+    if value is None:
+        return "없음"
+    if isinstance(value, bool):
+        return "켜짐" if value else "꺼짐"
+    if isinstance(value, datetime):
+        return f"<t:{int(value.timestamp())}:f>"
+    return safe_name(value)
 
 def private_channel(channel, guild, permitted):
     return (
@@ -119,7 +150,7 @@ async def inspect_layout(guild, store):
                 findings.append("인증 채널 접근 차단 확인")
     for ticket in await store.tickets(guild.id, "open"):
         channel = guild.get_channel(ticket["channel_id"])
-        permitted = {state.get("role:staff"), state.get("role:admin"), guild.me.id, ticket["owner_id"]}
+        permitted = {state.get("role:staff"), state.get("role:admin"), guild.me.id, ticket["owner_id"], ticket.get("assigned_id")}
         if not private_channel(channel, guild, permitted):
             findings.append(f"티켓 접근 범위 확인 · #{ticket['id']}")
     if getattr(guild, "verification_level", discord.VerificationLevel.medium).value < discord.VerificationLevel.medium.value:
@@ -157,12 +188,13 @@ class Operations:
         self.store = bot.store
         self.delivery_lock = asyncio.Lock()
 
-    async def record(self, guild, body, *, key=None, kind="operation", sink="audit", at=None, immediate=True):
+    async def record(self, guild, body, *, key=None, kind="operation", sink="audit", at=None, immediate=True, reference=None):
         if guild.id != self.bot.settings.guild_id:
             return False
         at = at or datetime.now(timezone.utc)
         added = await self.store.record_event(
-            guild.id, key or uuid4().hex, sink, kind, body[:800], at.isoformat())
+            guild.id, key or uuid4().hex, sink, kind,
+            json.dumps({"text": body[:3500], "reference": reference}, ensure_ascii=False), at.isoformat())
         if added and immediate:
             await self.flush(guild)
         return added
@@ -183,23 +215,35 @@ class Operations:
                 if not private_channel(channel, guild, permitted):
                     log.warning("DDH log sink %s unavailable or has unsafe overwrites", sink)
                     continue
-                lines = [f"<t:{int(datetime.fromisoformat(row['occurred_at']).timestamp())}:f> · {row['body']}"
-                         for row in rows]
-                card = discord.Embed(title="DDH 보안" if sink == "security_log" else "DDH 운영 기록",
-                                     description="\n".join(lines))
-                try:
-                    await channel.send(embed=card, allowed_mentions=discord.AllowedMentions.none())
-                except discord.HTTPException:
-                    log.exception("DDH %s delivery deferred", sink)
-                    continue
-                await self.store.mark_delivered(guild.id, rows)
+                for row in rows:
+                    try:
+                        payload = json.loads(row['body'])
+                    except (ValueError, TypeError):
+                        payload = {"text": row['body']}  # queued events from older versions
+                    if not isinstance(payload, dict):
+                        payload = {"text": row['body']}
+                    security = sink == "security_log"
+                    card = discord.Embed(
+                        title="🛡️ 보안 · 관리자 확인 필요" if security else "📋 운영 활동 기록",
+                        description=str(payload.get('text', ''))[:3500],
+                        colour=0xE74C3C if security else 0x3498DB,
+                        timestamp=datetime.fromisoformat(row['occurred_at']),
+                    )
+                    card.set_footer(text=("보안 설정·제재·이상 징후" if security else "일반 활동·문의·진행 내역")
+                                    + (" · " + str(payload['reference'])[:200] if payload.get('reference') else ""))
+                    try:
+                        await channel.send(embed=card, allowed_mentions=discord.AllowedMentions.none())
+                    except discord.HTTPException:
+                        log.exception("DDH %s delivery deferred", sink)
+                        break
+                    await self.store.mark_delivered(guild.id, [row])
 
     async def membership(self, guild, user, *, joined):
         now = datetime.now(timezone.utc)
         joined_at = getattr(user, "joined_at", None)
         key = f"join:{user.id}:{joined_at.isoformat()}" if joined and joined_at else None
         label = "입장" if joined else "탈퇴·퇴장"
-        added = await self.record(guild, f"{label} · {safe_name(user.name)} · ID `{user.id}`",
+        added = await self.record(guild, f"**멤버 {label}**\n사용자: {person(user)}",
                                   key=key, kind="join" if joined else "leave", at=now, immediate=False)
         if added and joined:
             await self.burst(guild, "join", 5, "60초 내 입장 5건 이상", now)
@@ -220,42 +264,54 @@ class Operations:
         label = AUDIT_LABELS.get(action)
         if label is None:
             return
-        target_id = getattr(entry.target, "id", None)
-        actor = getattr(entry, "user", None)
+        actor = getattr(entry, "user", None) or guild.get_member(entry.user_id)
         target = entry.target
-        details = (
-            f"{label} · 실행자 {safe_name(getattr(actor, 'name', None) or '확인 불가')} "
-            f"(`{entry.user_id or '확인 불가'}`) · 대상 "
-            f"{safe_name(getattr(target, 'name', None) or '확인 불가')} "
-            f"(`{target_id or '확인 불가'}`) · 감사 ID `{entry.id}`"
-        )
+        target_name = safe_name(getattr(target, 'display_name', None) or getattr(target, 'name', None) or '이름 확인 불가')
+        mention = getattr(target, 'mention', '')
+        details = f"**{label}**\n**실행자:** {person(actor) if actor else f'<@{entry.user_id}>'}\n**대상:** {target_name} {mention}"
+        extra = getattr(entry, 'extra', None)
+        permission_target = getattr(extra, 'name', None)
+        if permission_target:
+            details += f"\n**권한 대상:** {safe_name(permission_target)}"
+        count = getattr(extra, 'count', None)
+        if count:
+            details += f"\n**건수:** {count}"
         high_risk = action in RISKY_ACTIONS
         before = getattr(entry, "before", None)
         after = getattr(entry, "after", None)
-        for field, title in (("name", "이름"), ("slowmode_delay", "슬로우모드(초)")):
+        for field, title in (("name", "이름"), ("nick", "별명"), ("topic", "채널 설명"),
+                             ("slowmode_delay", "슬로우모드(초)"), ("timed_out_until", "타임아웃 만료"),
+                             ("nsfw", "성인 전용"), ("verification_level", "서버 인증 수준")):
             old, new = getattr(before, field, None), getattr(after, field, None)
             if old != new:
-                details += f"\n{title}: {safe_name(old)} → {safe_name(new)}"
+                details += f"\n**{title}:** {change_value(old)} → {change_value(new)}"
+                if field in ('timed_out_until', 'verification_level'):
+                    high_risk = True
         for field, title in (("permissions", "역할 권한"), ("allow", "채널 허용"), ("deny", "채널 거부")):
             old, new = getattr(before, field, None), getattr(after, field, None)
+            if old is None and isinstance(new, discord.Permissions):
+                old = discord.Permissions.none()
+            if new is None and isinstance(old, discord.Permissions):
+                new = discord.Permissions.none()
             if isinstance(old, discord.Permissions) and isinstance(new, discord.Permissions):
-                added = [name for name, enabled in new if enabled and not getattr(old, name)]
-                removed = [name for name, enabled in old if enabled and not getattr(new, name)]
+                added = [PERMISSION_LABELS.get(name, name) for name, enabled in new if enabled and not getattr(old, name)]
+                removed = [PERMISSION_LABELS.get(name, name) for name, enabled in old if enabled and not getattr(new, name)]
                 if added or removed:
-                    details += f"\n{title}: 추가 {', '.join(added) or '없음'} / 제거 {', '.join(removed) or '없음'}"
+                    details += f"\n**{title}**\n추가: {', '.join(added) or '없음'}\n제거: {', '.join(removed) or '없음'}"
                     high_risk = True
         if action == "member_role_update":
             for diff, title in ((before, "회수 역할"), (after, "지급 역할")):
                 changed = getattr(diff, "roles", ())
                 if changed:
-                    details += "\n" + title + ": " + ", ".join(
-                        f"{safe_name(role.name)} (`{role.id}`)" for role in changed[:8]
-                    )
-        details = details[:900]
+                    details += "\n**" + title + ":** " + ", ".join(safe_name(role.name) for role in changed[:12])
+                    high_risk |= any(unsafe_role_permissions(role) for role in changed)
+        reason = getattr(entry, 'reason', None)
+        if reason:
+            details += "\n**사유:** " + discord.utils.escape_mentions(discord.utils.escape_markdown(str(reason)))[:400]
         kind = "audit-risk" if high_risk else "audit"
         added = await self.record(guild, details, key=f"audit:{entry.id}", kind=kind,
                                   sink="security_log" if high_risk else "audit",
-                                  at=entry.created_at, immediate=False)
+                                  at=entry.created_at, immediate=False, reference=f"감사 기록 {entry.id}")
         now = datetime.now(timezone.utc)
         if added and high_risk and entry.created_at >= now - timedelta(seconds=60):
             await self.burst(guild, kind, 4, "60초 내 주요 관리 변경 4건 이상", now)
