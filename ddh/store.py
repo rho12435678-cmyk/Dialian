@@ -103,11 +103,12 @@ class Store:
                 "AND state IN ('creating','open')", (guild_id, owner_id, kind))).fetchone()
         return dict(row) if row else None
 
-    async def reserve(self, guild_id, owner_id, kind, fields):
+    async def reserve(self, guild_id, owner_id, kind, fields, *, assigned_id=None):
         async with self.connect() as db:
             cursor = await db.execute(
-                "INSERT INTO tickets(guild_id,owner_id,kind,fields,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-                (guild_id, owner_id, kind, json.dumps(fields, ensure_ascii=False), utcnow(), utcnow()))
+                "INSERT INTO tickets(guild_id,owner_id,kind,fields,created_at,updated_at,assigned_id,stage) VALUES (?,?,?,?,?,?,?,?)",
+                (guild_id, owner_id, kind, json.dumps(fields, ensure_ascii=False), utcnow(), utcnow(),
+                 assigned_id, "assigned" if assigned_id else "received"))
             await db.commit()
             return await self.ticket(cursor.lastrowid, guild_id)
 

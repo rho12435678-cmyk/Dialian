@@ -1,7 +1,7 @@
 """Repeatable provisioning of explicitly managed DDH resources."""
 import discord
 
-from ddh.blueprint import (CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, overwrites,
+from ddh.blueprint import (CATEGORIES, CHANNELS, ROLE_ALIASES, ROLES, overwrites, commission_hub_overwrites,
                            role_permissions, strict_readonly_overwrites)
 
 REQUIRED_PERMISSIONS = (
@@ -197,7 +197,8 @@ async def provision(guild, store, settings):
         category = found[f"category:{spec.key}"]
         if category is None:
             category = await guild.create_category(
-                name=spec.name, overwrites=overwrites(guild, roles, "private" if spec.private else "readonly"),
+                name=spec.name, overwrites=(commission_hub_overwrites(guild, roles) if spec.key == "commissions"
+                                               else overwrites(guild, roles, "private" if spec.private else "readonly")),
                 reason="DDH 소유자 초기 구성")
         categories[spec.key] = category
         await store.set(guild.id, f"category:{spec.key}", category.id)
@@ -220,6 +221,8 @@ async def provision(guild, store, settings):
                     if spec.policy == "readonly"
                     else overwrites(guild, roles, spec.policy, voice=spec.voice)
                 )
+                if spec.key == "commission_panel":
+                    policy = commission_hub_overwrites(guild, roles)
                 if spec.voice:
                     channel = await guild.create_voice_channel(**params, overwrites=policy)
                 else:
@@ -236,11 +239,12 @@ async def provision(guild, store, settings):
     return len(ROLES), len(CATEGORIES), len(CHANNELS)
 
 
-async def ticket_category(guild, store):
-    """Use the existing private Staff area: no ticket/archive category created."""
-    category = guild.get_channel(await store.get(guild.id, "category:ops", 0))
+async def ticket_category(guild, store, *, kind=None):
+    """Commission tickets use their dedicated area when installed; support stays private."""
+    category_id = await store.get(guild.id, "category:commissions") if kind == "commission" else None
+    category = guild.get_channel(category_id or await store.get(guild.id, "category:ops", 0))
     if not isinstance(category, discord.CategoryChannel):
         raise UserError("운영 카테고리가 없습니다. /ddh setup apply:True로 구성을 갱신해 주세요.")
     if len(category.channels) >= 48:
-        raise UserError("운영 카테고리 공간이 부족합니다. 종료된 티켓을 먼저 정리해 주세요.")
+        raise UserError("티켓 카테고리 공간이 부족합니다. 종료된 티켓을 먼저 정리해 주세요.")
     return category

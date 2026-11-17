@@ -58,6 +58,8 @@ class Message:
         self.view = view
 
     async def edit(self, **kwargs):
+        if "content" in kwargs:
+            self.content = kwargs["content"]
         if "embed" in kwargs:
             self.embeds = [kwargs["embed"]] if kwargs["embed"] else []
         if "view" in kwargs:
@@ -239,6 +241,10 @@ class Guild:
         if not channel:
             raise missing()
         return channel
+
+    async def fetch_members(self, *, limit=None):
+        for member in list(self.members.values())[:limit]:
+            yield member
 
     async def fetch_member(self, member_id):
         if member_id not in self.members:

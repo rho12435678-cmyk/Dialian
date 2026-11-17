@@ -95,11 +95,6 @@ class RulesView(GuardedView):
 
 
 class SupportView(GuardedView):
-    @discord.ui.button(label="작품 의뢰", style=discord.ButtonStyle.primary, custom_id="ddh:commission:v1")
-    async def commission(self, interaction, button):
-        from ddh.commission_views import CommissionFieldView
-        await interaction.response.send_message("의뢰할 분야를 선택해 주세요. 담당자가 없는 분야는 배정 대기 상태로 접수됩니다.", view=CommissionFieldView(self.bot, interaction.user.id), ephemeral=True)
-
     @discord.ui.button(label="파트너 문의", style=discord.ButtonStyle.primary, custom_id="ddh:partner:v1")
     async def partner(self, interaction, button):
         await interaction.response.send_modal(TicketModal(self.bot, "partner"))

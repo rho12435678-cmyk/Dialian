@@ -357,7 +357,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.bot.store.get(guild.id, "news_format_pending"))
 
     async def test_compact_bilingual_layout_and_announce_support(self):
-        self.assertEqual(len(CATEGORIES), 7)
+        self.assertEqual(len(CATEGORIES), 8)
         names = {ch.name for ch in CHANNELS}
         self.assertIn("포트폴리오-portfolio", names)
         self.assertIn("문의-support", names)
@@ -474,7 +474,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
                 channel = await self.channel(spec.key)
                 for person in (self.visitor, self.member, developer, custom):
                     effective = channel.permissions_for(person)
-                    self.assertTrue(effective.view_channel)
+                    self.assertEqual(effective.view_channel, not (spec.key == "commission_panel" and person is self.visitor))
                     for permission in (
                         "send_messages", "attach_files", "embed_links",
                         "add_reactions", "send_messages_in_threads",

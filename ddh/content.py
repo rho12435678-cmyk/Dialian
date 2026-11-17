@@ -10,7 +10,7 @@ def embed(title, description):
     return discord.Embed(title=title, description=description, colour=ORANGE)
 
 
-async def upsert_panel(channel, store, key, card, *, view=None):
+async def upsert_panel(channel, store, key, card, *, view=None, content=None, allowed_mentions=None):
     marker = f"DDH:{key}:v1"
     card.set_footer(text=marker)
     saved = await store.get(channel.guild.id, f"message:{key}")
@@ -27,10 +27,11 @@ async def upsert_panel(channel, store, key, card, *, view=None):
             if candidate.author.id == channel.guild.me.id and any(e.footer.text == marker for e in candidate.embeds):
                 message = candidate
                 break
+    extra = {"content": content} if content is not None else {}
     if message:
-        await message.edit(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await message.edit(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none(), **extra)
     else:
-        message = await channel.send(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
+        message = await channel.send(embed=card, view=view, allowed_mentions=allowed_mentions or discord.AllowedMentions.none(), **extra)
     await store.set(channel.guild.id, f"message:{key}", message.id)
     return message
 
@@ -118,7 +119,7 @@ async def guide(guild, store):
             f"**① 인증 후 규칙 확인하기** — {await link('verification')}에서 인증하고 {await link('rules')} 읽기\n"
             f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
             f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
-            f"**④ 함께할 사람 찾기** — {await link('hiring')}에서 팀원을 찾고 {await link('support_panel')}의 작품 의뢰 버튼으로 "
+            f"**④ 함께할 사람 찾기** — {await link('hiring')}에서 팀원을 찾고 {await link('commission_panel')}의 작품 의뢰 시작 버튼으로 "
             f"작업을 요청하세요. 개발자는 {await link('portfolio')}에서 작품·구직 정보 공유"
         ),
         inline=False,
@@ -147,7 +148,7 @@ async def guide(guild, store):
     )
     card.add_field(
         name="거래 채널 이용 권한",
-        value="구인: 인증된 멤버와 개발자 모두 게시·댓글 가능\n제작 의뢰: 문의 채널에서 분야별 티켓 접수\n"
+        value="구인: 인증된 멤버와 개발자 모두 게시·댓글 가능\n제작 의뢰: 의뢰안내 채널에서 분야별 티켓 접수\n"
               "포트폴리오: 승인된 개발자가 작품을 게시하고 인증된 멤버는 열람·댓글 가능\n"
               "실제 거래 조건과 연락은 당사자끼리 협의해 주세요.",
         inline=False,
@@ -171,7 +172,7 @@ def _panel_has_required_buttons(message, key):
         "verification": {"ddh:rules:v1"},
         "support": {
             "ddh:partner:v1", "ddh:feedback:v1",
-            "ddh:developer:v1", "ddh:report:v1", "ddh:commission:v1",
+            "ddh:developer:v1", "ddh:report:v1",
         },
     }.get(key, set())
     if not expected:
@@ -299,6 +300,8 @@ async def publish_panels(bot, guild):
     await upsert_panel(await channel_for(guild, bot.store, "rules"), bot.store, "rules", rules)
     await publish_guide(bot, guild)
     await publish_support(bot, guild)
+    from ddh.commission_hub import publish_commission_hub
+    await publish_commission_hub(bot, guild)
     await bot.store.set(guild.id, "panels:version", PANELS_VERSION)
     # The old alert opt-in panel is retired. Release posts are automatic.
     await retire_update_alerts_panel(bot, guild)
@@ -343,13 +346,13 @@ async def configure_verification_entry(bot, guild, verification):
 
 async def publish_support(bot, guild):
     from ddh.views import SupportView
-    card = embed("DDH 문의·신청 및 작품 의뢰",
-        "**작품 의뢰** — 분야 선택 → 신청서 → 비공개 티켓 → 담당 개발자 배정\n"
-        "GFX · UI · 복장 · 스크립팅 · VFX · 빌딩 · 모델링 · 애니메이션\n"
-        "인력이 없는 분야는 배정 대기이며, 제작이 확정된 것이 아닙니다.\n\n"
-        "**개발자 신청** — 분야 선택 후 작업물을 티켓에 첨부할 수 있습니다.\n"
-        "**파트너 문의 / 서버 피드백 / 거래·도용 신고**도 아래에서 접수하세요.\n\n"
-        "의뢰는 신청자·운영진·배정된 개발자만 열람합니다. 다른 문의는 신청자·운영진만 열람합니다.\n"
-        "일반 신청자는 티켓을 종료할 수 없습니다. 의뢰는 담당 개발자·운영진, 기타 문의는 운영진이 종료합니다.\n"
-        "종료된 의뢰는 읽기 전용으로 보관하며, 기타 문의는 종료 시 채널이 삭제됩니다. 종류별 진행 중 티켓은 1개씩 가능합니다.")
+    hub_id = await bot.store.get(guild.id, "channel:commission_panel")
+    hub = guild.get_channel(hub_id) if hub_id else None
+    commission_hint = f"**작품 제작 의뢰**는 {hub.mention}에서 신청 방법·가격 안내를 확인하고 접수하세요.\n\n" if hub else ""
+    card = embed("DDH 문의·신청",
+        commission_hint
+        + "**개발자 신청** — 분야 선택 후 작업물을 티켓에 첨부할 수 있습니다.\n"
+        "**파트너 문의 / 서버 피드백 / 거래·도용 신고**는 아래에서 접수하세요.\n\n"
+        "일반 문의는 신청자·운영진만 열람합니다. 일반 신청자는 직접 종료할 수 없으며 운영진이 종료합니다.\n"
+        "문의 종료 시 채널이 삭제되고 신청·처리 기록은 내부 DB에 남습니다.")
     await upsert_panel(await channel_for(guild, bot.store, "support_panel"), bot.store, "support", card, view=SupportView(bot))

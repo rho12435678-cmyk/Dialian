@@ -24,7 +24,7 @@ from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release,
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 from ddh.visibility import apply_visibility
-from ddh.commission_views import AccountModal, CommissionActions
+from ddh.commission_views import AccountModal, CommissionActions, CommissionEntryView
 from ddh.commissions import assign, install
 
 log = logging.getLogger(__name__)
@@ -141,7 +141,7 @@ class DDHCommands(app_commands.Group):
             summary = await repair_activity(self.bot, interaction.guild, apply=apply)
         await reply(interaction, summary)
 
-    @app_commands.command(name="commissions", description="소유자가 문의 패널에 작품 의뢰 티켓을 적용하고 기존 의뢰 포럼 보관")
+    @app_commands.command(name="commissions", description="소유자가 의뢰 전용 안내·접수 채널을 만들고 문의와 분리")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def commissions(self, interaction: discord.Interaction):
@@ -312,7 +312,7 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
