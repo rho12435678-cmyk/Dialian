@@ -73,7 +73,7 @@ async def retire_update_alerts_panel(bot, guild):
 
 
 PANELS_VERSION = "2026-11-commission-tickets-v3"
-GUIDE_VERSION = "2026-11-commission-guide-v3"
+GUIDE_VERSION = "2026-11-brief-guide-v4"
 
 
 async def guide(guild, store):
@@ -85,74 +85,23 @@ async def guide(guild, store):
             return "해당 DDH 채널"
 
     card = discord.Embed(
-        title="🌐 DDH · Dial Dev Hub | 처음 오셨나요?",
-        description=(
-            "**Roblox 개발자와 프로젝트 제작자가 함께 성장하는 연결 공간**\n"
-            "DDH는 작품을 소개하고, 개발자를 찾고, 협업 기회를 나누는 커뮤니티입니다.\n"
-            "처음 방문했다면 이 가이드만 읽어도 활동을 시작할 수 있어요."
-        ),
+        title="🌐 DDH · 시작 가이드",
+        description="Roblox 개발자가 작품을 공유하고, 게임 제작자가 필요한 개발자와 협업 파트너를 찾는 커뮤니티입니다.",
         colour=0x5865F2,
     )
-    card.add_field(
-        name="💡 DDH는 왜 만들어졌나요?",
-        value=(
-            "기존 DDS가 디자인 주문제작 중심이었다면, DDH는 그 범위를 Roblox 개발 전반으로 넓혔습니다.\n"
-            "개발자는 포트폴리오와 실력을 알리고, 게임 제작자는 필요한 팀원이나 협업 상대를 "
-            "더 쉽게 찾을 수 있도록 만들었습니다."
-        ),
-        inline=False,
-    )
-    card.add_field(
-        name="🧩 여기서 무엇을 할 수 있나요?",
-        value=(
-            "• **포트폴리오 공유** — GFX · UI · 복장 · VFX · 모델링 · 빌딩 · 애니메이션 · 스크립팅\n"
-            "• **구인·구직** — 프로젝트 팀원 모집, 개발 참여 기회 탐색\n"
-            "• **제작의뢰** — 예산과 작업 범위를 적어 주문제작 개발자 찾기\n"
-            "• **커뮤니티** — 개발 질문, 아이디어 공유, 작품 피드백, 공동 작업\n"
-            "• **문의·신청** — 개발자 등록, 파트너 제안, 서버 개선 의견 제출"
-        ),
-        inline=False,
-    )
-    card.add_field(
-        name="🚀 처음 들어왔다면 이 순서대로!",
-        value=(
-            f"**① 인증 후 규칙 확인하기** — {await link('verification')}에서 인증하고 {await link('rules')} 읽기\n"
-            f"**② 사람들과 인사하기** — {await link('general')}에서 대화하고 {await link('questions')}에서 질문하기\n"
-            f"**③ 개발자라면 등록하기** — {await link('support_panel')} → 개발자 신청 → 분야·포트폴리오 제출\n"
-            f"**④ 함께할 사람 찾기** — {await link('hiring')}에서 팀원을 찾고 {await link('commission_panel')}의 작품 의뢰 시작 버튼으로 "
-            f"작업을 요청하세요. 개발자는 {await link('portfolio')}에서 작품·구직 정보 공유"
-        ),
-        inline=False,
-    )
-    card.add_field(
-        name="📂 도움이 되는 채널",
-        value=(
-            f"**포트폴리오** {await link('portfolio')}  |  "
-            f"**개발 질문** {await link('questions')}\n"
-            f"**업데이트 공지** {await link('updates')}  |  "
-            f"**문의·신청** {await link('support_panel')}"
-        ),
-        inline=False,
-    )
-    card.add_field(
-        name="🛡️ 안전하고 편리한 활동을 위해",
-        value=(
-            "의뢰는 DDH 비공개 티켓으로 접수하며 결제·제작·납품은 담당 개발자와 직접 진행합니다. "
-            "제작 의뢰의 금액·납기·수정 조건은 담당 개발자와 비공개 티켓에서 합의하세요.\n"
-            "작업 범위, 보상, 일정, 수정·환불 조건을 미리 명확히 하고, "
-            "비밀번호·인증코드·토큰 같은 개인정보는 공유하지 마세요.\n"
-            "도배, 작품 도용, 괴롭힘, 무단 서버 홍보는 허용되지 않습니다. "
-            "문제 발생 시 **문의-support**에서 거래·도용 신고 버튼을 이용해 비공개로 알려주세요."
-        ),
-        inline=False,
-    )
-    card.add_field(
-        name="거래 채널 이용 권한",
-        value="구인: 인증된 멤버와 개발자 모두 게시·댓글 가능\n제작 의뢰: 의뢰안내 채널에서 분야별 티켓 접수\n"
-              "포트폴리오: 승인된 개발자가 작품을 게시하고 인증된 멤버는 열람·댓글 가능\n"
-              "실제 거래 조건과 연락은 당사자끼리 협의해 주세요.",
-        inline=False,
-    )
+    card.add_field(name="① 인증하고 참여하기", value=(
+        f"{await link('verification')}에서 인증 → {await link('rules')} 확인\n"
+        f"대화 {await link('general')} · 개발 질문 {await link('questions')}"), inline=False)
+    card.add_field(name="② 개발자 찾기 · 작품 알리기", value=(
+        f"**구인·구직** {await link('hiring')} — 인증된 멤버·개발자 모두 참여\n"
+        f"**포트폴리오** {await link('portfolio')} — 승인된 개발자가 게시, 멤버는 열람·댓글\n"
+        f"**개발자 신청** {await link('support_panel')} — GFX·UI·복장·스크립팅·VFX·빌딩·모델링·애니메이션"), inline=False)
+    card.add_field(name="③ 작품 제작 의뢰", value=(
+        f"{await link('commission_panel')} → 분야·개발자 선택 → 비공개 티켓 상담\n"
+        "금액·납기·수정 조건을 합의하고 진행하세요. 완료 후 별점 후기를 남길 수 있습니다."), inline=False)
+    card.add_field(name="문의 · 안전 수칙", value=(
+        f"파트너·피드백·거래/도용 신고: {await link('support_panel')}\n"
+        "작품 도용·도배·괴롭힘 금지. 비밀번호·인증코드·계좌 등 개인정보를 공개하지 마세요."), inline=False)
     return card
 
 

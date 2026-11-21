@@ -2,7 +2,7 @@
 import discord
 
 from ddh.blueprint import FIELDS
-from ddh.commissions import available_developers, form_labels, progress, quote, save_account
+from ddh.commissions import available_developers, form_labels, manager, progress, quote, save_account
 from ddh.server import UserError, require_guild
 from ddh.views import DecisionModal, GuardedView, reply, report_error
 
@@ -174,6 +174,15 @@ class QuoteModal(discord.ui.Modal):
         await report_error(interaction, error)
 
 
+async def open_commission_close(bot, interaction):
+    require_guild(interaction.guild, bot.settings)
+    ticket = await bot.tickets.current(interaction.guild, interaction.channel_id)
+    if ticket['kind'] != 'commission':
+        raise UserError('진행 중인 개발 의뢰 티켓에서 실행해 주세요.')
+    await manager(bot, interaction.guild, interaction.user, ticket)
+    await interaction.response.send_modal(DecisionModal(bot, 'close', interaction.channel_id))
+
+
 class CommissionActions(GuardedView):
     @discord.ui.button(label='견적·계좌 안내', custom_id='ddh:commission:quote:v1', style=discord.ButtonStyle.primary)
     async def send_quote(self, interaction, button):
@@ -201,7 +210,4 @@ class CommissionActions(GuardedView):
 
     @discord.ui.button(label='의뢰 종료', custom_id='ddh:commission:close:v1', style=discord.ButtonStyle.danger)
     async def close_ticket(self, interaction, button):
-        from ddh.commissions import manager
-        ticket = await self.bot.tickets.current(interaction.guild, interaction.channel_id)
-        await manager(self.bot, interaction.guild, interaction.user, ticket)
-        await interaction.response.send_modal(DecisionModal(self.bot, 'close', interaction.channel_id))
+        await open_commission_close(self.bot, interaction)

@@ -87,6 +87,12 @@ class Store:
                 rating INTEGER CHECK(rating BETWEEN 1 AND 5), body TEXT,
                 submitted_at TEXT, channel_id INTEGER, message_id INTEGER, published_at TEXT,
                 PRIMARY KEY(guild_id,ticket_id))""")
+            review_columns = {row[1] for row in await (await db.execute('PRAGMA table_info(commission_reviews)')).fetchall()}
+            if 'receipt_at' not in review_columns:
+                await db.execute('ALTER TABLE commission_reviews ADD COLUMN receipt_at TEXT')
+                # Earlier releases already acknowledged these publicly. Only new
+                # submissions should notify developers when this version starts.
+                await db.execute('UPDATE commission_reviews SET receipt_at=published_at WHERE published_at IS NOT NULL')
             await db.commit()
         if os.name == "posix":
             self.path.chmod(0o600)
@@ -221,11 +227,17 @@ class Store:
         async with self.connect() as db:
             rows = await (await db.execute("""SELECT r.* FROM commission_reviews r JOIN tickets t
                 ON t.guild_id=r.guild_id AND t.id=r.ticket_id WHERE r.guild_id=? AND (
-                  (r.rating IS NOT NULL AND r.published_at IS NULL) OR
+                  (r.rating IS NOT NULL AND (r.published_at IS NULL OR r.receipt_at IS NULL)) OR
                   (r.rating IS NULL AND r.prompted_at IS NULL AND t.stage='delivered'
                    AND t.state IN ('open','closed') AND t.assigned_id=r.developer_id))
                 ORDER BY r.rating IS NULL, r.requested_at LIMIT 20""", (guild_id,))).fetchall()
         return [dict(row) for row in rows]
+
+    async def mark_review_receipt(self, guild_id, ticket_id):
+        async with self.connect() as db:
+            await db.execute('UPDATE commission_reviews SET receipt_at=? WHERE guild_id=? AND ticket_id=?',
+                             (utcnow(), guild_id, ticket_id))
+            await db.commit()
 
     async def record_event(self, guild_id, key, sink, kind, body, when):
         async with self.connect() as db:

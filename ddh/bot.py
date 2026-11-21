@@ -24,10 +24,11 @@ from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release,
 from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 from ddh.visibility import apply_visibility
-from ddh.commission_views import AccountModal, CommissionActions, CommissionEntryView
-from ddh.commissions import account_actor, assign, install, remove_account, send_account
-from ddh.reviews import configure_reviews, recover_reviews
-from ddh.review_views import ReviewRequestView, open_review
+from ddh.commission_views import AccountModal, CommissionActions, CommissionEntryView, open_commission_close
+from ddh.commissions import account_actor, assign, install, progress, remove_account, send_account
+from ddh.reviews import configure_reviews, recover_reviews, request_review_by_command
+from ddh.review_views import ReviewReceiptView, ReviewRequestView, open_review
+from ddh.readability import apply_requested_copy
 
 log = logging.getLogger(__name__)
 
@@ -224,6 +225,27 @@ class DDHCommands(app_commands.Group):
         require_guild(interaction.guild, self.bot.settings)
         await open_review(self.bot, interaction)
 
+    @app_commands.command(name="complete", description="담당 개발자·운영진이 납품 완료 처리하고 신청자에게 후기 요청")
+    @app_commands.guild_only()
+    async def complete(self, interaction: discord.Interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await progress(self.bot, interaction.guild, interaction.channel, interaction.user, 'delivered')
+        await reply(interaction, '납품 완료 처리했습니다. 신청자는 /ddh review로 후기를 작성할 수 있습니다. 후기 버튼 재전송은 /ddh review-request를 사용하세요.')
+
+    @app_commands.command(name="review-request", description="담당 개발자·운영진이 완료된 의뢰의 후기 버튼을 티켓 아래로 전송")
+    @app_commands.guild_only()
+    async def review_request(self, interaction: discord.Interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await request_review_by_command(self.bot, interaction.guild, interaction.channel, interaction.user)
+        await reply(interaction, result)
+
+    @app_commands.command(name="close", description="담당 개발자·운영진이 현재 의뢰를 종료하고 대화를 읽기 전용으로 보관")
+    @app_commands.guild_only()
+    async def close_commission(self, interaction: discord.Interaction):
+        await open_commission_close(self.bot, interaction)
+
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -276,7 +298,7 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, f"자동 공지 {'켜짐' if enabled else '꺼짐'} · "
                     f"한국 시간 {self.bot.settings.notice_hour}시 / {self.bot.settings.notice_interval_days}일 간격")
 
-    @app_commands.command(name="updates", description="업데이트 공지 게시 중지 상태 확인·저장")
+    @app_commands.command(name="updates", description="이번 업데이트 공지 자동 게시 켜기·끄기 (전체 멘션 없음)")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def updates(self, interaction: discord.Interaction, enabled: bool):
@@ -287,8 +309,8 @@ class DDHCommands(app_commands.Group):
         async with self.bot.update_lock:
             await self.bot.store.set(interaction.guild.id, RELEASE_NOTICES_KEY, enabled)
         await reply(interaction, (
-            "업데이트 자동 공지·멤버 멘션을 켰습니다. 다음 점검 주기부터 미게시 버전을 한 번 공지합니다."
-            if enabled else "업데이트 자동 공지·멤버 멘션을 껐습니다. 재시작 후에도 유지됩니다."
+            "이번 업데이트 자동 공지를 켰습니다. 아직 게시하지 않았다면 한 번 공지합니다. 전체 멘션은 없습니다."
+            if enabled else "이번 업데이트 자동 공지를 껐습니다. 재시작 후에도 유지됩니다."
         ))
 
     @app_commands.command(name="status", description="Dialian 연결·구성 상태 확인")
@@ -297,7 +319,7 @@ class DDHCommands(app_commands.Group):
         require_guild(interaction.guild, self.bot.settings)
         ready = await self.bot.store.get(interaction.guild.id, "setup_complete", False)
         notices = await self.bot.store.get(interaction.guild.id, OWNER_NOTICES_KEY, False)
-        updates = release_announcements_allowed() and await self.bot.store.get(interaction.guild.id, RELEASE_NOTICES_KEY, False)
+        updates = release_announcements_allowed() and await self.bot.store.get(interaction.guild.id, RELEASE_NOTICES_KEY, True)
         security = await self.bot.store.get(interaction.guild.id, "security_complete", False)
         news_pending = await self.bot.store.get(interaction.guild.id, "news_format_pending", False)
         failure = None
@@ -314,7 +336,7 @@ class DDHCommands(app_commands.Group):
                 details += f"\n최근 인증 오류: {verification_error}"
         await reply(interaction, f"Dialian · DDH v{__version__}\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
-                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n업데이트 공지·멘션: {'켜짐' if updates else '꺼짐'}\n시작 시각: {self.bot.started_at}\n"
+                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n이번 업데이트 공지: {'켜짐' if updates else '꺼짐'} · 전체 멘션 없음\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
@@ -344,7 +366,7 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self), ReviewRequestView(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self), ReviewRequestView(self), ReviewReceiptView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
@@ -401,15 +423,17 @@ class Dialian(discord.Client):
             log.error("Configured DDH guild is unavailable; check DDH_GUILD_ID and bot invitation")
             return
         log.info("Dialian connected to DDH guild %s (owner-controlled configuration)", guild.id)
-        # No automatic layout, channel, role, permission, AutoMod or panel
-        # repair. The owner has explicitly requested that their manual edits
-        # remain untouched. A previously requested new-version announcement
-        # is a new post only, not a change to guild configuration.
+        # Apply only the owner's newly requested copy refresh once. There is
+        # no general layout/permission/role restoration or repeated panel repair.
         if await self.store.get(guild.id, "setup_complete", False):
+            try:
+                await apply_requested_copy(self, guild)
+            except Exception:
+                log.exception("DDH requested copy pending; will retry")
             try:
                 await publish_release(self, guild)
             except Exception:
-                log.exception("DDH automatic release notice failed; no server settings were changed")
+                log.exception("DDH update announcement pending; will retry")
 
     async def on_member_join(self, member):
         await self.operations.membership(member.guild, member, joined=True)
@@ -449,9 +473,9 @@ class Dialian(discord.Client):
             for name, action in (
                 ("ticket recovery", self.tickets.recover),
                 ("requested commission reviews", lambda g: recover_reviews(self, g)),
+                ("owner-requested short copy", lambda g: apply_requested_copy(self, g)),
                 ("owner-enabled scheduled notice", lambda g: publish_due(self, g)),
-                ("previously requested new-version announcement",
-                 lambda g: publish_release(self, g)),
+                ("owner-requested update announcement", lambda g: publish_release(self, g)),
             ):
                 try:
                     await action(guild)

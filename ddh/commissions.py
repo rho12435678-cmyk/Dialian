@@ -186,13 +186,10 @@ async def status_panel(bot, guild, channel, ticket):
     field = json.loads(ticket['fields'])['_field']
     assignee = f"<@{ticket['assigned_id']}>" if ticket.get('assigned_id') else '운영진 배정 대기'
     card = embed(f"{FIELDS[field]} 의뢰 #{ticket['id']} · 진행 현황",
-                 f"**신청자:** <@{ticket['owner_id']}>\n**담당 개발자:** {assignee}\n"
-                 f"**상태:** {STAGES.get(ticket.get('stage'), STAGES['received'])}\n\n"
-                 + ("선택한 담당 개발자가 신청서·첨부 자료를 확인하고 손님과 이 티켓에서 직접 상담·제작을 진행합니다.\n"
-                  if ticket.get("assigned_id") else "현재 담당자 대기 상태입니다. 운영진이 `/ddh assign`으로 배정할 수 있으며 제작은 아직 확정되지 않았습니다.\n")
-                 + "담당자는 `/ddh account`로 계좌를 등록하고 `/ddh account-send`로 전송할 수 있습니다. 운영진도 개발자 지정 등록과 계좌 전송을 대신할 수 있습니다.\n"
-                 "금액·일정·수정 범위는 티켓에서 합의해 주세요. 입금 여부는 담당자가 직접 확인합니다.\n"
-                 "신청자는 종료할 수 없으며 운영진·담당 개발자에게 종료를 요청할 수 있습니다.")
+        f"**담당 개발자:** {assignee}\n**상태:** {STAGES.get(ticket.get('stage'), STAGES['received'])}\n\n"
+        "**담당자·운영진** 계좌 전송 `/ddh account-send` · 납품 완료 `/ddh complete`\n"
+        "**신청자** 완료 후 `/ddh review`로 후기 작성\n"
+        "금액·일정은 여기서 협의해 주세요. 담당자·운영진은 `/ddh close`로 종료·보관하세요.")
     assigned_id = ticket.get("assigned_id")
     await upsert_panel(channel, bot.store, f"commission:{ticket['id']}", card, view=CommissionActions(bot),
                        content=f"<@{assigned_id}> · 신청서를 확인하고 손님과 상담을 진행해 주세요." if assigned_id else "담당자 배정 대기",

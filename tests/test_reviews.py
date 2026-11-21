@@ -27,6 +27,10 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         self.bot = Dialian(Settings('test', self.guild.id, Path(self.tmp.name) / 'ddh.db'))
         self.addAsyncCleanup(self.bot.close)
         await self.bot.store.initialize()
+        # These fixtures represent an installation after the requested copy rollout,
+        # with this edition's optional announcement explicitly paused.
+        await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
+        await self.bot.store.set(self.guild.id, 'release:1.4.0:enabled', False)
         await provision(self.guild, self.bot.store, self.bot.settings)
         await self.bot.store.set(self.guild.id, 'setup_complete', True)
         self.roles = await roles_for(self.guild, self.bot.store)
@@ -168,6 +172,80 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('private brief', str(card.to_dict()))
         self.assertEqual(len([m for m in channel.messages if isinstance(m.view, ReviewRequestView)]), 1)
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))['state'], 'closed')
+
+    async def test_receipt_recovers_without_duplicate_public_post_or_developer_ping(self):
+        from ddh.review_views import ReviewReceiptView
+        reviews = await configure_reviews(self.bot, self.guild)
+        channel = await self.delivered()
+        with patch.object(self.bot.store, 'mark_review_receipt', side_effect=RuntimeError('interrupted')):
+            with self.assertRaises(RuntimeError):
+                await submit_review(self.bot, self.guild, channel, self.customer, 5, '좋았습니다')
+        await recover_reviews(self.bot, self.guild)
+        await recover_reviews(self.bot, self.guild)
+        self.assertEqual(len(reviews.messages), 1)
+        receipts = [m for m in channel.messages if isinstance(m.view, ReviewReceiptView)]
+        self.assertEqual(len(receipts), 1)
+        receipt = receipts[0]
+        self.assertIn(f"<@{self.dev.id}>", receipt.content)
+        self.assertIn('5/5점', receipt.embeds[0].description)
+        self.assertIn(f"<@{self.customer.id}>", reviews.messages[0].embeds[0].description)
+        self.assertIn(str(reviews.messages[0].id), receipt.view.children[-1].url)
+        self.assertFalse(receipt.view.close_ticket.disabled)
+
+    async def test_command_close_archives_only_after_authorized_confirmation(self):
+        cmds = DDHCommands(self.bot)
+        channel = await self.ticket()
+        self.assertEqual(channel.name, 'gfx-0001')
+        interaction = SimpleNamespace(guild=self.guild, channel=channel, channel_id=channel.id,
+            response=SimpleNamespace(send_modal=AsyncMock(), defer=AsyncMock(), is_done=lambda: True),
+            followup=SimpleNamespace(send=AsyncMock()))
+        for actor in (self.customer, self.other):
+            interaction.user = actor
+            with self.assertRaises(UserError):
+                await cmds.close_commission.callback(cmds, interaction)
+        interaction.user = self.dev
+        await cmds.close_commission.callback(cmds, interaction)
+        modal = interaction.response.send_modal.await_args.args[0]
+        self.assertEqual((await self.bot.tickets.current(self.guild, channel.id))['state'], 'open')
+        modal.reason._value = '작업 완료 확인'
+        await modal.on_submit(interaction)
+        self.assertEqual(channel.name, '종료-gfx-0001')
+        self.assertFalse(channel.permissions_for(self.customer).send_messages)
+        self.assertTrue(channel.permissions_for(self.customer).view_channel)
+        self.assertFalse(channel.permissions_for(self.other).view_channel)
+
+    async def test_delivery_and_resend_commands_respect_assignment(self):
+        await configure_reviews(self.bot, self.guild)
+        channel = await self.ticket()
+        cmds = DDHCommands(self.bot)
+        interaction = SimpleNamespace(user=self.dev, guild=self.guild, channel=channel, channel_id=channel.id,
+            response=SimpleNamespace(defer=AsyncMock(), is_done=lambda: True), followup=SimpleNamespace(send=AsyncMock()))
+        with self.assertRaises(UserError):
+            await cmds.review_request.callback(cmds, interaction)
+        await cmds.complete.callback(cmds, interaction)
+        interaction.user = self.other
+        with self.assertRaises(UserError):
+            await cmds.review_request.callback(cmds, interaction)
+        interaction.user = self.staff
+        await cmds.review_request.callback(cmds, interaction)
+        with self.assertRaises(UserError):
+            await cmds.review_request.callback(cmds, interaction)
+        prompts = [m for m in channel.messages if isinstance(m.view, ReviewRequestView)]
+        self.assertEqual(len(prompts), 2)
+        self.assertIs(channel.messages[-1], prompts[-1])
+
+    async def test_existing_default_name_migrates_once_then_preserves_owner_edits(self):
+        from ddh.readability import COPY_KEY, apply_requested_copy
+        await self.bot.store.set(self.guild.id, COPY_KEY, False)
+        channel = await self.ticket()
+        await channel.edit(name='commission-0001')
+        before = channel.overwrites
+        self.assertTrue(await apply_requested_copy(self.bot, self.guild))
+        self.assertEqual(channel.name, 'gfx-0001')
+        self.assertEqual(channel.overwrites, before)
+        await channel.edit(name='custom')
+        self.assertTrue(await apply_requested_copy(self.bot, self.guild))
+        self.assertEqual(channel.name, 'custom')
 
     async def test_rejects_early_or_foreign_reviews_and_cancelled_tickets(self):
         await configure_reviews(self.bot, self.guild)

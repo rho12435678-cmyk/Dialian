@@ -25,6 +25,19 @@ class ReviewRequestView(GuardedView):
         await open_review(self.bot, interaction)
 
 
+class ReviewReceiptView(GuardedView):
+    def __init__(self, bot, *, url=None, closed=False):
+        super().__init__(bot)
+        self.close_ticket.disabled = closed
+        if url:
+            self.add_item(discord.ui.Button(label='후기 원문 보기', url=url))
+
+    @discord.ui.button(label='의뢰 종료', custom_id='ddh:review:close:v1', style=discord.ButtonStyle.danger)
+    async def close_ticket(self, interaction, button):
+        from ddh.commission_views import open_commission_close
+        await open_commission_close(self.bot, interaction)
+
+
 class ReviewRatingView(GuardedView):
     def __init__(self, bot, owner_id, channel_id, developer_id):
         super().__init__(bot, timeout=300)
