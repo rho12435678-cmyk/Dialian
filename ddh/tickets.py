@@ -49,6 +49,16 @@ def validate_payload(kind, fields):
             raise UserError("http:// 또는 https://로 시작하는 링크를 입력해 주세요.")
 
 
+def ticket_channel_name(ticket, *, closed=False):
+    kind = ticket['kind']
+    if kind == 'commission':
+        field = json.loads(ticket['fields'])['_field']
+        if field not in FIELDS:
+            raise UserError('의뢰 분야를 확인해 주세요.')
+        kind = field
+    return f"{'종료-' if closed else ''}{kind}-{ticket['id']:04d}"
+
+
 class Tickets:
     def __init__(self, bot):
         self.bot = bot
@@ -97,8 +107,6 @@ class Tickets:
 
     async def materialize(self, guild, ticket, member, roles):
         """Recover creation interrupted before the channel ID/first message was saved."""
-        from ddh.views import TicketActions
-
         marker = f"DDH ticket:{ticket['id']} owner:{ticket['owner_id']} kind:{ticket['kind']}"
         channels = await fetch_supported_channels(guild)
         channel = next((c for c in channels if isinstance(c, discord.TextChannel) and
@@ -125,30 +133,40 @@ class Tickets:
                     expected[developer] = access()
             category = await ticket_category(guild, self.store, kind=ticket["kind"])
             channel = await guild.create_text_channel(
-                f"{ticket['kind']}-{ticket['id']:04d}", category=category, topic=marker,
+                ticket_channel_name(ticket), category=category, topic=marker,
                 overwrites=expected,
                 reason=f"DDH {KINDS[ticket['kind']]} #{ticket['id']}",
             )
         if not private_channel(channel, guild, permitted):
             raise UserError("티켓 채널의 비공개 권한을 확인해 주세요. 운영진이 권한을 직접 수정한 뒤 다시 시도할 수 있습니다.")
         await self.store.update_ticket(ticket["id"], guild.id, channel_id=channel.id)
-        attachment_guide = (
-            "포트폴리오 링크가 없다면 이 티켓에 작업 이미지·영상·PDF를 첨부해 주세요. "
-            "공동 작업은 본인이 맡은 부분을 함께 적어 주세요."
-            if ticket["kind"] == "developer" else "추가 자료는 이 채널에 첨부해 주세요."
-        )
-        card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
-                     f"신청자: <@{ticket['owner_id']}>\n담당자가 신청서를 확인 후 답변합니다. "
-                     f"{attachment_guide} 비밀번호·토큰은 보내지 마세요.\n"
-                     + ("일반 신청자는 티켓을 종료할 수 없습니다. 의뢰 종료 후 대화는 읽기 전용으로 보관됩니다."
-                      if ticket["kind"] == "commission" else "승인·반려·종료는 운영진 전용입니다. 종료 시 신청·처리 기록은 DB에 남고 채널은 삭제됩니다."))
+        await self.publish_ticket(guild, channel, ticket)
+        if ticket["state"] == "creating":
+            await self.store.update_ticket(ticket["id"], guild.id, state="open")
+            assigned = f"\n담당 개발자: <@{ticket['assigned_id']}>" if ticket.get("assigned_id") else ""
+            await self.audit(guild, f"**{KINDS[ticket['kind']]} 접수 · #{ticket['id']}**\n신청자: {person(member)}{assigned}\n{channel.mention}")
+        return channel
+
+    async def publish_ticket(self, guild, channel, ticket):
+        from ddh.views import TicketActions
         fields = json.loads(ticket["fields"])
+        if ticket['kind'] == 'commission':
+            card = embed(f"{FIELDS[fields['_field']]} 의뢰 #{ticket['id']} · 신청 내용",
+                f"**신청자:** <@{ticket['owner_id']}>\n추가 자료는 여기에 첨부하고 담당자와 상담해 주세요.")
+        else:
+            attachment_guide = (
+                "포트폴리오 링크가 없다면 이 티켓에 작업 이미지·영상·PDF를 첨부해 주세요. "
+                "공동 작업은 본인이 맡은 부분을 함께 적어 주세요."
+                if ticket["kind"] == "developer" else "추가 자료는 이 채널에 첨부해 주세요."
+            )
+            card = embed(f"{KINDS[ticket['kind']]} #{ticket['id']}",
+                         f"신청자: <@{ticket['owner_id']}>\n담당자가 신청서를 확인 후 답변합니다. "
+                         f"{attachment_guide} 비밀번호·토큰은 보내지 마세요.\n"
+                         "승인·반려·종료는 운영진 전용입니다. 종료 시 신청·처리 기록은 DB에 남고 채널은 삭제됩니다.")
         for key, value in fields.items():
-            if key == "_developer":
+            if key in ("_developer", "_field"):
                 continue
-            if key == "_field":
-                card.add_field(name="의뢰 분야", value=FIELDS[value], inline=False)
-            elif key == "_fields":
+            if key == "_fields":
                 card.add_field(name="지원 분야", value=" / ".join(FIELDS[f] for f in value), inline=False)
             elif key != PORTFOLIO_LINK or value:
                 card.add_field(name=key, value=value or "미입력", inline=False)
@@ -156,11 +174,6 @@ class Tickets:
         if ticket["kind"] == "commission":
             from ddh.commissions import status_panel
             await status_panel(self.bot, guild, channel, ticket)
-        if ticket["state"] == "creating":
-            await self.store.update_ticket(ticket["id"], guild.id, state="open")
-            assigned = f"\n담당 개발자: <@{ticket['assigned_id']}>" if ticket.get("assigned_id") else ""
-            await self.audit(guild, f"**{KINDS[ticket['kind']]} 접수 · #{ticket['id']}**\n신청자: {person(member)}{assigned}\n{channel.mention}")
-        return channel
 
     async def current(self, guild, channel_id):
         await self.ready(guild)
@@ -249,7 +262,9 @@ class Tickets:
             for target in list(policy):
                 if target.id in (ticket["owner_id"], ticket.get("assigned_id")):
                     policy[target] = access(write=False)
-            await channel.edit(name=f"종료-의뢰-{ticket['id']:04d}", overwrites=policy, reason="DDH 의뢰 종료·대화 기록 보존")
+            name = ticket_channel_name(ticket, closed=True) if channel.name in (
+                ticket_channel_name(ticket), f"commission-{ticket['id']:04d}") else channel.name
+            await channel.edit(name=name, overwrites=policy, reason="DDH 의뢰 종료·대화 기록 보존")
             await self.complete_close(guild, ticket)
             from ddh.reviews import request_review
             await request_review(self.bot, guild, channel, ticket)

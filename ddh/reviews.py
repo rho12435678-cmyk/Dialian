@@ -1,11 +1,11 @@
 """Customer-authored reviews; only the owner command creates/syncs their channel."""
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import discord
 
 from ddh.blueprint import FIELDS
-from ddh.commissions import ensure_private
+from ddh.commissions import ensure_private, manager
 from ddh.content import embed
 from ddh.server import UserError, require_guild
 
@@ -94,7 +94,7 @@ async def eligible_review(bot, guild, channel, actor):
     return ticket
 
 
-async def send_once(bot, channel, key, card, after, *, view=None):
+async def send_once(bot, channel, key, card, after, *, view=None, content=None, allowed_mentions=None):
     """Recover a send-before-DB-write failure without posting the review twice."""
     marker = f'DDH:{key}:v1'
     card.set_footer(text=marker)
@@ -103,11 +103,12 @@ async def send_once(bot, channel, key, card, after, *, view=None):
     async for message in channel.history(limit=None, after=datetime.fromisoformat(after)):
         if message.author.id == channel.guild.me.id and any(e.footer.text == marker for e in message.embeds):
             return message
-    return await channel.send(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
+    return await channel.send(content=content, embed=card, view=view,
+                              allowed_mentions=allowed_mentions or discord.AllowedMentions.none())
 
 
-async def deliver_prompt(bot, guild, channel, row):
-    if row['prompted_at'] or row['rating'] is not None:
+async def deliver_prompt(bot, guild, channel, row, *, resend=False):
+    if (row['prompted_at'] and not resend) or row['rating'] is not None:
         return
     await review_channel(bot, guild)
     ticket = await bot.store.ticket(row['ticket_id'], guild.id)
@@ -116,13 +117,42 @@ async def deliver_prompt(bot, guild, channel, row):
         return
     await ensure_private(bot, guild, channel, ticket)
     from ddh.review_views import ReviewRequestView
-    await send_once(bot, channel, f"review-request:{row['ticket_id']}:{row['developer_id']}",
-        embed('⭐ 납품 완료 · 별점 후기',
-            f"<@{row['owner_id']}>님, 작업에 대한 1~5점 별점과 후기를 남겨 주세요.\n"
-            '작성자·개발자·분야·별점·후기 내용은 후기 채널에 공개됩니다. 계좌·연락처·비공개 작업 내용은 적지 마세요.\n'
-            '후기는 선택 사항이며 의뢰당 한 번 작성할 수 있습니다. 티켓 종료 후에도 이 버튼을 사용할 수 있습니다.'),
-        row['requested_at'], view=ReviewRequestView(bot))
+    card = embed('⭐ 납품 완료 · 별점 후기',
+        f"<@{row['owner_id']}>님, 작업에 대한 1~5점 별점과 후기를 남겨 주세요.\n"
+        '버튼 또는 `/ddh review`로 작성 · 의뢰당 1회 · 선택 사항\n'
+        '별점·후기는 후기 채널에 공개됩니다. 계좌·개인정보는 적지 마세요.')
+    view = ReviewRequestView(bot)
+    if resend:
+        await channel.send(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
+    else:
+        key = f"review-request:{row['ticket_id']}:{row['developer_id']}"
+        await send_once(bot, channel, key, card, row['requested_at'], view=view)
     await bot.store.mark_review(guild.id, row['ticket_id'])
+
+
+async def request_review_by_command(bot, guild, channel, actor):
+    require_guild(guild, bot.settings)
+    async with bot.mutation_lock:
+        ticket = await bot.store.channel_ticket(guild.id, channel.id)
+        if not ticket or ticket['kind'] != 'commission' or ticket['state'] not in ('open', 'closed'):
+            raise UserError('작품 의뢰 티켓에서 실행해 주세요.')
+        await manager(bot, guild, actor, ticket)
+        if ticket['stage'] != 'delivered' or not ticket.get('assigned_id'):
+            raise UserError('납품 완료 후 요청할 수 있습니다. /ddh complete로 완료 처리해 주세요.')
+        await ensure_private(bot, guild, channel, ticket)
+        row = await bot.store.request_review(guild.id, ticket)
+        if row['rating'] is not None:
+            await deliver_review(bot, guild, row)
+            return '이미 제출된 후기입니다. 티켓의 완료 알림에서 확인해 주세요.'
+        await review_channel(bot, guild)
+        key = f"review:manual:{ticket['id']}"
+        now = datetime.now(timezone.utc).timestamp()
+        last = await bot.store.get(guild.id, key, 0)
+        if now - last < 30:
+            raise UserError('후기 요청은 30초에 한 번 보낼 수 있습니다.')
+        await bot.store.set(guild.id, key, now)
+        await deliver_prompt(bot, guild, channel, row, resend=True)
+        return '티켓 아래에 신청자용 후기 버튼을 보냈습니다. 신청자는 /ddh review로도 작성할 수 있습니다.'
 
 
 async def request_review(bot, guild, channel, ticket):
@@ -138,19 +168,54 @@ async def request_review(bot, guild, channel, ticket):
 
 async def deliver_review(bot, guild, row):
     if row['published_at']:
+        await deliver_receipt(bot, guild, row)
         return row
     channel = await review_channel(bot, guild, row['channel_id'])
     card = embed(f"{'⭐' * row['rating']} · {row['rating']}/5점",
         f"**분야:** {FIELDS[row['field']]}\n**담당 개발자:** <@{row['developer_id']}>\n"
-        f"**작성자:** <@{row['owner_id']}>\n\n"
+        f"**신청자·후기 작성자:** <@{row['owner_id']}>\n\n"
         + discord.utils.escape_mentions(discord.utils.escape_markdown(row['body'] or '별점만 남긴 후기입니다.')))
     card.timestamp = datetime.fromisoformat(row['submitted_at'])
     message = await send_once(bot, channel, f"commission-review:{row['ticket_id']}", card, row['submitted_at'])
     await bot.store.mark_review(guild.id, row['ticket_id'], message_id=message.id)
+    row = await bot.store.commission_review(guild.id, row['ticket_id'])
+    await deliver_receipt(bot, guild, row)
     await bot.operations.record(guild, f"**의뢰 후기 등록 · #{row['ticket_id']}**\n작성자: <@{row['owner_id']}>\n"
         f"담당 개발자: <@{row['developer_id']}> · {FIELDS[row['field']]} · {row['rating']}/5점",
         key=f"review:published:{row['ticket_id']}")
     return await bot.store.commission_review(guild.id, row['ticket_id'])
+
+
+async def deliver_receipt(bot, guild, row):
+    if row.get('receipt_at') or not row['published_at']:
+        return
+    ticket = await bot.store.ticket(row['ticket_id'], guild.id)
+    if not ticket or not ticket['channel_id']:
+        return
+    try:
+        channel = await guild.fetch_channel(ticket['channel_id'])
+    except discord.NotFound:
+        # Public review stays published even if the owner removed the ticket.
+        await bot.store.mark_review_receipt(guild.id, row['ticket_id'])
+        return
+    try:
+        await ensure_private(bot, guild, channel, ticket)
+        from ddh.review_views import ReviewReceiptView
+        url = f"https://discord.com/channels/{guild.id}/{row['channel_id']}/{row['message_id']}"
+        card = embed('✅ 별점 후기 작성 완료',
+            f"**신청자:** <@{row['owner_id']}>\n**개발자:** <@{row['developer_id']}> · {FIELDS[row['field']]}\n"
+            f"**별점:** {'⭐' * row['rating']} ({row['rating']}/5점)\n"
+            + ('종료된 의뢰입니다. 후기 원문을 확인할 수 있습니다.' if ticket['state'] == 'closed'
+               else '담당 개발자·운영진은 후기를 확인한 뒤 아래에서 티켓을 종료하세요.'))
+        notify = ticket.get('assigned_id') == row['developer_id'] and ticket['state'] == 'open'
+        await send_once(bot, channel, f"review-receipt:{row['ticket_id']}", card, row['submitted_at'],
+            view=ReviewReceiptView(bot, url=url, closed=ticket['state'] == 'closed'),
+            content=f"<@{row['developer_id']}> · 의뢰 후기가 등록되었습니다." if notify else None,
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False,
+                users=[discord.Object(id=row['developer_id'])] if notify else False))
+        await bot.store.mark_review_receipt(guild.id, row['ticket_id'])
+    except (discord.HTTPException, UserError):
+        log.info('Review receipt pending for ticket %s', row['ticket_id'])
 
 
 async def submit_review(bot, guild, channel, actor, rating, body, *, developer_id=None):

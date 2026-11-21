@@ -14,25 +14,19 @@ async def publish_commission_hub(bot, guild, channel=None):
     if not isinstance(channel, discord.TextChannel):
         return None
     card = embed('🛒 DDH · 작품 제작 의뢰',
-                 '원하는 작업을 선택하고 개발자와 직접 상담하세요.\n'
-                 '**GFX · UI · 복장 · 스크립팅 · VFX · 빌딩 · 모델링 · 애니메이션**')
+        'GFX · UI · 복장 · 스크립팅 · VFX · 빌딩 · 모델링 · 애니메이션')
     card.add_field(name='① 신청 방법', value=(
-        '**아래 「작품 의뢰 시작」 → 분야 → 개발자 선택 → 간단 신청서**\n'
-        '신청서는 의뢰 제목과 작업 내용 중심입니다. 참고 자료는 선택 사항이며, '
-        '티켓이 열린 뒤 이미지·파일을 첨부해도 됩니다.'), inline=False)
+        '**작품 의뢰 시작 → 분야 → 개발자 → 간단 신청서**\n'
+        '참고 이미지·파일은 티켓이 열린 뒤 첨부해도 됩니다.'), inline=False)
     card.add_field(name='② 가격 안내', value=(
-        '**공통 고정 가격표는 없습니다.** 개발자·작업 종류·수량·난이도에 따라 가격이 달라집니다.\n'
-        '담당 개발자가 신청서를 확인한 뒤 티켓에서 견적을 안내합니다. '
-        '**최종 금액·일정·수정 조건을 확인하고 합의한 뒤 진행하세요.**'), inline=False)
+        '**공통 고정 가격표는 없습니다.** 개발자와 작업 내용에 따라 달라집니다.\n'
+        '티켓에서 금액·납기·수정 조건을 합의한 뒤 진행하세요.'), inline=False)
     card.add_field(name='③ 접수 후 진행', value=(
-        '선택한 개발자가 비공개 티켓에서 신청서를 읽고 손님과 상담합니다.\n'
-        '**상담·견적 → 조건 합의 → 제작 → 검수·수정 → 납품**\n'
-        '입금 계좌는 담당 개발자가 해당 티켓에서 안내하며 입금 여부도 직접 확인합니다.'), inline=False)
+        '**상담·견적 → 제작 → 검수·수정 → 납품 → 별점 후기**\n'
+        '계좌는 담당 개발자·운영진이 티켓에서 안내합니다.'), inline=False)
     card.add_field(name='④ 이용 안내', value=(
-        '• 신청자·담당 개발자·운영진만 의뢰 내용을 볼 수 있습니다.\n'
-        '• 원하는 분야에 인력이 없으면 운영진에게 배정을 요청할 수 있습니다.\n'
-        '• 이미 진행 중인 의뢰가 있으면 기존 티켓으로 연결됩니다.\n'
-        '• 종료·취소는 담당 개발자나 운영진에게 요청하세요. 일반 신청자는 직접 종료할 수 없습니다.'), inline=False)
+        '신청자·담당 개발자·운영진만 열람하며, 종료는 담당자·운영진이 처리합니다.\n'
+        '개발자가 없으면 배정 요청으로 접수하고, 진행 중인 의뢰가 있으면 기존 티켓으로 연결됩니다.'), inline=False)
     portfolio_id = await bot.store.get(guild.id, 'channel:portfolio')
     if portfolio_id and guild.get_channel(portfolio_id):
         card.add_field(name='개발자 작업물 살펴보기', value=f'<#{portfolio_id}>에서 포트폴리오를 확인하세요.', inline=False)

@@ -30,6 +30,10 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
         self.bot = Dialian(Settings('test', self.guild.id, Path(self.tmp.name) / 'ddh.db'))
         self.addAsyncCleanup(self.bot.close)
         await self.bot.store.initialize()
+        # These fixtures represent an installation after the requested copy rollout,
+        # with this edition's optional announcement explicitly paused.
+        await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
+        await self.bot.store.set(self.guild.id, 'release:1.4.0:enabled', False)
         await provision(self.guild, self.bot.store, self.bot.settings)
         await self.bot.store.set(self.guild.id, 'setup_complete', True)
         self.roles = await roles_for(self.guild, self.bot.store)
