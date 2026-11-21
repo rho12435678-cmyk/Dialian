@@ -85,13 +85,52 @@ async def manager(bot, guild, actor, ticket):
     return await developer_member(bot, guild, actor.id, json.loads(ticket["fields"])["_field"])
 
 
-async def save_account(bot, guild, actor, bank, account, holder):
-    await developer_member(bot, guild, actor.id)
+async def account_actor(bot, guild, actor, developer_id=None):
+    require_guild(guild, bot.settings)
+    actor = await guild.fetch_member(actor.id)
+    target_id = actor.id if developer_id is None else developer_id
+    if target_id != actor.id and not await is_staff(actor, bot.store):
+        raise UserError("다른 개발자의 계좌는 운영진만 대신 관리할 수 있습니다.")
+    return actor, target_id
+
+
+async def save_account(bot, guild, actor, bank, account, holder, *, developer_id=None):
+    actor, target_id = await account_actor(bot, guild, actor, developer_id)
+    developer = await developer_member(bot, guild, target_id)
     bank, account, holder = bank.strip(), account.strip(), holder.strip()
     if not bank or not holder or max(len(bank), len(holder)) > 60 or not re.fullmatch(r"[0-9][0-9 -]{4,38}[0-9]", account):
         raise UserError("은행·예금주를 입력하고 계좌번호는 숫자·공백·하이픈으로 6~40자 입력해 주세요.")
-    await bot.store.save_account(guild.id, actor.id, bank, account, holder)
-    await bot.operations.record(guild, f"**개발자 계좌 등록·변경**\n담당자: {person(actor)}\n계좌 내용은 비공개로 저장되었습니다.")
+    await bot.store.save_account(guild.id, target_id, bank, account, holder)
+    await bot.operations.record(guild, f"**개발자 계좌 등록·변경**\n처리자: {person(actor)}\n계좌 대상: {person(developer)}\n계좌 내용은 비공개로 저장되었습니다.")
+
+
+async def remove_account(bot, guild, actor, *, developer_id=None):
+    actor, target_id = await account_actor(bot, guild, actor, developer_id)
+    # A developer who lost their field role must still be able to erase their account.
+    await bot.store.delete_account(guild.id, target_id)
+    await bot.operations.record(guild, f"**개발자 계좌 삭제**\n처리자: {person(actor)}\n계좌 대상: <@{target_id}>")
+
+
+async def send_account(bot, guild, channel, actor):
+    require_guild(guild, bot.settings)
+    async with bot.mutation_lock:
+        ticket = await bot.tickets.current(guild, channel.id)
+        if ticket['kind'] != 'commission' or not ticket.get('assigned_id'):
+            raise UserError("담당 개발자가 배정된 작품 의뢰 티켓에서 실행해 주세요.")
+        actor = await manager(bot, guild, actor, ticket)
+        developer = await developer_member(bot, guild, ticket['assigned_id'], json.loads(ticket['fields'])['_field'])
+        await ensure_private(bot, guild, channel, ticket)
+        account = await bot.store.account(guild.id, developer.id)
+        if not account:
+            raise UserError("담당 개발자의 계좌가 없습니다. 개발자는 /ddh account, 운영진은 /ddh account developer:대상으로 등록해 주세요.")
+        card = embed(f"의뢰 #{ticket['id']} · 담당 개발자 입금 계좌",
+            f"**담당 개발자:** {person(developer)}\n**전송 요청자:** {person(actor)}\n\n"
+            f"**은행:** {discord.utils.escape_markdown(account['bank'])}\n"
+            f"**계좌번호:** {account['account']}\n**예금주:** {discord.utils.escape_markdown(account['holder'])}\n\n"
+            "금액·작업 조건은 담당 개발자와 합의한 내용을 확인해 주세요. 입금 여부는 담당자가 직접 확인합니다.")
+        await bot.store.set(guild.id, f"commission:payment:{ticket['id']}", True)
+        await upsert_panel(channel, bot.store, f"payment:{ticket['id']}", card)
+        await bot.operations.record(guild, f"**의뢰 계좌 안내 · #{ticket['id']}**\n처리자: {person(actor)}\n담당 개발자: {person(developer)}\n{channel.mention} · 계좌 내용은 비공개 티켓에만 표시")
 
 
 async def ensure_private(bot, guild, channel, ticket, *, extra_ids=()):
@@ -124,6 +163,9 @@ async def assign(bot, guild, channel, actor, developer):
         if changed and previous:
             await upsert_panel(channel, bot.store, f"quote:{ticket['id']}", embed('담당자 변경 안내',
                 '담당 개발자가 변경되어 이전 계좌 안내를 중지했습니다. 새 담당자의 견적·계좌 안내를 기다려 주세요.'))
+            if await bot.store.get(guild.id, f"commission:payment:{ticket['id']}"):
+                await upsert_panel(channel, bot.store, f"payment:{ticket['id']}", embed('담당자 변경 안내',
+                    '이전 담당자의 계좌 안내를 중지했습니다. 새 담당자의 계좌 안내를 기다려 주세요.'))
         await bot.store.set(guild.id, journal_key, {'previous': previous, 'target': developer.id})
         # Store desired assignee first. Explicit retry repairs an interrupted
         # permissions write; no background job rewrites owner channel edits.
@@ -148,7 +190,7 @@ async def status_panel(bot, guild, channel, ticket):
                  f"**상태:** {STAGES.get(ticket.get('stage'), STAGES['received'])}\n\n"
                  + ("선택한 담당 개발자가 신청서·첨부 자료를 확인하고 손님과 이 티켓에서 직접 상담·제작을 진행합니다.\n"
                   if ticket.get("assigned_id") else "현재 담당자 대기 상태입니다. 운영진이 `/ddh assign`으로 배정할 수 있으며 제작은 아직 확정되지 않았습니다.\n")
-                 + "담당자는 `/ddh account`로 본인 계좌를 등록한 뒤 아래에서 견적·계좌를 안내할 수 있습니다.\n"
+                 + "담당자는 `/ddh account`로 계좌를 등록하고 `/ddh account-send`로 전송할 수 있습니다. 운영진도 개발자 지정 등록과 계좌 전송을 대신할 수 있습니다.\n"
                  "금액·일정·수정 범위는 티켓에서 합의해 주세요. 입금 여부는 담당자가 직접 확인합니다.\n"
                  "신청자는 종료할 수 없으며 운영진·담당 개발자에게 종료를 요청할 수 있습니다.")
     assigned_id = ticket.get("assigned_id")
@@ -197,6 +239,9 @@ async def progress(bot, guild, channel, actor, stage):
         previous = STAGES[ticket['stage']]
         await bot.store.update_ticket(ticket['id'], guild.id, stage=stage)
         ticket['stage'] = stage
+        if stage == 'delivered':
+            from ddh.reviews import request_review
+            await request_review(bot, guild, channel, ticket)
         await status_panel(bot, guild, channel, ticket)
         await bot.operations.record(guild, f"**의뢰 진행 변경 · #{ticket['id']}**\n처리자: {person(actor)}\n{previous} → {STAGES[stage]}\n{channel.mention}")
 

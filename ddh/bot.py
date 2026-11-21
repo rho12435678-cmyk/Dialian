@@ -25,7 +25,9 @@ from ddh.verification import verify_member
 from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
 from ddh.visibility import apply_visibility
 from ddh.commission_views import AccountModal, CommissionActions, CommissionEntryView
-from ddh.commissions import assign, install
+from ddh.commissions import account_actor, assign, install, remove_account, send_account
+from ddh.reviews import configure_reviews, recover_reviews
+from ddh.review_views import ReviewRequestView, open_review
 
 log = logging.getLogger(__name__)
 
@@ -178,19 +180,49 @@ class DDHCommands(app_commands.Group):
         await assign(self.bot, interaction.guild, interaction.channel, interaction.user, developer)
         await reply(interaction, "담당 개발자를 배정했습니다. 개발자는 이 티켓에서 견적·계좌 안내와 진행 상태를 관리할 수 있습니다.")
 
-    @app_commands.command(name="account", description="개발자 본인의 입금 계좌 비공개 등록·수정")
+    @app_commands.command(name="account", description="본인 계좌 등록·수정 또는 운영진의 개발자 계좌 대리 등록")
+    @app_commands.describe(developer="운영진 대리 등록 대상 개발자 (생략하면 본인)")
     @app_commands.guild_only()
-    async def account(self, interaction: discord.Interaction):
+    async def account(self, interaction: discord.Interaction, developer: discord.Member | None = None):
         require_guild(interaction.guild, self.bot.settings)
-        await interaction.response.send_modal(AccountModal(self.bot))
+        # Fresh authorization is performed on submit too; a modal is not a grant.
+        if developer is not None:
+            await account_actor(self.bot, interaction.guild, interaction.user, developer.id)
+        await interaction.response.send_modal(AccountModal(self.bot, developer.id if developer else None))
 
-    @app_commands.command(name="account-remove", description="본인이 저장한 개발자 입금 계좌 삭제")
+    @app_commands.command(name="account-remove", description="본인 계좌 삭제 또는 운영진의 개발자 계좌 대리 삭제")
+    @app_commands.describe(developer="운영진 대리 삭제 대상 개발자 (생략하면 본인)")
     @app_commands.guild_only()
-    async def remove_account(self, interaction: discord.Interaction):
+    async def remove_account(self, interaction: discord.Interaction, developer: discord.Member | None = None):
         require_guild(interaction.guild, self.bot.settings)
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.bot.store.delete_account(interaction.guild.id, interaction.user.id)
-        await reply(interaction, "저장된 본인 계좌를 삭제했습니다. 이미 티켓에 보낸 계좌 안내와 보관 기간 내 백업에는 남아 있을 수 있습니다.")
+        await remove_account(self.bot, interaction.guild, interaction.user, developer_id=developer.id if developer else None)
+        await reply(interaction, "저장된 계좌를 삭제했습니다. 이미 티켓에 보낸 계좌 안내와 보관 기간 내 백업에는 남아 있을 수 있습니다.")
+
+    @app_commands.command(name="account-send", description="담당 개발자 또는 운영진이 이 의뢰의 담당자 계좌 전송")
+    @app_commands.guild_only()
+    async def send_account(self, interaction: discord.Interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await send_account(self.bot, interaction.guild, interaction.channel, interaction.user)
+        await reply(interaction, "배정된 개발자의 계좌를 이 비공개 의뢰 티켓에 안내했습니다.")
+
+    @app_commands.command(name="reviews", description="소유자가 커미션 후기 채널만 생성·카테고리 권한 동기화")
+    @app_commands.describe(category="현재 사용 중인 커미션 카테고리 (생략하면 연결된 기존 카테고리)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def reviews(self, interaction: discord.Interaction, category: discord.CategoryChannel | None = None):
+        self.owner(interaction)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self.bot.mutation_lock:
+            channel = await configure_reviews(self.bot, interaction.guild, category=category)
+        await reply(interaction, f"{channel.mention}에 현재 커미션 카테고리 권한을 동기화했습니다. 납품 완료된 의뢰의 신청자는 후기 버튼으로 별점과 내용을 남길 수 있습니다.")
+
+    @app_commands.command(name="review", description="납품 완료된 현재 의뢰의 신청자가 별점 후기 작성")
+    @app_commands.guild_only()
+    async def review(self, interaction: discord.Interaction):
+        require_guild(interaction.guild, self.bot.settings)
+        await open_review(self.bot, interaction)
 
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
@@ -312,7 +344,7 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self), ReviewRequestView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
@@ -416,6 +448,7 @@ class Dialian(discord.Client):
             # as an interrupted ticket. Do NOT restore channels or policies.
             for name, action in (
                 ("ticket recovery", self.tickets.recover),
+                ("requested commission reviews", lambda g: recover_reviews(self, g)),
                 ("owner-enabled scheduled notice", lambda g: publish_due(self, g)),
                 ("previously requested new-version announcement",
                  lambda g: publish_release(self, g)),

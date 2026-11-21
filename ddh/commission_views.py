@@ -133,9 +133,9 @@ class CommissionModal(discord.ui.Modal):
 
 
 class AccountModal(discord.ui.Modal):
-    def __init__(self, bot):
-        super().__init__(title='개발자 본인 계좌 등록·수정', timeout=300)
-        self.bot = bot
+    def __init__(self, bot, developer_id=None):
+        super().__init__(title='개발자 계좌 등록·수정', timeout=300)
+        self.bot, self.developer_id = bot, developer_id
         self.bank = discord.ui.TextInput(label='은행명', max_length=60)
         self.account = discord.ui.TextInput(label='계좌번호 (본인 명의)', min_length=6, max_length=40)
         self.holder = discord.ui.TextInput(label='예금주', max_length=60)
@@ -145,8 +145,9 @@ class AccountModal(discord.ui.Modal):
     async def on_submit(self, interaction):
         require_guild(interaction.guild, self.bot.settings)
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await save_account(self.bot, interaction.guild, interaction.user, self.bank.value, self.account.value, self.holder.value)
-        await reply(interaction, '본인 계좌를 저장했습니다. 담당 의뢰의 「견적·계좌 안내」를 누를 때 해당 티켓에만 표시합니다. 삭제는 `/ddh account-remove`를 사용하세요.')
+        await save_account(self.bot, interaction.guild, interaction.user, self.bank.value, self.account.value, self.holder.value,
+                           developer_id=self.developer_id)
+        await reply(interaction, '개발자 계좌를 저장했습니다. 해당 의뢰 티켓에서 `/ddh account-send`로 전송할 수 있습니다. 삭제는 `/ddh account-remove`를 사용하세요.')
 
     async def on_error(self, interaction, error):
         await report_error(interaction, error)

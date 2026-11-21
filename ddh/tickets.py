@@ -251,6 +251,8 @@ class Tickets:
                     policy[target] = access(write=False)
             await channel.edit(name=f"종료-의뢰-{ticket['id']:04d}", overwrites=policy, reason="DDH 의뢰 종료·대화 기록 보존")
             await self.complete_close(guild, ticket)
+            from ddh.reviews import request_review
+            await request_review(self.bot, guild, channel, ticket)
             return
         await channel.edit(
             name=f"closed-{ticket['kind']}-{ticket['id']:04d}",

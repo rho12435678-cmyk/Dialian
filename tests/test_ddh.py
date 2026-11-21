@@ -1474,7 +1474,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def test_slash_command_payloads_are_valid(self):
         group = DDHCommands(self.bot)
         payload = group.to_dict(self.bot.tree)
-        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "updates", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity", "commissions", "assign", "account", "account-remove", "logs"})
+        self.assertEqual({c["name"] for c in payload["options"]}, {"setup", "plan", "panels", "notices", "updates", "status", "security", "cleanup", "check", "verify", "layout", "operator", "visibility", "activity", "commissions", "assign", "account", "account-remove", "account-send", "reviews", "review", "logs"})
         self.assertLess(len(json.dumps(payload)), 10000)
 
 

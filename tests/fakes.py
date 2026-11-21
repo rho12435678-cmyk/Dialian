@@ -85,6 +85,8 @@ class ChannelMethods:
             self.name = kwargs["name"]
         if "category" in kwargs:
             self.category_id = kwargs["category"].id
+        if kwargs.get("sync_permissions"):
+            self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=self.category.overwrites))
         if "overwrites" in kwargs:
             self._fill_overwrites(model_data(self.guild, self.name, 0, overwrites=kwargs["overwrites"]))
         if "topic" in kwargs:

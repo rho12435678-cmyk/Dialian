@@ -80,6 +80,13 @@ class Store:
                 guild_id INTEGER NOT NULL, developer_id INTEGER NOT NULL,
                 bank TEXT NOT NULL, account TEXT NOT NULL, holder TEXT NOT NULL,
                 updated_at TEXT NOT NULL, PRIMARY KEY(guild_id,developer_id))""")
+            await db.execute("""CREATE TABLE IF NOT EXISTS commission_reviews (
+                guild_id INTEGER NOT NULL, ticket_id INTEGER NOT NULL,
+                owner_id INTEGER NOT NULL, developer_id INTEGER NOT NULL, field TEXT NOT NULL,
+                requested_at TEXT NOT NULL, prompted_at TEXT,
+                rating INTEGER CHECK(rating BETWEEN 1 AND 5), body TEXT,
+                submitted_at TEXT, channel_id INTEGER, message_id INTEGER, published_at TEXT,
+                PRIMARY KEY(guild_id,ticket_id))""")
             await db.commit()
         if os.name == "posix":
             self.path.chmod(0o600)
@@ -171,6 +178,54 @@ class Store:
         async with self.connect() as db:
             await db.execute("DELETE FROM payout_accounts WHERE guild_id=? AND developer_id=?", (guild_id, developer_id))
             await db.commit()
+
+    async def request_review(self, guild_id, ticket):
+        async with self.connect() as db:
+            await db.execute("""INSERT INTO commission_reviews
+                (guild_id,ticket_id,owner_id,developer_id,field,requested_at) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(guild_id,ticket_id) DO UPDATE SET
+                  developer_id=excluded.developer_id, requested_at=excluded.requested_at, prompted_at=NULL
+                WHERE commission_reviews.rating IS NULL
+                  AND commission_reviews.developer_id != excluded.developer_id""",
+                (guild_id, ticket['id'], ticket['owner_id'], ticket['assigned_id'],
+                 json.loads(ticket['fields'])['_field'], utcnow()))
+            await db.commit()
+        return await self.commission_review(guild_id, ticket['id'])
+
+    async def commission_review(self, guild_id, ticket_id):
+        async with self.connect() as db:
+            row = await (await db.execute("SELECT * FROM commission_reviews WHERE guild_id=? AND ticket_id=?",
+                                         (guild_id, ticket_id))).fetchone()
+        return dict(row) if row else None
+
+    async def submit_review(self, guild_id, ticket_id, rating, body, channel_id):
+        async with self.connect() as db:
+            cursor = await db.execute("""UPDATE commission_reviews
+                SET rating=?,body=?,submitted_at=?,channel_id=?
+                WHERE guild_id=? AND ticket_id=? AND rating IS NULL""",
+                (rating, body, utcnow(), channel_id, guild_id, ticket_id))
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def mark_review(self, guild_id, ticket_id, *, message_id=None):
+        async with self.connect() as db:
+            if message_id is None:
+                await db.execute("UPDATE commission_reviews SET prompted_at=? WHERE guild_id=? AND ticket_id=?",
+                                 (utcnow(), guild_id, ticket_id))
+            else:
+                await db.execute("UPDATE commission_reviews SET message_id=?,published_at=? WHERE guild_id=? AND ticket_id=?",
+                                 (message_id, utcnow(), guild_id, ticket_id))
+            await db.commit()
+
+    async def pending_reviews(self, guild_id):
+        async with self.connect() as db:
+            rows = await (await db.execute("""SELECT r.* FROM commission_reviews r JOIN tickets t
+                ON t.guild_id=r.guild_id AND t.id=r.ticket_id WHERE r.guild_id=? AND (
+                  (r.rating IS NOT NULL AND r.published_at IS NULL) OR
+                  (r.rating IS NULL AND r.prompted_at IS NULL AND t.stage='delivered'
+                   AND t.state IN ('open','closed') AND t.assigned_id=r.developer_id))
+                ORDER BY r.rating IS NULL, r.requested_at LIMIT 20""", (guild_id,))).fetchall()
+        return [dict(row) for row in rows]
 
     async def record_event(self, guild_id, key, sink, kind, body, when):
         async with self.connect() as db:
