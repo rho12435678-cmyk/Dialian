@@ -238,7 +238,7 @@ class Tickets:
         await self.review_notice(guild, channel, ticket, "승인", ticket["reason"], ticket["reviewer_id"])
         return "승인"
 
-    async def close(self, guild, channel, actor, reason):
+    async def close(self, guild, channel, actor, reason=None):
         await self.ready(guild)
         async with self.bot.mutation_lock:
             ticket = await self.current(guild, channel.id)
@@ -246,40 +246,21 @@ class Tickets:
             await manager(self.bot, guild, actor, ticket)
             if ticket["decision"] == "approving":
                 raise UserError("역할 지급이 진행 중입니다. 운영진이 역할 권한을 확인하고 승인을 완료한 뒤 종료해 주세요.")
-            roles = await roles_for(guild, self.store)
             # Journal before deleting: an interrupted close is completed on restart.
             await self.store.update_ticket(ticket["id"], guild.id, state="closing", close_reason=reason, closed_by=actor.id)
             ticket["closed_by"] = actor.id
             ticket["close_reason"] = reason
-            await self.finish_close(guild, channel, ticket, roles)
+            await self.finish_close(guild, channel, ticket)
 
-    async def finish_close(self, guild, channel, ticket, roles):
-        if ticket["kind"] == "commission":
-            from ddh.blueprint import access
-            from ddh.commissions import ensure_private
-            await ensure_private(self.bot, guild, channel, ticket)
-            policy = channel.overwrites
-            for target in list(policy):
-                if target.id in (ticket["owner_id"], ticket.get("assigned_id")):
-                    policy[target] = access(write=False)
-            name = ticket_channel_name(ticket, closed=True) if channel.name in (
-                ticket_channel_name(ticket), f"commission-{ticket['id']:04d}") else channel.name
-            await channel.edit(name=name, overwrites=policy, reason="DDH 의뢰 종료·대화 기록 보존")
-            await self.complete_close(guild, ticket)
-            from ddh.reviews import request_review
-            await request_review(self.bot, guild, channel, ticket)
-            return
-        await channel.edit(
-            name=f"closed-{ticket['kind']}-{ticket['id']:04d}",
-            overwrites=overwrites(guild, roles, "private"),
-            reason="DDH 문의 종료 및 비공개 처리",
-        )
-        # Closing was recorded first, so an interrupted deletion is retryable.
-        await channel.delete(reason="DDH 문의 종료: 티켓 카테고리 없이 정리")
+    async def finish_close(self, guild, channel, ticket):
+        try:
+            await channel.delete(reason=f"DDH 티켓 #{ticket['id']} 종료")
+        except discord.NotFound:
+            pass
         await self.complete_close(guild, ticket)
 
     async def complete_close(self, guild, ticket):
-        await self.audit(guild, f"**티켓 #{ticket['id']} 종료**\n처리자: {'<@' + str(ticket['closed_by']) + '>' if ticket['closed_by'] else '자동 복구'}\n사유: {ticket.get('close_reason') or '기록 없음'}",
+        await self.audit(guild, f"**티켓 #{ticket['id']} 종료**\n처리자: {'<@' + str(ticket['closed_by']) + '>' if ticket['closed_by'] else '자동 복구'}",
                          key=f"ticket:closed:{ticket['id']}")
         await self.store.update_ticket(ticket["id"], guild.id, state="closed")
 
@@ -311,7 +292,7 @@ class Tickets:
                     await self.complete_close(guild, ticket)
                     continue
                 try:
-                    await self.finish_close(guild, channel, ticket, roles)
+                    await self.finish_close(guild, channel, ticket)
                 except (discord.HTTPException, UserError):
                     log.exception("Ticket close recovery deferred for %s", ticket["id"])
             for ticket in await self.store.approvals(guild.id):

@@ -1,0 +1,127 @@
+import tempfile
+import unittest
+from datetime import datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from config import Settings
+from ddh.bot import Dialian
+from ddh.invite_event import CAMPAIGN_GUILD, KEY, InviteEvent, event_card, standings, tally
+from ddh.notices import KST, publish_due
+from ddh.server import provision
+from fakes import Guild
+
+
+class InviteScoreTests(unittest.TestCase):
+    def state(self):
+        return dict(start=10, end=1000, seen=['8'], members={'8': [5, False]}, uses={},
+                    scores={}, reached={}, bonus=False, initial_population=1)
+
+    def test_mixed_sources_are_safe_only_if_all_new_members_qualify(self):
+        s = self.state()
+        members = {'8': [5, False], '9': [15, False], '10': [16, False]}
+        uses = {'a': [1, '1'], 'b': [1, '2']}
+        tally(s, members, uses, 20)
+        self.assertEqual(standings(s), [(1, '1', 1), (2, '2', 1)])
+        tally(s, members, uses, 23)
+        self.assertEqual(s['scores'], {'1': 1, '2': 1})
+        members = dict(members, **{'9': [28, False], '11': [29, False]})
+        tally(s, members, {'a': [2, '1'], 'b': [2, '2']}, 30)
+        self.assertEqual(s['scores'], {'1': 1, '2': 1})
+
+    def test_bots_rejoins_and_joins_after_cutoff_never_score(self):
+        s = self.state()
+        members = {'8': [12, False], '9': [13, True], '10': [14, False], '11': [1001, False]}
+        tally(s, members, {'link': [4, '1']}, 1002)
+        self.assertEqual(s['scores'], {'1': 1})
+
+    def test_short_visit_is_not_credited_again_on_return(self):
+        s = self.state()
+        s['pending'] = [['12', 12, False]]
+        tally(s, s['members'], {'link': [1, '1']}, 13)
+        tally(s, {'12': [18, False]}, {'link': [2, '1']}, 19)
+        self.assertEqual(s['scores'], {'1': 1})
+
+    def test_threshold_and_prizes_are_latched(self):
+        s = self.state()
+        roster = {str(i): [5, False] for i in range(100, 249)}
+        s.update(seen=list(roster), members=roster, initial_population=149)
+        tally(s, {**roster, '999': [12, False]}, {'one': [1, '1']}, 13)
+        self.assertTrue(s['bonus'])
+        tally(s, {}, {}, 14)
+        self.assertIn('GFX 6개', str(event_card(s, final=True).to_dict()))
+
+
+class CampaignTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.guild = Guild(CAMPAIGN_GUILD)
+        self.bot = Dialian(Settings('test', self.guild.id, Path(tmp.name) / 'db'))
+        self.addAsyncCleanup(self.bot.close)
+        await self.bot.store.initialize()
+        await provision(self.guild, self.bot.store, self.bot.settings)
+        await self.bot.store.set(self.guild.id, 'setup_complete', True)
+        self.when = datetime(2026, 11, 22, 13, tzinfo=KST)
+        self.guild.invites = AsyncMock(return_value=[])
+        self.guild.me.bot = True
+        self.bot_member = self.guild.me
+        self.bot_member.joined_at = self.when - timedelta(days=1)
+        self.verification = await self.guild.create_text_channel('인증')
+        await self.bot.store.set(self.guild.id, 'channel:verification', self.verification.id)
+
+    async def test_lifecycle_restart_countdown_bonus_and_final_publication(self):
+        event, guild = self.bot.invite_event, self.guild
+        t = self.when
+        await event.tick(guild, t)
+        state = await self.bot.store.get(guild.id, KEY)
+        self.assertEqual(state['end'] - state['start'], 28 * 86400)
+        channel = guild.get_channel(state['channel'])
+        news = guild.get_channel(await self.bot.store.get(guild.id, 'channel:announcements'))
+        self.assertTrue(channel.messages[0].view.is_persistent())
+        owner = guild.member(300)
+        person = guild.member(301)
+        owner.joined_at = t + timedelta(seconds=2)
+        person.joined_at = t + timedelta(seconds=3)
+        await event.tick(guild, t + timedelta(seconds=5))
+        friend = guild.member(302)
+        friend.joined_at = t + timedelta(seconds=15)
+        invite = SimpleNamespace(code='abc', uses=1, inviter=owner)
+        guild.invites.return_value = [invite]
+        await event.record_join(friend)
+        await InviteEvent(self.bot).tick(guild, t + timedelta(minutes=1))
+        await event.tick(guild, t + timedelta(weeks=4))
+        await event.tick(guild, t + timedelta(weeks=5))
+        self.assertEqual(len(channel.messages), 1)
+        self.assertIsNone(channel.messages[0].view)
+        self.assertEqual(len(news.messages), 2)
+        self.assertIn('GFX 5개', str(news.messages[-1].embeds[0].to_dict()))
+        self.assertTrue((await self.bot.store.get(guild.id, KEY))['announced_end'])
+
+    async def test_personal_link_is_private_and_reused(self):
+        guild, event = self.guild, self.bot.invite_event
+        await event.tick(guild, self.when)
+        state = await self.bot.store.get(guild.id, KEY)
+        role = guild.get_role(await self.bot.store.get(guild.id, 'role:member'))
+        actor = guild.member(42, [role])
+        invite = SimpleNamespace(code='abc', url='https://discord.gg/abc', uses=0, inviter=guild.me)
+        with patch('ddh.invite_event.datetime') as clock, patch.object(self.verification, 'create_invite',
+                new=AsyncMock(return_value=invite)) as create:
+            clock.now.return_value = self.when
+            self.assertEqual(await event.personal_link(guild, actor, state['channel']), invite.url)
+            guild.invites.return_value = [invite]
+            self.assertEqual(await event.personal_link(guild, actor, state['channel']), invite.url)
+            create.assert_awaited_once()
+
+    async def test_guide_evening_every_other_day_only_in_chat(self):
+        g, b = self.guild, self.bot
+        day = self.when.replace(hour=18)
+        self.assertFalse(await publish_due(b, g, day - timedelta(seconds=1), chat=True))
+        self.assertTrue(await publish_due(b, g, day, chat=True))
+        self.assertFalse(await publish_due(b, g, day + timedelta(minutes=2), chat=True))
+        self.assertFalse(await publish_due(b, g, day + timedelta(days=1), chat=True))
+        self.assertTrue(await publish_due(b, g, day + timedelta(days=2), chat=True))
+        chat = g.get_channel(await b.store.get(g.id, 'channel:general'))
+        self.assertEqual(len(chat.messages), 2)
+        self.assertFalse(chat.messages[0].content)

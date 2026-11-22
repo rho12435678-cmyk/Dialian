@@ -49,7 +49,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         # These fixtures represent an installation after the requested copy rollout,
         # with this edition's optional announcement explicitly paused.
         await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
-        await self.bot.store.set(self.guild.id, 'release:1.4.0:enabled', False)
+        await self.bot.store.set(self.guild.id, 'release:1.5.0:enabled', False)
         await provision(self.guild, self.bot.store, self.settings)
         await self.bot.store.set(self.guild.id, "setup_complete", True)
         await self.bot.store.set(self.guild.id, "setup_at", "2026-11-12T00:00:00+00:00")
@@ -910,16 +910,13 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         channel = await self.bot.tickets.create(self.guild, self.member, "developer", self.payload())
         with self.assertRaises(UserError):
             await self.bot.tickets.close(self.guild, channel, self.visitor, "no")
-        channel.fail_edit = True
-        with self.assertRaises(RuntimeError):
-            await self.bot.tickets.close(self.guild, channel, self.staff, "완료")
+        with patch.object(channel, "delete", side_effect=RuntimeError("Discord unavailable")):
+            with self.assertRaises(RuntimeError):
+                await self.bot.tickets.close(self.guild, channel, self.staff)
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))["state"], "closing")
-        channel.fail_edit = False
         await self.bot.tickets.recover(self.guild)
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))["state"], "closed")
         self.assertNotIn(channel, self.guild.channels)
-        self.assertFalse(channel.permissions_for(self.member).view_channel)
-        self.assertTrue(channel.permissions_for(self.staff).view_channel)
 
     async def test_rules_button_cannot_grant_a_modified_powerful_role(self):
         role = self.roles["member"]

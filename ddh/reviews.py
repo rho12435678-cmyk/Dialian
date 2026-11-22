@@ -171,10 +171,16 @@ async def deliver_review(bot, guild, row):
         await deliver_receipt(bot, guild, row)
         return row
     channel = await review_channel(bot, guild, row['channel_id'])
-    card = embed(f"{'⭐' * row['rating']} · {row['rating']}/5점",
-        f"**분야:** {FIELDS[row['field']]}\n**담당 개발자:** <@{row['developer_id']}>\n"
-        f"**신청자·후기 작성자:** <@{row['owner_id']}>\n\n"
-        + discord.utils.escape_mentions(discord.utils.escape_markdown(row['body'] or '별점만 남긴 후기입니다.')))
+    stars = '★' * row['rating'] + '☆' * (5 - row['rating'])
+    card = embed(f"{FIELDS[row['field']]} 제작 후기 · {row['rating']}/5점",
+                 f"**{stars}**  ·  납품 완료 의뢰 #{row['ticket_id']:04d}")
+    card.add_field(name='신청자', value=f"<@{row['owner_id']}>")
+    card.add_field(name='담당 개발자', value=f"<@{row['developer_id']}>")
+    # A Discord field is capped at 1024 characters. Leave user markdown
+    # escaped, keeping the full review in the longer description instead.
+    body = discord.utils.escape_mentions(discord.utils.escape_markdown(row['body'] or ''))
+    if body:
+        card.description += f"\n\n**신청자의 한마디**\n{body}"
     card.timestamp = datetime.fromisoformat(row['submitted_at'])
     message = await send_once(bot, channel, f"commission-review:{row['ticket_id']}", card, row['submitted_at'])
     await bot.store.mark_review(guild.id, row['ticket_id'], message_id=message.id)
@@ -206,7 +212,7 @@ async def deliver_receipt(bot, guild, row):
             f"**신청자:** <@{row['owner_id']}>\n**개발자:** <@{row['developer_id']}> · {FIELDS[row['field']]}\n"
             f"**별점:** {'⭐' * row['rating']} ({row['rating']}/5점)\n"
             + ('종료된 의뢰입니다. 후기 원문을 확인할 수 있습니다.' if ticket['state'] == 'closed'
-               else '담당 개발자·운영진은 후기를 확인한 뒤 아래에서 티켓을 종료하세요.'))
+               else '후기를 확인한 담당 개발자·운영진이 아래 버튼을 누르면 티켓 채널이 즉시 삭제됩니다.'))
         notify = ticket.get('assigned_id') == row['developer_id'] and ticket['state'] == 'open'
         await send_once(bot, channel, f"review-receipt:{row['ticket_id']}", card, row['submitted_at'],
             view=ReviewReceiptView(bot, url=url, closed=ticket['state'] == 'closed'),
@@ -247,7 +253,11 @@ async def recover_reviews(bot, guild):
                     await deliver_review(bot, guild, row)
                 else:
                     ticket = await bot.store.ticket(row['ticket_id'], guild.id)
-                    channel = await guild.fetch_channel(ticket['channel_id'])
+                    try:
+                        channel = await guild.fetch_channel(ticket['channel_id'])
+                    except discord.NotFound:
+                        await bot.store.mark_review(guild.id, row['ticket_id'])
+                        continue
                     await deliver_prompt(bot, guild, channel, row)
             except (discord.HTTPException, UserError):
                 log.info('Review delivery pending for ticket %s', row['ticket_id'])

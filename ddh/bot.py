@@ -12,6 +12,7 @@ from ddh.backups import backup
 from ddh.blueprint import LAYOUT_VERSION, layout_summary, overwrites
 from ddh.cleanup import cleanup_legacy
 from ddh.content import publish_panels
+from ddh.invite_event import InviteEvent, InviteEventView
 from ddh.layout import cosmetic_layout
 from ddh.notices import OWNER_NOTICES_KEY, publish_due
 from ddh.operations import Operations, private_channel
@@ -22,13 +23,13 @@ from ddh.store import Store, utcnow
 from ddh.tickets import Tickets
 from ddh.updates import RELEASE_NOTICES_KEY, deployed_revision, publish_release, release_announcements_allowed
 from ddh.verification import verify_member
-from ddh.views import RulesView, SupportView, TicketActions, reply, report_error
+from ddh.views import RulesView, SupportView, TicketActions, close_now, reply, report_error
 from ddh.visibility import apply_visibility
-from ddh.commission_views import AccountModal, CommissionActions, CommissionEntryView, open_commission_close
+from ddh.commission_views import AccountModal, CommissionActions, CommissionEntryView
 from ddh.commissions import account_actor, assign, install, progress, remove_account, send_account
 from ddh.reviews import configure_reviews, recover_reviews, request_review_by_command
 from ddh.review_views import ReviewReceiptView, ReviewRequestView, open_review
-from ddh.readability import apply_requested_copy
+from ddh.readability import apply_requested_copy, refresh_close_controls
 
 log = logging.getLogger(__name__)
 
@@ -241,10 +242,10 @@ class DDHCommands(app_commands.Group):
         result = await request_review_by_command(self.bot, interaction.guild, interaction.channel, interaction.user)
         await reply(interaction, result)
 
-    @app_commands.command(name="close", description="담당 개발자·운영진이 현재 의뢰를 종료하고 대화를 읽기 전용으로 보관")
+    @app_commands.command(name="close", description="운영진 또는 배정된 개발자가 현재 티켓 채널을 즉시 삭제")
     @app_commands.guild_only()
     async def close_commission(self, interaction: discord.Interaction):
-        await open_commission_close(self.bot, interaction)
+        await close_now(self.bot, interaction)
 
     @app_commands.command(name="security", description="기존 채널을 변경하지 않고 DDH 보안 설정 재적용")
     @app_commands.guild_only()
@@ -340,6 +341,22 @@ class DDHCommands(app_commands.Group):
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
+@app_commands.command(name="의뢰도움", description="눌러서 쓰는 의뢰 명령어 모음 · 개발자·운영진·신청자")
+@app_commands.guild_only()
+async def commission_help(interaction: discord.Interaction):
+    bot = interaction.client
+    require_guild(interaction.guild, bot.settings)
+    def cmd(name):
+        return f"</ddh {name}:{bot.ddh_command_id}>" if bot.ddh_command_id else f"`/ddh {name}`"
+    card = discord.Embed(title="의뢰 명령어", description="명령어를 누르면 입력창이 열립니다.", colour=0xF39C12)
+    card.add_field(name="담당 개발자", value=f"{cmd('account')} 계좌 등록 · {cmd('account-send')} 계좌 안내", inline=False)
+    card.add_field(name="납품과 종료", value=f"{cmd('complete')} 납품 완료 · {cmd('review-request')} 후기 요청\n"
+                   f"{cmd('close')} 티켓 즉시 삭제 · 후기 작성 후 이용을 권장합니다.", inline=False)
+    card.add_field(name="운영진", value=f"{cmd('assign')} 담당 배정 · {cmd('account')} 개발자 계좌 대리 등록", inline=False)
+    card.add_field(name="신청자", value=f"{cmd('review')} 납품 후 별점 작성", inline=False)
+    await interaction.response.send_message(embed=card, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
 class Dialian(discord.Client):
     def __init__(self, settings):
         intents = discord.Intents.none()
@@ -351,6 +368,8 @@ class Dialian(discord.Client):
         self.settings = settings
         self.store = Store(settings.database)
         self.mutation_lock = asyncio.Lock()
+        self.invite_event = InviteEvent(self)
+        self.ddh_command_id = None
         self.operations = Operations(self)
         self.tickets = Tickets(self)
         self.tree = app_commands.CommandTree(self)
@@ -366,11 +385,13 @@ class Dialian(discord.Client):
         await self.store.initialize()
         await backup(self.settings.database)
         self.last_backup_day = datetime.now(timezone.utc).date()
-        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self), ReviewRequestView(self), ReviewReceiptView(self)):
+        for view in (RulesView(self), SupportView(self), TicketActions(self), CommissionActions(self), CommissionEntryView(self), ReviewRequestView(self), ReviewReceiptView(self), InviteEventView(self)):
             self.add_view(view)
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
-        await self.tree.sync(guild=target)
+        self.tree.add_command(commission_help, guild=target)
+        synced = await self.tree.sync(guild=target)
+        self.ddh_command_id = next((c.id for c in synced if c.name == "ddh"), None)
         self.maintenance.start()
 
     async def bootstrap(self, guild):
@@ -427,6 +448,10 @@ class Dialian(discord.Client):
         # no general layout/permission/role restoration or repeated panel repair.
         if await self.store.get(guild.id, "setup_complete", False):
             try:
+                await self.invite_event.tick(guild)
+            except Exception:
+                log.exception("DDH invite event pending; will retry")
+            try:
                 await apply_requested_copy(self, guild)
             except Exception:
                 log.exception("DDH requested copy pending; will retry")
@@ -436,7 +461,10 @@ class Dialian(discord.Client):
                 log.exception("DDH update announcement pending; will retry")
 
     async def on_member_join(self, member):
-        await self.operations.membership(member.guild, member, joined=True)
+        try:
+            await self.invite_event.record_join(member)
+        finally:
+            await self.operations.membership(member.guild, member, joined=True)
 
     async def on_raw_member_remove(self, payload):
         guild = self.get_guild(payload.guild_id)
@@ -471,9 +499,12 @@ class Dialian(discord.Client):
             # Finish only work a member or owner previously requested, such
             # as an interrupted ticket. Do NOT restore channels or policies.
             for name, action in (
+                ("invite event", self.invite_event.tick),
+                ("general chat guide", lambda g: publish_due(self, g, chat=True)),
                 ("ticket recovery", self.tickets.recover),
                 ("requested commission reviews", lambda g: recover_reviews(self, g)),
                 ("owner-requested short copy", lambda g: apply_requested_copy(self, g)),
+                ("ticket close controls", lambda g: refresh_close_controls(self, g)),
                 ("owner-enabled scheduled notice", lambda g: publish_due(self, g)),
                 ("owner-requested update announcement", lambda g: publish_release(self, g)),
             ):

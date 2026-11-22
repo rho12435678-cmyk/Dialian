@@ -33,7 +33,7 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
         # These fixtures represent an installation after the requested copy rollout,
         # with this edition's optional announcement explicitly paused.
         await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
-        await self.bot.store.set(self.guild.id, 'release:1.4.0:enabled', False)
+        await self.bot.store.set(self.guild.id, 'release:1.5.0:enabled', False)
         await provision(self.guild, self.bot.store, self.bot.settings)
         await self.bot.store.set(self.guild.id, 'setup_complete', True)
         self.roles = await roles_for(self.guild, self.bot.store)
@@ -271,7 +271,7 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
                 validate_commission(payload)
         self.assertTrue(CommissionActions(self.bot).is_persistent())
 
-    async def test_workflow_private_account_quote_progress_and_closed_archive(self):
+    async def test_workflow_private_account_quote_progress_and_deletion(self):
         channel = await self.ticket()
         self.assertFalse(channel.permissions_for(self.gfx).view_channel)
         self.assertTrue(channel.permissions_for(self.member).view_channel)
@@ -291,10 +291,7 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.tickets.close(self.guild, channel, self.gfx, '납품 완료 확인')
         saved = await self.bot.store.channel_ticket(self.guild.id, channel.id)
         self.assertEqual(saved['state'], 'closed')
-        self.assertIn(channel, self.guild.channels)
-        self.assertTrue(channel.permissions_for(self.member).view_channel)
-        self.assertFalse(channel.permissions_for(self.member).send_messages)
-        self.assertFalse(channel.permissions_for(self.gfx).send_messages)
+        self.assertNotIn(channel, self.guild.channels)
         with self.assertRaises(UserError):
             await progress(self.bot, self.guild, channel, self.gfx, 'working')
         # Sensitive bank data only exists in the private quote and account table.
@@ -320,10 +317,10 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_support_old_close_buttons_also_reject_requester(self):
         channel = await self.bot.tickets.create(self.guild, self.member, 'feedback', {'제목': '문의', '내용': '테스트'})
         view = TicketActions(self.bot)
-        interaction = SimpleNamespace(guild=self.guild, channel_id=channel.id, user=self.member,
-                                      response=SimpleNamespace(send_modal=AsyncMock()))
+        interaction = SimpleNamespace(guild=self.guild, channel_id=channel.id, channel=channel, user=self.member,
+                                      response=SimpleNamespace(send_modal=AsyncMock(), defer=AsyncMock()))
         with self.assertRaises(UserError):
-            await view.launch(interaction, 'close')
+            await view.close_ticket.callback(interaction)
         interaction.response.send_modal.assert_not_awaited()
         with self.assertRaises(UserError):
             await self.bot.tickets.close(self.guild, channel, self.gfx, '다른 문의는 권한 없음')

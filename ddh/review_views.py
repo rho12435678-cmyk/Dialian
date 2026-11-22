@@ -3,7 +3,7 @@ import discord
 
 from ddh.reviews import eligible_review, review_channel, submit_review
 from ddh.server import UserError, require_guild
-from ddh.views import GuardedView, reply, report_error
+from ddh.views import GuardedView, close_now, reply, report_error
 
 
 async def open_review(bot, interaction):
@@ -32,10 +32,9 @@ class ReviewReceiptView(GuardedView):
         if url:
             self.add_item(discord.ui.Button(label='후기 원문 보기', url=url))
 
-    @discord.ui.button(label='의뢰 종료', custom_id='ddh:review:close:v1', style=discord.ButtonStyle.danger)
+    @discord.ui.button(label='티켓 종료·삭제', custom_id='ddh:review:close:v1', style=discord.ButtonStyle.danger)
     async def close_ticket(self, interaction, button):
-        from ddh.commission_views import open_commission_close
-        await open_commission_close(self.bot, interaction)
+        await close_now(self.bot, interaction, commission_only=True)
 
 
 class ReviewRatingView(GuardedView):

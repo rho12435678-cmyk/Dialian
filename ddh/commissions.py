@@ -189,7 +189,7 @@ async def status_panel(bot, guild, channel, ticket):
         f"**담당 개발자:** {assignee}\n**상태:** {STAGES.get(ticket.get('stage'), STAGES['received'])}\n\n"
         "**담당자·운영진** 계좌 전송 `/ddh account-send` · 납품 완료 `/ddh complete`\n"
         "**신청자** 완료 후 `/ddh review`로 후기 작성\n"
-        "금액·일정은 여기서 협의해 주세요. 담당자·운영진은 `/ddh close`로 종료·보관하세요.")
+        "금액·일정은 여기서 협의해 주세요. 명령어 모음 `/의뢰도움` · `/ddh close` 즉시 채널 삭제")
     assigned_id = ticket.get("assigned_id")
     await upsert_panel(channel, bot.store, f"commission:{ticket['id']}", card, view=CommissionActions(bot),
                        content=f"<@{assigned_id}> · 신청서를 확인하고 손님과 상담을 진행해 주세요." if assigned_id else "담당자 배정 대기",

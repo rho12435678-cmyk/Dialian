@@ -5,7 +5,7 @@ import discord
 
 from ddh.commission_hub import publish_commission_hub
 from ddh.content import publish_guide
-from ddh.commissions import ensure_private
+from ddh.commissions import ensure_private, status_panel
 from ddh.server import UserError, require_guild
 from ddh.tickets import ticket_channel_name
 
@@ -58,3 +58,33 @@ async def apply_requested_copy(bot, guild):
         if complete:
             await bot.store.set(guild.id, COPY_KEY, True)
         return complete
+
+
+async def refresh_close_controls(bot, guild):
+    key = 'ticket-close-controls:1.5.0'
+    if await bot.store.get(guild.id, key, False):
+        return
+    async with bot.mutation_lock:
+        if await bot.store.get(guild.id, key, False):
+            return
+        complete = True
+        for ticket in await bot.store.tickets(guild.id, 'open'):
+            if ticket['kind'] != 'commission':
+                continue
+            message_id = await bot.store.get(guild.id, f"message:commission:{ticket['id']}")
+            if not message_id:
+                continue
+            try:
+                channel = await guild.fetch_channel(ticket['channel_id'])
+                message = await channel.fetch_message(message_id)
+                if (message.author.id == guild.me.id and message.embeds
+                        and '종료·보관' in (message.embeds[0].description or '')):
+                    await ensure_private(bot, guild, channel, ticket)
+                    await status_panel(bot, guild, channel, ticket)
+            except discord.NotFound:
+                continue
+            except (discord.HTTPException, UserError) as error:
+                log.warning('DDH close controls pending for %s: %s', ticket['id'], error)
+                complete = False
+        if complete:
+            await bot.store.set(guild.id, key, True)

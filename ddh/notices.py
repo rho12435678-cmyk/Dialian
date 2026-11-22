@@ -1,5 +1,5 @@
 """KST reminders with a durable ledger and Discord-side crash recovery."""
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 import discord
@@ -19,24 +19,28 @@ def due_date(now, setup_date, hour, interval):
     return local.date()
 
 
-async def publish_due(bot, guild, now=None):
+async def publish_due(bot, guild, now=None, *, chat=False):
     require_guild(guild, bot.settings)
     if not await bot.store.get(guild.id, "setup_complete", False):
         return False
-    if not await bot.store.get(guild.id, OWNER_NOTICES_KEY, False):
-        return False
-    started = await bot.store.get(guild.id, "setup_at")
-    if not started:
-        return False
-    day = due_date(now or datetime.now(timezone.utc), datetime.fromisoformat(started).astimezone(KST).date(),
-                   bot.settings.notice_hour, bot.settings.notice_interval_days)
+    now = now or datetime.now(timezone.utc)
+    if chat:
+        day = due_date(now, date(2026, 11, 22), 18, 2)
+    else:
+        if not await bot.store.get(guild.id, OWNER_NOTICES_KEY, False):
+            return False
+        started = await bot.store.get(guild.id, "setup_at")
+        if not started:
+            return False
+        day = due_date(now, datetime.fromisoformat(started).astimezone(KST).date(),
+                       bot.settings.notice_hour, bot.settings.notice_interval_days)
     if day is None:
         return False
     async with bot.mutation_lock:
-        key = f"notice:{day.isoformat()}"
+        key = f"chat-guide:{day.isoformat()}" if chat else f"notice:{day.isoformat()}"
         if await bot.store.get(guild.id, key):
             return False
-        channel = await channel_for(guild, bot.store, "announcements")
+        channel = await channel_for(guild, bot.store, "general" if chat else "announcements")
         marker = f"DDH:{key}:v1"
         # A send may have succeeded just before the process/DB failed.
         async for message in channel.history(limit=None, after=datetime.combine(day, time.min, KST)):

@@ -30,7 +30,7 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         # These fixtures represent an installation after the requested copy rollout,
         # with this edition's optional announcement explicitly paused.
         await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
-        await self.bot.store.set(self.guild.id, 'release:1.4.0:enabled', False)
+        await self.bot.store.set(self.guild.id, 'release:1.5.0:enabled', False)
         await provision(self.guild, self.bot.store, self.bot.settings)
         await self.bot.store.set(self.guild.id, 'setup_complete', True)
         self.roles = await roles_for(self.guild, self.bot.store)
@@ -156,19 +156,19 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.bot.store.get(self.guild.id, 'category:commissions'), self.category.id)
         self.assertEqual({key: value for key, value in self.snapshot()[0].items() if key != reviews.id}, before[0])
 
-    async def test_completed_customer_review_survives_closed_readonly_ticket(self):
+    async def test_published_customer_review_survives_channel_deletion(self):
         reviews = await configure_reviews(self.bot, self.guild)
         channel = await self.delivered()
         prompt = next(m for m in channel.messages if isinstance(m.view, ReviewRequestView))
         self.assertTrue(prompt.view.is_persistent())
-        await self.bot.tickets.close(self.guild, channel, self.dev, '완료')
-        self.assertFalse(channel.permissions_for(self.customer).send_messages)
         result = await submit_review(self.bot, self.guild, channel, self.customer, 4, '정성스러운 작업이었습니다.')
         self.assertTrue(result['published_at'])
         card = reviews.messages[0].embeds[0]
         self.assertIn('4/5', card.title)
-        self.assertIn('GFX', card.description)
-        self.assertIn(f'<@{self.dev.id}>', card.description)
+        self.assertIn('GFX', card.title)
+        self.assertIn(f'<@{self.dev.id}>', card.fields[1].value)
+        await self.bot.tickets.close(self.guild, channel, self.dev)
+        self.assertNotIn(channel, self.guild.channels)
         self.assertNotIn('private brief', str(card.to_dict()))
         self.assertEqual(len([m for m in channel.messages if isinstance(m.view, ReviewRequestView)]), 1)
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))['state'], 'closed')
@@ -188,11 +188,11 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         receipt = receipts[0]
         self.assertIn(f"<@{self.dev.id}>", receipt.content)
         self.assertIn('5/5점', receipt.embeds[0].description)
-        self.assertIn(f"<@{self.customer.id}>", reviews.messages[0].embeds[0].description)
+        self.assertIn(f"<@{self.customer.id}>", reviews.messages[0].embeds[0].fields[0].value)
         self.assertIn(str(reviews.messages[0].id), receipt.view.children[-1].url)
         self.assertFalse(receipt.view.close_ticket.disabled)
 
-    async def test_command_close_archives_only_after_authorized_confirmation(self):
+    async def test_command_close_deletes_immediately_only_when_authorized(self):
         cmds = DDHCommands(self.bot)
         channel = await self.ticket()
         self.assertEqual(channel.name, 'gfx-0001')
@@ -205,14 +205,10 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
                 await cmds.close_commission.callback(cmds, interaction)
         interaction.user = self.dev
         await cmds.close_commission.callback(cmds, interaction)
-        modal = interaction.response.send_modal.await_args.args[0]
-        self.assertEqual((await self.bot.tickets.current(self.guild, channel.id))['state'], 'open')
-        modal.reason._value = '작업 완료 확인'
-        await modal.on_submit(interaction)
-        self.assertEqual(channel.name, '종료-gfx-0001')
-        self.assertFalse(channel.permissions_for(self.customer).send_messages)
-        self.assertTrue(channel.permissions_for(self.customer).view_channel)
-        self.assertFalse(channel.permissions_for(self.other).view_channel)
+        interaction.response.send_modal.assert_not_awaited()
+        self.assertNotIn(channel, self.guild.channels)
+        row = await self.bot.store.channel_ticket(self.guild.id, channel.id)
+        self.assertEqual((row['state'], row['closed_by'], row['close_reason']), ('closed', self.dev.id, None))
 
     async def test_delivery_and_resend_commands_respect_assignment(self):
         await configure_reviews(self.bot, self.guild)
@@ -307,13 +303,13 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         await recover_reviews(self.bot, self.guild)
         self.assertEqual(len([m for m in reviews.messages if m.embeds]), 1)
 
-    async def test_missing_review_channel_does_not_block_delivery_or_close_and_prompt_recovers(self):
+    async def test_missing_review_channel_does_not_block_delivery_or_close_or_queue_a_prompt_to_a_deleted_channel(self):
         channel = await self.delivered()
         await self.bot.tickets.close(self.guild, channel, self.dev, '완료')
         self.assertEqual((await self.bot.store.channel_ticket(self.guild.id, channel.id))['state'], 'closed')
         await configure_reviews(self.bot, self.guild)
         await recover_reviews(self.bot, self.guild)
-        self.assertEqual(len([m for m in channel.messages if isinstance(m.view, ReviewRequestView)]), 1)
+        self.assertEqual(await self.bot.store.pending_reviews(self.guild.id), [])
 
     async def test_stale_review_modal_and_revoked_membership_are_rejected(self):
         await configure_reviews(self.bot, self.guild)

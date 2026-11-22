@@ -214,9 +214,24 @@ class TicketModal(discord.ui.Modal):
         await report_error(interaction, error)
 
 
+async def close_now(bot, interaction, *, commission_only=False):
+    require_guild(interaction.guild, bot.settings)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    if commission_only:
+        ticket = await bot.tickets.current(interaction.guild, interaction.channel_id)
+        if ticket["kind"] != "commission":
+            raise UserError("진행 중인 개발 의뢰 티켓에서 실행해 주세요.")
+    await bot.tickets.close(interaction.guild, interaction.channel, interaction.user)
+    # The source channel is gone. Discord may already have discarded the token.
+    try:
+        await reply(interaction, "티켓 채널을 삭제했습니다.")
+    except discord.NotFound:
+        pass
+
+
 class DecisionModal(discord.ui.Modal):
     def __init__(self, bot, action, channel_id):
-        super().__init__(title={"approve": "신청 승인", "reject": "신청 반려", "close": "티켓 종료"}[action], timeout=300)
+        super().__init__(title={"approve": "신청 승인", "reject": "신청 반려"}[action], timeout=300)
         self.bot, self.action, self.channel_id = bot, action, channel_id
         self.reason = discord.ui.TextInput(label="처리 사유", style=discord.TextStyle.paragraph, max_length=500)
         self.add_item(self.reason)
@@ -228,13 +243,9 @@ class DecisionModal(discord.ui.Modal):
         if not self.reason.value.strip():
             raise UserError("처리 사유를 입력해 주세요.")
         await interaction.response.defer(ephemeral=True, thinking=True)
-        if self.action == "close":
-            await self.bot.tickets.close(interaction.guild, interaction.channel, interaction.user, self.reason.value.strip())
-            await reply(interaction, "처리 결과를 기록하고 티켓 채널을 종료했습니다.")
-        else:
-            label = await self.bot.tickets.review(interaction.guild, interaction.channel, interaction.user,
-                                                  self.action == "approve", self.reason.value.strip())
-            await reply(interaction, f"신청을 {label}했습니다.")
+        label = await self.bot.tickets.review(interaction.guild, interaction.channel, interaction.user,
+                                              self.action == "approve", self.reason.value.strip())
+        await reply(interaction, f"신청을 {label}했습니다.")
 
     async def on_error(self, interaction, error):
         await report_error(interaction, error)
@@ -244,13 +255,10 @@ class TicketActions(GuardedView):
     async def launch(self, interaction, action):
         ticket = await self.bot.tickets.current(interaction.guild, interaction.channel_id)
         staff = await is_staff(interaction.user, self.bot.store)
-        if action != "close" and not staff:
+        if not staff:
             raise UserError("운영진만 신청을 심사할 수 있습니다.")
-        if action == "close":
-            from ddh.commissions import manager
-            await manager(self.bot, interaction.guild, interaction.user, ticket)
         eligible = ticket["decision"] == "pending" or (action == "approve" and ticket["decision"] == "approving")
-        if action != "close" and (ticket["kind"] not in ("partner", "developer") or not eligible):
+        if ticket["kind"] not in ("partner", "developer") or not eligible:
             raise UserError("심사 대상이 아니거나 이미 처리된 신청입니다.")
         await interaction.response.send_modal(DecisionModal(self.bot, action, interaction.channel_id))
 
@@ -262,7 +270,7 @@ class TicketActions(GuardedView):
     async def reject(self, interaction, button):
         await self.launch(interaction, "reject")
 
-    @discord.ui.button(label="티켓 종료", style=discord.ButtonStyle.danger, custom_id="ddh:close:v1")
+    @discord.ui.button(label="티켓 종료·삭제", style=discord.ButtonStyle.danger, custom_id="ddh:close:v1")
     async def close_ticket(self, interaction, button):
-        await self.launch(interaction, "close")
+        await close_now(self.bot, interaction)
 
