@@ -13,7 +13,8 @@ from pathlib import Path
 import discord
 
 from ddh import __version__
-from ddh.server import channel_for, require_guild
+from ddh.clients import client_role
+from ddh.server import UserError, channel_for, require_guild, roles_for
 
 log = logging.getLogger(__name__)
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -50,14 +51,20 @@ def deployed_revision():
 def release_embed(previous=None, revision=None, member_role=None, marker=None):
     """Reviewed user-facing benefits, not guessed Git changes or speed claims."""
     card = discord.Embed(
-        title=f"Dialian v{RELEASE_ID} · 의뢰와 초대 이벤트",
-        description="의뢰 처리와 신규 멤버 안내가 바뀌었습니다.", colour=0xF39C12, timestamp=datetime.now(timezone.utc),
+        title=f"Dialian v{RELEASE_ID} · 의뢰 후기와 초대 이벤트",
+        description=(f"{member_role.mention}\n" if member_role else "") +
+                    "의뢰를 마친 분들을 위한 역할이 생겼습니다. 이번 DDH 변경 사항을 확인해 주세요.",
+        colour=0xF39C12, timestamp=datetime.now(timezone.utc),
     )
     changes = (
-        ("의뢰 명령어 모음", "`/의뢰도움`을 열고 배정·계좌·납품·후기 명령을 바로 선택하세요."),
-        ("별점 후기", "공개 후기에 의뢰 번호, 분야, 신청자와 담당자를 표시합니다. 납품 후 `/ddh review-request`로 후기를 요청하세요."),
-        ("티켓 종료", "운영진과 담당자는 종료 버튼 또는 `/ddh close`로 채널을 즉시 삭제합니다. 필요한 자료와 후기를 먼저 확인하세요."),
-        ("신규 멤버 안내", "격일 오후 6시(한국 시간)에 일반 채팅에서 서버 이용 가이드를 볼 수 있습니다."),
+        ("⭐ 후기를 남기면 의뢰자 역할 지급", "납품 후 신청자가 후기 버튼이나 `/ddh review`로 1~5점을 남기면 "
+         "**의뢰자** 역할을 받습니다. 이전에 후기를 남긴 인증 멤버에게도 순차 지급합니다."),
+        ("🧾 후기 확인과 티켓 종료", "후기 채널에서 분야·신청자·담당자·별점을 확인하세요. 티켓에도 후기 링크가 뜹니다. "
+         "운영진은 문의·의뢰 티켓을, 담당 개발자는 자기 의뢰 티켓을 빨간 종료 버튼이나 `/ddh close`로 즉시 삭제할 수 있습니다."),
+        ("🛠️ 의뢰 명령어", "`/의뢰도움`에서 배정·계좌·납품 명령을 찾아보세요. 납품 후 `/ddh review-request`로 후기 버튼을 다시 보낼 수 있습니다."),
+        ("🎁 4주 초대 이벤트", "이벤트 채널에서 개인 초대 링크·순위·남은 시간을 확인하세요. 유효한 신규 초대 순위에 따라 "
+         "GFX 제작권을 **1위 5개 · 2위 4개 · 3위 3개** 드립니다. 이벤트 초대로 서버 인원이 150명에 도달하면 각 1개 추가! 마감 때 최종 순위를 안내합니다."),
+        ("📖 신규 멤버 가이드", "격일 오후 6시(한국 시간), 일반 채팅에 주요 채널과 역할을 소개합니다."),
     )
     for name, value in changes:
         card.add_field(name=name, value=value, inline=False)
@@ -110,7 +117,7 @@ async def redact_legacy_release_links(bot, guild):
 
 
 async def publish_release(bot, guild):
-    """Post this owner-authorized edition once, without a member-role ping."""
+    """Post this owner-authorized edition once, notifying only the verified member role."""
     require_guild(guild, bot.settings)
     if not release_announcements_allowed() or not await bot.store.get(guild.id, 'setup_complete', False):
         return False
@@ -130,7 +137,15 @@ async def publish_release(bot, guild):
             if message.author.id == guild.me.id and any(card.footer.text == marker for card in message.embeds):
                 await bot.store.set(guild.id, RELEASE_SENT_KEY, message.id)
                 return False
-        message = await channel.send(embed=release_embed(marker=marker), allowed_mentions=discord.AllowedMentions.none())
+        member = (await roles_for(guild, bot.store, keys=('member',)))['member']
+        if member.is_default() or member.managed:
+            raise UserError('업데이트를 받을 멤버 역할 설정을 확인해 주세요.')
+        if not (member.mentionable or channel.permissions_for(guild.me).mention_everyone):
+            raise UserError('업데이트 채널에서 Dialian에 멤버 역할 멘션 권한이 필요합니다.')
+        async with bot.mutation_lock:
+            await client_role(bot, guild)
+        message = await channel.send(content=member.mention, embed=release_embed(member_role=member, marker=marker),
+            allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[member], replied_user=False))
         await bot.store.set(guild.id, RELEASE_SENT_KEY, message.id)
         log.info('DDH release %s sent to updates channel', RELEASE_ID)
         return True

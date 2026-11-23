@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import discord
 
 from ddh.blueprint import FIELDS
+from ddh.clients import grant_client
 from ddh.commissions import ensure_private, manager
 from ddh.content import embed
 from ddh.server import UserError, require_guild
@@ -120,7 +121,7 @@ async def deliver_prompt(bot, guild, channel, row, *, resend=False):
     card = embed('⭐ 납품 완료 · 별점 후기',
         f"<@{row['owner_id']}>님, 작업에 대한 1~5점 별점과 후기를 남겨 주세요.\n"
         '버튼 또는 `/ddh review`로 작성 · 의뢰당 1회 · 선택 사항\n'
-        '별점·후기는 후기 채널에 공개됩니다. 계좌·개인정보는 적지 마세요.')
+        '작성하면 의뢰자 역할을 받습니다. 별점·후기는 후기 채널에 공개됩니다. 계좌·개인정보는 적지 마세요.')
     view = ReviewRequestView(bot)
     if resend:
         await channel.send(embed=card, view=view, allowed_mentions=discord.AllowedMentions.none())
@@ -237,6 +238,8 @@ async def submit_review(bot, guild, channel, actor, rating, body, *, developer_i
         if row['rating'] is None:
             await bot.store.submit_review(guild.id, ticket['id'], rating, body.strip(), destination.id)
             row = await bot.store.commission_review(guild.id, ticket['id'])
+        if await bot.store.pending_clients(guild.id, owner_id=ticket['owner_id']):
+            await grant_client(bot, guild, ticket['owner_id'])
         try:
             return await deliver_review(bot, guild, row)
         except discord.HTTPException:
@@ -247,6 +250,8 @@ async def submit_review(bot, guild, channel, actor, rating, body, *, developer_i
 async def recover_reviews(bot, guild):
     require_guild(guild, bot.settings)
     async with bot.mutation_lock:
+        for owner_id in await bot.store.pending_clients(guild.id):
+            await grant_client(bot, guild, owner_id)
         for row in await bot.store.pending_reviews(guild.id):
             try:
                 if row['rating'] is not None:
