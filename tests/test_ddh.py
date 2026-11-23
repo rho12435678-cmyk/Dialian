@@ -49,7 +49,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         # These fixtures represent an installation after the requested copy rollout,
         # with this edition's optional announcement explicitly paused.
         await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
-        await self.bot.store.set(self.guild.id, 'release:1.5.0:enabled', False)
+        await self.bot.store.set(self.guild.id, 'release:1.5.1:enabled', False)
         await provision(self.guild, self.bot.store, self.settings)
         await self.bot.store.set(self.guild.id, "setup_complete", True)
         await self.bot.store.set(self.guild.id, "setup_at", "2026-11-12T00:00:00+00:00")
@@ -1062,7 +1062,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(ticket, discord.TextChannel)
         self.assertFalse(ticket.permissions_for(self.visitor).view_channel)
 
-    async def test_update_release_announces_once_per_edition_without_ping(self):
+    async def test_update_release_announces_once_per_edition_with_member_ping(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         self.bot.release_sha = '1' * 40
         channel = await self.channel('updates')
@@ -1071,8 +1071,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.bot.release_sha = '2' * 40
         self.assertFalse(await publish_release(self.bot, self.guild))
         self.assertEqual(len(channel.messages), 1)
-        self.assertEqual(channel.messages[0].content, None)
-        self.assertEqual(send.call_args.kwargs['allowed_mentions'].to_dict()['parse'], [])
+        member = (await roles_for(self.guild, self.bot.store))['member']
+        self.assertEqual(channel.messages[0].content, member.mention)
+        self.assertTrue(channel.messages[0].embeds[0].description.startswith(member.mention))
+        self.assertEqual(send.call_args.kwargs['allowed_mentions'].to_dict(), {'parse': [], 'roles': [member.id]})
         self.assertNotIn(self.bot.release_sha, str(channel.messages[0].embeds[0].to_dict()))
 
     async def test_release_recovers_without_duplicate_when_db_save_fails(self):
@@ -1142,10 +1144,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.on_ready()
         channel = await self.channel("updates")
         self.assertEqual(len(channel.messages), 1)
-        self.assertIsNone(channel.messages[0].content)
+        self.assertEqual(channel.messages[0].content, self.roles['member'].mention)
 
     @patch("ddh.updates.RELEASE_ANNOUNCEMENTS_ALLOWED", True)
-    async def test_update_role_ping_permission_fixed_without_changing_member_perms(self):
+    async def test_update_waits_for_ping_permission_without_changing_member_perms(self):
         await self.bot.store.set(self.guild.id, RELEASE_NOTICES_KEY, True)
         channel = await self.channel("updates")
         denied = channel.overwrites_for(self.guild.me)
@@ -1155,7 +1157,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         # The fake bot role has Administrator; override the effective check to
         # exercise the real Discord bot role's permission-repair branch.
         with patch.object(channel, "permissions_for", return_value=discord.Permissions.none()):
-            self.assertTrue(await publish_release(self.bot, self.guild))
+            with self.assertRaisesRegex(UserError, '멘션 권한'):
+                await publish_release(self.bot, self.guild)
+        self.assertEqual(channel.messages, [])
+        self.assertTrue(await publish_release(self.bot, self.guild))
         self.assertFalse(channel.overwrites_for(self.guild.me).mention_everyone)
         self.assertFalse(channel.permissions_for(self.member).mention_everyone)
 

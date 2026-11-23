@@ -87,6 +87,12 @@ class Store:
                 rating INTEGER CHECK(rating BETWEEN 1 AND 5), body TEXT,
                 submitted_at TEXT, channel_id INTEGER, message_id INTEGER, published_at TEXT,
                 PRIMARY KEY(guild_id,ticket_id))""")
+            await db.execute("""CREATE TABLE IF NOT EXISTS commission_clients (
+                guild_id INTEGER NOT NULL, owner_id INTEGER NOT NULL, retry_at INTEGER DEFAULT 0,
+                PRIMARY KEY(guild_id,owner_id))""")
+            await db.execute("""INSERT OR IGNORE INTO commission_clients (guild_id,owner_id)
+                SELECT DISTINCT guild_id,owner_id FROM commission_reviews
+                WHERE submitted_at IS NOT NULL AND rating BETWEEN 1 AND 5""")
             review_columns = {row[1] for row in await (await db.execute('PRAGMA table_info(commission_reviews)')).fetchall()}
             if 'receipt_at' not in review_columns:
                 await db.execute('ALTER TABLE commission_reviews ADD COLUMN receipt_at TEXT')
@@ -210,8 +216,25 @@ class Store:
                 SET rating=?,body=?,submitted_at=?,channel_id=?
                 WHERE guild_id=? AND ticket_id=? AND rating IS NULL""",
                 (rating, body, utcnow(), channel_id, guild_id, ticket_id))
+            if cursor.rowcount:
+                await db.execute("""INSERT OR IGNORE INTO commission_clients (guild_id,owner_id)
+                    SELECT guild_id,owner_id FROM commission_reviews WHERE guild_id=? AND ticket_id=?""",
+                    (guild_id, ticket_id))
             await db.commit()
             return cursor.rowcount == 1
+
+    async def pending_clients(self, guild_id, *, owner_id=None):
+        async with self.connect() as db:
+            rows = await (await db.execute("""SELECT owner_id FROM commission_clients
+                WHERE guild_id=? AND retry_at <= unixepoch() AND (? IS NULL OR owner_id=?)
+                ORDER BY retry_at,owner_id LIMIT 20""", (guild_id, owner_id, owner_id))).fetchall()
+        return [row[0] for row in rows]
+
+    async def client_result(self, guild_id, owner_id, *, retry_at):
+        async with self.connect() as db:
+            await db.execute("""UPDATE commission_clients SET retry_at=?
+                WHERE guild_id=? AND owner_id=? AND retry_at IS NOT NULL""", (retry_at, guild_id, owner_id))
+            await db.commit()
 
     async def mark_review(self, guild_id, ticket_id, *, message_id=None):
         async with self.connect() as db:

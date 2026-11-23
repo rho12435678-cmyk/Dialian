@@ -30,7 +30,7 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         # These fixtures represent an installation after the requested copy rollout,
         # with this edition's optional announcement explicitly paused.
         await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
-        await self.bot.store.set(self.guild.id, 'release:1.5.0:enabled', False)
+        await self.bot.store.set(self.guild.id, 'release:1.5.1:enabled', False)
         await provision(self.guild, self.bot.store, self.bot.settings)
         await self.bot.store.set(self.guild.id, 'setup_complete', True)
         self.roles = await roles_for(self.guild, self.bot.store)
@@ -270,6 +270,54 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('@everyone', reviews.messages[0].embeds[0].description)
         again = await submit_review(self.bot, self.guild, channel, self.customer, 5, '변경 불가')
         self.assertEqual(again['rating'], 3)
+
+    async def test_client_role_only_once_for_owner_even_after_manual_removal(self):
+        await configure_reviews(self.bot, self.guild)
+        channel = await self.delivered()
+        await submit_review(self.bot, self.guild, channel, self.customer, 1, '')
+        role = self.guild.get_role(await self.bot.store.get(self.guild.id, 'role:client'))
+        self.assertEqual((role.name, role.permissions.value), ('의뢰자', 0))
+        self.assertIn(role, self.customer.roles)
+        self.assertNotIn(role, self.dev.roles)
+        await self.customer.remove_roles(role)
+        await submit_review(self.bot, self.guild, channel, self.customer, 5, '중복 제출')
+        await self.bot.store.initialize()
+        await recover_reviews(self.bot, self.guild)
+        self.assertNotIn(role, self.customer.roles)
+
+    async def test_role_failure_retries_after_channel_deletion_and_restart(self):
+        reviews = await configure_reviews(self.bot, self.guild)
+        channel = await self.delivered()
+        # A same-name role with private-channel access cannot be auto-granted.
+        role = self.guild.make_role('의뢰자')
+        await channel.set_permissions(role, overwrite=discord.PermissionOverwrite(manage_messages=True))
+        await submit_review(self.bot, self.guild, channel, self.customer, 4, '')
+        self.assertEqual(len(reviews.messages), 1)
+        self.assertNotIn(role, self.customer.roles)
+        await self.bot.tickets.close(self.guild, channel, self.dev, '완료')
+        await self.bot.store.client_result(self.guild.id, self.customer.id, retry_at=0)
+        await self.bot.store.initialize()
+        await recover_reviews(self.bot, self.guild)
+        self.assertIn(role, self.customer.roles)
+        self.assertEqual(len(reviews.messages), 1)
+
+    async def test_existing_reviews_backfill_only_after_verification(self):
+        await configure_reviews(self.bot, self.guild)
+        channel = await self.delivered()
+        ticket = await self.bot.store.channel_ticket(self.guild.id, channel.id)
+        reviews_id = await self.bot.store.get(self.guild.id, 'channel:commission_reviews')
+        await self.bot.store.submit_review(self.guild.id, ticket['id'], 3, '', reviews_id)
+        async with self.bot.store.connect() as db:
+            await db.execute('DROP TABLE commission_clients')
+            await db.commit()
+        await self.customer.remove_roles(self.roles['member'])
+        await self.bot.store.initialize()
+        await recover_reviews(self.bot, self.guild)
+        self.assertNotIn('의뢰자', [r.name for r in self.customer.roles])
+        await self.customer.add_roles(self.roles['member'])
+        await self.bot.store.client_result(self.guild.id, self.customer.id, retry_at=0)
+        await recover_reviews(self.bot, self.guild)
+        self.assertIn('의뢰자', [r.name for r in self.customer.roles])
 
     async def test_delivery_failure_retries_after_restart_without_touching_permissions(self):
         reviews = await configure_reviews(self.bot, self.guild)

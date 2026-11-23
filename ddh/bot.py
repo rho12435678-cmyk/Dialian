@@ -299,7 +299,7 @@ class DDHCommands(app_commands.Group):
         await reply(interaction, f"자동 공지 {'켜짐' if enabled else '꺼짐'} · "
                     f"한국 시간 {self.bot.settings.notice_hour}시 / {self.bot.settings.notice_interval_days}일 간격")
 
-    @app_commands.command(name="updates", description="이번 업데이트 공지 자동 게시 켜기·끄기 (전체 멘션 없음)")
+    @app_commands.command(name="updates", description="이번 업데이트 공지 자동 게시 켜기·끄기 (멤버 역할 1회 멘션)")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def updates(self, interaction: discord.Interaction, enabled: bool):
@@ -310,7 +310,7 @@ class DDHCommands(app_commands.Group):
         async with self.bot.update_lock:
             await self.bot.store.set(interaction.guild.id, RELEASE_NOTICES_KEY, enabled)
         await reply(interaction, (
-            "이번 업데이트 자동 공지를 켰습니다. 아직 게시하지 않았다면 한 번 공지합니다. 전체 멘션은 없습니다."
+            "이번 업데이트 자동 공지를 켰습니다. 아직 게시하지 않았다면 한 번 공지합니다. 멤버 역할을 멘션합니다."
             if enabled else "이번 업데이트 자동 공지를 껐습니다. 재시작 후에도 유지됩니다."
         ))
 
@@ -337,7 +337,7 @@ class DDHCommands(app_commands.Group):
                 details += f"\n최근 인증 오류: {verification_error}"
         await reply(interaction, f"Dialian · DDH v{__version__}\n서버 구성: {'완료' if ready else '미완료'}\n보안 설정: {'완료' if security else '미완료'}{details}\n"
                     f"공지형식: {'커뮤니티 활성화 필요' if news_pending else '설정 완료'}\n"
-                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n이번 업데이트 공지: {'켜짐' if updates else '꺼짐'} · 전체 멘션 없음\n시작 시각: {self.bot.started_at}\n"
+                    f"정기 안내: {'켜짐' if notices else '꺼짐'}\n이번 업데이트 공지: {'켜짐' if updates else '꺼짐'} · 멤버 역할 1회 멘션\n시작 시각: {self.bot.started_at}\n"
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
