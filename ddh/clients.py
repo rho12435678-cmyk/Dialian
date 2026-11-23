@@ -24,8 +24,20 @@ async def client_role(bot, guild):
     if (role.is_default() or role.managed or role.permissions.value or role >= guild.me.top_role
             or not guild.me.guild_permissions.manage_roles):
         raise UserError('의뢰자 역할은 권한이 없는 일반 역할이어야 하며 Dialian이 지급할 수 있어야 합니다.')
-    if any(channel.overwrites_for(role).pair()[0].value for channel in guild.channels):
-        raise UserError('의뢰자 역할에 설정된 채널별 권한 허용을 확인해 주세요.')
+    member_role = guild.get_role(await bot.store.get(guild.id, 'role:member', 0))
+    for channel in guild.channels:
+        allow, _ = channel.overwrites_for(role).pair()
+        if not allow.value:
+            continue
+        # Owner-run provisioning puts public read-only overrides on every
+        # role. Those are harmless where @everyone can already view history.
+        public = channel.permissions_for(guild.default_role)
+        if public.view_channel:
+            allow.view_channel = False
+        if public.read_message_history or (member_role and channel.permissions_for(member_role).read_message_history):
+            allow.read_message_history = False
+        if allow.value:
+            raise UserError('의뢰자 역할에 별도 채널 접근 또는 작업 권한이 있습니다.')
     if role_id != role.id:
         await bot.store.set(guild.id, 'role:client', role.id)
     return role

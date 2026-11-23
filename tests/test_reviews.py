@@ -10,6 +10,7 @@ import discord
 from config import Settings
 from ddh.bot import DDHCommands, Dialian
 from ddh.blueprint import FIELDS, access
+from ddh.clients import client_role
 from ddh.commissions import assign, form_labels, progress, quote, remove_account, save_account, send_account
 from ddh.commission_views import AccountModal
 from ddh.reviews import configure_reviews, eligible_review, recover_reviews, submit_review
@@ -279,6 +280,10 @@ class AccountReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((role.name, role.permissions.value), ('의뢰자', 0))
         self.assertIn(role, self.customer.roles)
         self.assertNotIn(role, self.dev.roles)
+        # Existing read-only announcement overwrites must survive owner-run setup.
+        news = self.guild.get_channel(await self.bot.store.get(self.guild.id, 'channel:announcements'))
+        await news.set_permissions(role, overwrite=discord.PermissionOverwrite(view_channel=True, read_message_history=True))
+        self.assertEqual(await client_role(self.bot, self.guild), role)
         await self.customer.remove_roles(role)
         await submit_review(self.bot, self.guild, channel, self.customer, 5, '중복 제출')
         await self.bot.store.initialize()
