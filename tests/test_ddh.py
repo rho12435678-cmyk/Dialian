@@ -49,7 +49,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         # These fixtures represent an installation after the requested copy rollout,
         # with this edition's optional announcement explicitly paused.
         await self.bot.store.set(self.guild.id, 'requested-copy:1.4.0', True)
-        await self.bot.store.set(self.guild.id, 'release:1.5.1:enabled', False)
+        await self.bot.store.set(self.guild.id, 'release:1.5.2:enabled', False)
         await provision(self.guild, self.bot.store, self.settings)
         await self.bot.store.set(self.guild.id, "setup_complete", True)
         await self.bot.store.set(self.guild.id, "setup_at", "2026-11-12T00:00:00+00:00")
@@ -1485,7 +1485,7 @@ class PureTests(unittest.TestCase):
         self.assertNotIn("rho12435678", visible)
         self.assertNotIn("https://", visible)
         self.assertNotIn(revision, visible)
-        self.assertIn("/ddh review-request", visible)
+        self.assertIn("총 3명", visible)
 
     def test_release_notes_never_repeat_untrusted_commit_messages(self):
         revision = "4" * 40
