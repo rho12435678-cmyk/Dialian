@@ -17,11 +17,16 @@ class StatusTests(unittest.TestCase):
             with sqlite3.connect(path) as db:
                 db.execute('CREATE TABLE settings (guild_id INTEGER, key TEXT, value TEXT)')
                 db.execute('INSERT INTO settings VALUES (1, ?, ?)',
-                           ('event:invite:2026-11-22', json.dumps(dict(scores={'3': 3}, links={'secret': '3'}))))
+                           ('event:invite:2026-11-22', json.dumps(dict(
+                               start=10, scores={'3': 3}, links={'secret': '3'}, uses={'secret': [5, None]}))))
             before = path.read_bytes()
             result = inspect(path, 1)
             self.assertEqual(result['awarded_total'], 3)
             self.assertEqual(result['tracking_status'], 'legacy_no_diagnostics')
             self.assertEqual(inspect(path, 2), {'event': 'not_initialized'})
+            linked = inspect(path, 1, link='secret')
+            self.assertEqual(linked['link']['last_observed_uses'], 5)
+            self.assertEqual(linked['inviter']['confirmed'], 3)
+            self.assertNotIn('secret', json.dumps(linked))
             self.assertEqual(before, path.read_bytes())
             self.assertNotIn('secret', json.dumps(result))

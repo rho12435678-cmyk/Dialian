@@ -341,6 +341,20 @@ class DDHCommands(app_commands.Group):
                     "문의는 문의·신청 패널을 이용해 주세요.")
 
 
+@app_commands.command(name="초대복구", description="서버 소유자가 확인한 초대 총점을 미리보기 또는 반영")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.describe(inviter="초대한 멤버", total="이미 집계된 점수까지 포함한 확정 총점",
+                       evidence="확인한 입장 기록과 사용 링크 근거", apply="True일 때만 반영")
+async def invite_recover(interaction: discord.Interaction, inviter: discord.Member,
+                         total: app_commands.Range[int, 1, 100000], evidence: app_commands.Range[str, 1, 500],
+                         apply: bool = False):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    before, after = await interaction.client.invite_event.recover_total(
+        interaction.guild, interaction.user, inviter, total, evidence, apply=apply)
+    await reply(interaction, f'{"반영 결과" if apply else "미리보기"} · {before}명 → {after}명')
+
+
 @app_commands.command(name="의뢰도움", description="눌러서 쓰는 의뢰 명령어 모음 · 개발자·운영진·신청자")
 @app_commands.guild_only()
 async def commission_help(interaction: discord.Interaction):
@@ -390,6 +404,7 @@ class Dialian(discord.Client):
         target = discord.Object(id=self.settings.guild_id)
         self.tree.add_command(DDHCommands(self), guild=target)
         self.tree.add_command(commission_help, guild=target)
+        self.tree.add_command(invite_recover, guild=target)
         synced = await self.tree.sync(guild=target)
         self.ddh_command_id = next((c.id for c in synced if c.name == "ddh"), None)
         self.maintenance.start()

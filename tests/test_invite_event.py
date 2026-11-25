@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from config import Settings
 from ddh.bot import Dialian
-from ddh.invite_event import CAMPAIGN_GUILD, KEY, InviteEvent, event_card, standings, tally
+from ddh.invite_event import CAMPAIGN_GUILD, KEY, InviteEvent, event_card, recover_observations, standings, tally
 from ddh.notices import KST, publish_due
 from ddh.server import provision
 from fakes import Guild
@@ -37,6 +37,24 @@ class InviteScoreTests(unittest.TestCase):
         members = dict(members, **{'9': [28, False], '11': [29, False]})
         tally(s, members, {'a': [2, '1'], 'b': [2, '2']}, 30)
         self.assertEqual(s['scores'], {'1': 1, '2': 1})
+
+    def test_recover_guaranteed_part_of_old_mixed_window_once(self):
+        s = self.state()
+        s.update(unresolved_total=5, recent_observations=[dict(
+            at=20, arrivals=[['8', 15, False], *[[str(i), 15, False] for i in range(9, 14)]],
+            eligible=[str(i) for i in range(9, 14)], changes={'1': 5, '2': 1},
+            awarded=0, unresolved=5)])
+        self.assertEqual(recover_observations(s), 4)
+        self.assertEqual(s['scores'], {'1': 4})
+        self.assertEqual(s['unresolved_total'], 1)
+        self.assertEqual(recover_observations(s), 0)
+        self.assertEqual(s['scores'], {'1': 4})
+
+    def test_newly_joined_inviter_can_invite_other_members_in_same_window(self):
+        s = self.state()
+        members = {**s['members'], '9': [15, False], '10': [16, False]}
+        tally(s, members, {'from-existing': [1, '1'], 'from-new': [1, '9']}, 20)
+        self.assertEqual(s['scores'], {'1': 1, '9': 1})
 
     def test_bots_rejoins_and_joins_after_cutoff_never_score(self):
         s = self.state()
@@ -120,6 +138,23 @@ class CampaignTests(unittest.IsolatedAsyncioTestCase):
         self.bot_member.joined_at = self.when - timedelta(days=1)
         self.verification = await self.guild.create_text_channel('인증')
         await self.bot.store.set(self.guild.id, 'channel:verification', self.verification.id)
+
+    async def test_owner_recovery_is_an_absolute_total_and_survives_restart(self):
+        event, guild = self.bot.invite_event, self.guild
+        await event.tick(guild, self.when)
+        actor, inviter = SimpleNamespace(id=guild.owner_id), SimpleNamespace(id=42, bot=False)
+        with patch('ddh.invite_event.datetime', wraps=datetime) as clock:
+            clock.now.return_value = self.when + timedelta(minutes=1)
+            self.assertEqual(await event.recover_total(guild, actor, inviter, 5, 'verified logs'), (0, 5))
+            self.assertEqual((await self.bot.store.get(guild.id, KEY))['scores'], {})
+            self.assertEqual(await event.recover_total(guild, actor, inviter, 5, 'verified logs', apply=True), (0, 5))
+            event = InviteEvent(self.bot)
+            self.assertEqual(await event.recover_total(guild, actor, inviter, 5, 'verified logs', apply=True), (5, 5))
+            state = await self.bot.store.get(guild.id, KEY)
+            self.assertEqual(state['scores'], {'42': 5})
+            self.assertEqual(len(state['manual_recovery']['42']), 1)
+            board = guild.get_channel(state['channel'])
+            self.assertIn('**5명**', board.messages[0].embeds[0].description)
 
     async def test_lifecycle_restart_countdown_bonus_and_final_publication(self):
         event, guild = self.bot.invite_event, self.guild
