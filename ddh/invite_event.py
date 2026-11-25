@@ -27,6 +27,57 @@ def standings(state):
     return [(rank, user, score) for rank, (user, score) in enumerate(ordered, 1)]
 
 
+def guaranteed_scores(changes, arrivals, eligible):
+    if sum(changes.values()) != len(arrivals):
+        return {}
+    # Any link owner could account for all ineligible joins. Only credit
+    # the remainder that must be eligible in every possible assignment.
+    excluded = len(arrivals) - len(eligible)
+    return {owner: count - excluded for owner, count in changes.items()
+            if owner and owner.isdecimal() and count > excluded}
+
+
+def recover_observations(state):
+    """Upgrade old observations once using the original window and award rules."""
+    restored = 0
+    for record in state.get('recent_observations', []):
+        if not record['unresolved'] or 'credited' in record:
+            continue
+        arrivals = record['arrivals']
+        eligible = record['eligible']
+        changes = record['changes']
+        if sum(changes.values()) != len(arrivals):
+            continue
+        joined = {row[0] for row in arrivals}
+        old_awards = {}
+        if len(changes) == 1:
+            old_awards = {next(iter(changes)): len(eligible)}
+        elif len(eligible) == len(arrivals):
+            old_awards = changes
+        old_awards = {owner: count for owner, count in old_awards.items()
+                      if owner and owner.isdecimal() and owner not in joined and count}
+        # An archived observation must agree with the old published award count.
+        if sum(old_awards.values()) != record['awarded']:
+            continue
+        credited = guaranteed_scores(changes, arrivals, eligible)
+        record['credited'] = dict(old_awards)
+        for owner, total in credited.items():
+            delta = total - old_awards.get(owner, 0)
+            if delta <= 0:
+                continue
+            # A manual total may already cover these historical joins.
+            if owner in state.get('manual_recovery', {}):
+                continue
+            state['scores'][owner] = state['scores'].get(owner, 0) + delta
+            state['reached'][owner] = max(record['at'], state['reached'].get(owner, 0))
+            record['credited'][owner] = total
+            record['awarded'] += delta
+            record['unresolved'] -= delta
+            restored += delta
+    state['unresolved_total'] = max(0, state.get('unresolved_total', 0) - restored)
+    return restored
+
+
 def tally(state, members, uses, now, *, retry=False):
     """Count interval totals only when every possible attribution yields the same score.
 
@@ -60,24 +111,16 @@ def tally(state, members, uses, now, *, retry=False):
             state['tracking_status'] = 'retrying'
             return
     state.pop('reconcile_since', None)
-    credited = {}
-    # With a single source all eligible arrivals belong to it. With mixed
-    # sources we can award aggregate scores only if every arrival qualifies.
-    if sum(changes.values()) == len(arrivals) and arrivals:
-        if len(changes) == 1:
-            credited[next(iter(changes))] = len(eligible)
-        elif len(eligible) == len(arrivals):
-            credited = changes
+    credited = guaranteed_scores(changes, arrivals, eligible)
     for owner, count in credited.items():
-        if owner and count and owner not in joined:
-            state['scores'][owner] = state['scores'].get(owner, 0) + count
-            state['reached'][owner] = now
-    awarded = sum(count for owner, count in credited.items() if owner and owner not in joined)
+        state['scores'][owner] = state['scores'].get(owner, 0) + count
+        state['reached'][owner] = now
+    awarded = sum(credited.values())
     unresolved = len(eligible) - awarded
     state['tracking_status'] = 'review_needed' if unresolved else 'ok'
     if arrivals or changes:
         record = dict(at=now, arrivals=[list(row) for row in sorted(arrivals)],
-                      eligible=sorted(eligible), changes=changes, awarded=awarded,
+                      eligible=sorted(eligible), changes=changes, awarded=awarded, credited=credited,
                       unresolved=unresolved)
         state['recent_observations'] = (state.get('recent_observations', []) + [record])[-50:]
         if unresolved:
@@ -119,7 +162,7 @@ def event_card(state, *, final=False, board=False):
             card.add_field(name='집계 확인', value=f"{status} · <t:{int(state['last_checked'])}:R>", inline=False)
         if state.get('unresolved_total'):
             card.add_field(name='운영자 확인 필요',
-                           value=f"초대 경로를 확정하지 못한 신규 가입 {state['unresolved_total']}명 · 점수 미반영", inline=False)
+                           value=f"자동 집계에서 초대 경로를 확정하지 못한 신규 가입 {state['unresolved_total']}명", inline=False)
     card.add_field(name='집계 기준', value='초대자가 확인된 신규 가입만 1인 1회 집계합니다. 봇·재가입은 제외하며 동점은 해당 점수에 먼저 도달한 순, 같은 집계 시각에는 Discord ID 오름차순입니다.', inline=False)
     return card
 
@@ -141,6 +184,44 @@ class InviteEvent:
 
     async def save(self, guild, state):
         await self.bot.store.set(guild.id, KEY, state)
+
+    async def recover_total(self, guild, actor, inviter, total, evidence, *, apply=False):
+        require_guild(guild, self.bot.settings)
+        if guild.id != CAMPAIGN_GUILD or actor.id != guild.owner_id or inviter.bot:
+            raise UserError('DDH 서버 소유자만 일반 멤버의 초대 내역을 복구할 수 있습니다.')
+        evidence = evidence.strip()
+        if not evidence or not 1 <= total <= 100000:
+            raise UserError('확인한 근거와 1명 이상의 확정 총점을 입력해 주세요.')
+        async with self.lock:
+            state = await self.bot.store.get(guild.id, KEY)
+            if not state or state.get('frozen') or datetime.now(timezone.utc).timestamp() >= state['end']:
+                raise UserError('진행 중인 초대 이벤트에서만 점수를 복구할 수 있습니다.')
+            if apply:
+                sample = await self.snapshot(guild, state['links'])
+                if sample is None:
+                    raise UserError('Discord 초대 기록이 갱신 중입니다. 잠시 뒤 다시 확인해 주세요.')
+                tally(state, *sample, datetime.now(timezone.utc).timestamp(), retry=True)
+                await self.save(guild, state)
+            if state.get('pending') or state.get('reconcile_since') is not None:
+                raise UserError('아직 집계 중인 가입이 있습니다. 집계가 끝난 뒤 총점을 다시 확인해 주세요.')
+            uid = str(inviter.id)
+            recovered = recover_observations(state)
+            before = state['scores'].get(uid, 0)
+            if total <= before or not apply:
+                return before, max(before, total)
+            now = datetime.now(timezone.utc).timestamp()
+            state['scores'][uid] = total
+            state['reached'][uid] = now
+            state.setdefault('manual_recovery', {}).setdefault(uid, []).append(
+                dict(before=before, after=total, at=now, actor=str(actor.id), evidence=evidence[:500]))
+            await self.save(guild, state)
+            log.info('DDH invite event manual recovery: inviter=%s before=%s after=%s automatic=%s',
+                     uid, before, total, recovered)
+            try:
+                await self.publish(guild, state)
+            except (discord.HTTPException, UserError):
+                log.exception('DDH invite event recovery saved; board publication deferred')
+            return before, total
 
     async def record_join(self, member):
         guild = member.guild
@@ -229,6 +310,8 @@ class InviteEvent:
                 return
             if state and state.get('announced_end'):
                 return
+            if state and recover_observations(state):
+                await self.save(guild, state)
             if not state:
                 entry = await channel_for(guild, self.bot.store, 'verification')
                 if not entry.permissions_for(guild.me).create_instant_invite:
