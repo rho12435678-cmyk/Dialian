@@ -18,6 +18,7 @@ LAUNCH_DAY = datetime(2026, 11, 22, tzinfo=KST).date()
 CAMPAIGN_GUILD = 1570276882669240383
 DURATION = timedelta(weeks=4)
 REWARDS = (5, 4, 3)
+RECONCILE_SECONDS = 120
 
 
 def standings(state):
@@ -26,7 +27,7 @@ def standings(state):
     return [(rank, user, score) for rank, (user, score) in enumerate(ordered, 1)]
 
 
-def tally(state, members, uses, now):
+def tally(state, members, uses, now, *, retry=False):
     """Count interval totals only when every possible attribution yields the same score.
 
     members contains ID -> [most recent join timestamp, bot]. uses contains
@@ -47,6 +48,18 @@ def tally(state, members, uses, now):
         delta = count - old.get(code, [0])[0]
         if delta > 0:
             changes[owner] = changes.get(owner, 0) + delta
+    state['last_checked'] = now
+    state['last_observation'] = dict(arrivals=len(arrivals), eligible=len(eligible),
+                                    invite_uses=sum(changes.values()))
+    if retry and sum(changes.values()) != len(arrivals):
+        # Discord's member and invite endpoints can become consistent at
+        # different times. Keep BOTH baselines until a later observation.
+        since = state.setdefault('reconcile_since', now)
+        if now - since < RECONCILE_SECONDS:
+            state['pending'] = [list(row) for row in sorted(arrivals)]
+            state['tracking_status'] = 'retrying'
+            return
+    state.pop('reconcile_since', None)
     credited = {}
     # With a single source all eligible arrivals belong to it. With mixed
     # sources we can award aggregate scores only if every arrival qualifies.
@@ -59,6 +72,20 @@ def tally(state, members, uses, now):
         if owner and count and owner not in joined:
             state['scores'][owner] = state['scores'].get(owner, 0) + count
             state['reached'][owner] = now
+    awarded = sum(count for owner, count in credited.items() if owner and owner not in joined)
+    unresolved = len(eligible) - awarded
+    state['tracking_status'] = 'review_needed' if unresolved else 'ok'
+    if arrivals or changes:
+        record = dict(at=now, arrivals=[list(row) for row in sorted(arrivals)],
+                      eligible=sorted(eligible), changes=changes, awarded=awarded,
+                      unresolved=unresolved)
+        state['recent_observations'] = (state.get('recent_observations', []) + [record])[-50:]
+        if unresolved:
+            state['unresolved_total'] = state.get('unresolved_total', 0) + unresolved
+            log.warning('DDH invite event needs review: eligible=%s awarded=%s invite_uses=%s',
+                        len(eligible), awarded, sum(changes.values()))
+        else:
+            log.info('DDH invite event counted: awarded=%s excluded=%s', awarded, len(joined) - awarded)
     population = sum(not bot and stamp < state['end'] for stamp, bot in members.values())
     # Require confirmed event growth as well as an observed 150 human members.
     if state['initial_population'] < 150 <= population and state['scores']:
@@ -87,6 +114,12 @@ def event_card(state, *, final=False, board=False):
             reward = f' · GFX {prize}개' if final and prize else ''
             lines.append(f'**{rank}위** <@{user}> · {score}명{reward}')
         card.add_field(name='초대 순위 · 상위 15명', value='\n'.join(lines) or '아직 집계된 초대가 없어요.', inline=False)
+        if state.get('last_checked'):
+            status = '가입·초대 기록 재확인 중' if state.get('tracking_status') == 'retrying' else '조회 완료'
+            card.add_field(name='집계 확인', value=f"{status} · <t:{int(state['last_checked'])}:R>", inline=False)
+        if state.get('unresolved_total'):
+            card.add_field(name='운영자 확인 필요',
+                           value=f"초대 경로를 확정하지 못한 신규 가입 {state['unresolved_total']}명 · 점수 미반영", inline=False)
     card.add_field(name='집계 기준', value='초대자가 확인된 신규 가입만 1인 1회 집계합니다. 봇·재가입은 제외하며 동점은 해당 점수에 먼저 도달한 순, 같은 집계 시각에는 Discord ID 오름차순입니다.', inline=False)
     return card
 
@@ -223,7 +256,12 @@ class InviteEvent:
                     # invite API outage, and publish the last confirmed totals.
                     state['partial_final'] = True
                 else:
-                    tally(state, *sample, now.timestamp())
+                    tally(state, *sample, now.timestamp(),
+                          retry=now.timestamp() < state['end'] + RECONCILE_SECONDS)
+                    if state.get('tracking_status') == 'retrying' and now.timestamp() < state['end'] + 120:
+                        await self.save(guild, state)
+                        await self.publish(guild, state)
+                        return
                 state['frozen'] = ended
                 await self.save(guild, state)
             await self.publish(guild, state)
@@ -236,7 +274,11 @@ class InviteEvent:
         after = datetime.fromtimestamp(state['start'], timezone.utc).isoformat()
         card = event_card(state, final=final, board=True)
         card.set_footer(text=f'DDH:{marker}:v1')
-        signature = [state['scores'], state['bonus'], final]
+        # Refresh periodically even at zero, and repair an old/stale board
+        # once on upgrade without changing the campaign dates or points.
+        signature = [state['scores'], state['bonus'], final, 2,
+                     int(state.get('last_checked', 0)) // 300,
+                     state.get('tracking_status'), state.get('unresolved_total', 0)]
         if state.get('display') != signature:
             message = None
             if state.get('message'):

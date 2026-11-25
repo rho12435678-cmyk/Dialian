@@ -52,6 +52,48 @@ class InviteScoreTests(unittest.TestCase):
         tally(s, {}, {}, 14)
         self.assertIn('GFX 6개', str(event_card(s, final=True).to_dict()))
 
+    def test_delayed_invite_counter_preserves_three_arrivals_across_restart(self):
+        import json
+        s = self.state()
+        members = {**s['members'], **{str(i): [15, False] for i in (9, 10, 11)}}
+        tally(s, members, {}, 20, retry=True)
+        self.assertEqual(s['tracking_status'], 'retrying')
+        self.assertEqual(s['seen'], ['8'])
+        # Persist/reload exactly as production does; no transient state needed.
+        s = json.loads(json.dumps(s))
+        tally(s, members, {'link': [3, '1']}, 80, retry=True)
+        self.assertEqual(s['scores'], {'1': 3})
+        self.assertEqual(s['tracking_status'], 'ok')
+        tally(s, members, {'link': [3, '1']}, 140, retry=True)
+        self.assertEqual(s['scores'], {'1': 3})
+
+    def test_counter_arriving_before_member_list_is_retried(self):
+        s = self.state()
+        tally(s, s['members'], {'link': [1, '1']}, 20, retry=True)
+        self.assertEqual(s['uses'], {})
+        tally(s, {**s['members'], '9': [15, False]}, {'link': [1, '1']}, 80, retry=True)
+        self.assertEqual(s['scores'], {'1': 1})
+
+    def test_unresolved_window_is_logged_and_does_not_block_later_joins(self):
+        s = self.state()
+        members = {**s['members'], '9': [15, False]}
+        tally(s, members, {}, 20, retry=True)
+        with self.assertLogs('ddh.invite_event', level='WARNING'):
+            tally(s, members, {}, 140, retry=True)
+        self.assertEqual(s['unresolved_total'], 1)
+        self.assertEqual(s['scores'], {})
+        self.assertEqual(s['recent_observations'][0]['eligible'], ['9'])
+        tally(s, {**members, '10': [145, False]}, {'link': [1, '2']}, 150, retry=True)
+        self.assertEqual(s['scores'], {'2': 1})
+        self.assertEqual(s['unresolved_total'], 1)
+
+    def test_bot_or_rejoin_in_mixed_sources_is_never_guessed(self):
+        s = self.state()
+        tally(s, {'8': [15, False], '9': [16, False]},
+              {'one': [1, '1'], 'two': [1, '2']}, 20, retry=True)
+        self.assertEqual(s['scores'], {})
+        self.assertEqual(s['unresolved_total'], 1)
+
 
 class CampaignTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -85,12 +127,13 @@ class CampaignTests(unittest.IsolatedAsyncioTestCase):
         owner.joined_at = t + timedelta(seconds=2)
         person.joined_at = t + timedelta(seconds=3)
         await event.tick(guild, t + timedelta(seconds=5))
+        await event.tick(guild, t + timedelta(seconds=125))
         friend = guild.member(302)
-        friend.joined_at = t + timedelta(seconds=15)
+        friend.joined_at = t + timedelta(seconds=135)
         invite = SimpleNamespace(code='abc', uses=1, inviter=owner)
         guild.invites.return_value = [invite]
         await event.record_join(friend)
-        await InviteEvent(self.bot).tick(guild, t + timedelta(minutes=1))
+        await InviteEvent(self.bot).tick(guild, t + timedelta(minutes=3))
         await event.tick(guild, t + timedelta(weeks=4))
         await event.tick(guild, t + timedelta(weeks=5))
         self.assertEqual(len(channel.messages), 1)
@@ -113,6 +156,49 @@ class CampaignTests(unittest.IsolatedAsyncioTestCase):
             guild.invites.return_value = [invite]
             self.assertEqual(await event.personal_link(guild, actor, state['channel']), invite.url)
             create.assert_awaited_once()
+
+    async def test_board_recovers_delayed_counts_without_extra_announcement(self):
+        guild, event, t = self.guild, self.bot.invite_event, self.when
+        await event.tick(guild, t)
+        state = await self.bot.store.get(guild.id, KEY)
+        board = guild.get_channel(state['channel'])
+        for i in (401, 402, 403):
+            guild.member(i).joined_at = t + timedelta(seconds=10)
+        await event.tick(guild, t + timedelta(seconds=60))
+        self.assertIn('재확인 중', str(board.messages[0].embeds[0].to_dict()))
+        guild.invites.return_value = [SimpleNamespace(code='abc', uses=3, inviter=SimpleNamespace(id=1, bot=False))]
+        await event.tick(guild, t + timedelta(seconds=120))
+        state = await self.bot.store.get(guild.id, KEY)
+        self.assertEqual(state['scores'], {'1': 3})
+        self.assertIn('**3명**', board.messages[0].embeds[0].description)
+        self.assertEqual(len(board.messages), 1)
+
+    async def test_deadline_waits_for_delayed_counters_then_finishes(self):
+        guild, event, t = self.guild, self.bot.invite_event, self.when
+        await event.tick(guild, t)
+        end = t + timedelta(weeks=4)
+        guild.member(401).joined_at = end - timedelta(seconds=10)
+        await event.tick(guild, end)
+        s = await self.bot.store.get(guild.id, KEY)
+        self.assertFalse(s.get('announced_end'))
+        guild.invites.return_value = [SimpleNamespace(code='abc', uses=1,
+                                                     inviter=SimpleNamespace(id=1, bot=False))]
+        await event.tick(guild, end + timedelta(seconds=60))
+        s = await self.bot.store.get(guild.id, KEY)
+        self.assertTrue(s['announced_end'])
+        self.assertEqual(s['scores'], {'1': 1})
+
+    async def test_deadline_unresolved_counter_cannot_hold_event_open(self):
+        guild, event, t = self.guild, self.bot.invite_event, self.when
+        await event.tick(guild, t)
+        end = t + timedelta(weeks=4)
+        guild.member(401).joined_at = end - timedelta(seconds=10)
+        await event.tick(guild, end)
+        await event.tick(guild, end + timedelta(seconds=120))
+        s = await self.bot.store.get(guild.id, KEY)
+        self.assertTrue(s['announced_end'])
+        self.assertEqual(s['unresolved_total'], 1)
+        self.assertEqual(s['scores'], {})
 
     async def test_guide_evening_every_other_day_only_in_chat(self):
         g, b = self.guild, self.bot
