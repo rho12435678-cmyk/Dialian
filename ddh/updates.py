@@ -51,20 +51,18 @@ def deployed_revision():
 def release_embed(previous=None, revision=None, member_role=None, marker=None):
     """Reviewed user-facing benefits, not guessed Git changes or speed claims."""
     card = discord.Embed(
-        title=f"Dialian v{RELEASE_ID} · 의뢰 후기와 초대 이벤트",
+        title=f"Dialian v{RELEASE_ID} · 초대 이벤트 집계 안내",
         description=(f"{member_role.mention}\n" if member_role else "") +
-                    "의뢰를 마친 분들을 위한 역할이 생겼습니다. 이번 DDH 변경 사항을 확인해 주세요.",
+                    "초대 순위는 초대자 계정별로 집계합니다.",
         colour=0xF39C12, timestamp=datetime.now(timezone.utc),
     )
     changes = (
-        ("⭐ 후기를 남기면 의뢰자 역할 지급", "납품 후 신청자가 후기 버튼이나 `/ddh review`로 1~5점을 남기면 "
-         "**의뢰자** 역할을 받습니다. 이전에 후기를 남긴 인증 멤버에게도 순차 지급합니다."),
-        ("🧾 후기 확인과 티켓 종료", "후기 채널에서 분야·신청자·담당자·별점을 확인하세요. 티켓에도 후기 링크가 뜹니다. "
-         "운영진은 문의·의뢰 티켓을, 담당 개발자는 자기 의뢰 티켓을 빨간 종료 버튼이나 `/ddh close`로 즉시 삭제할 수 있습니다."),
-        ("🛠️ 의뢰 명령어", "`/의뢰도움`에서 배정·계좌·납품 명령을 찾아보세요. 납품 후 `/ddh review-request`로 후기 버튼을 다시 보낼 수 있습니다."),
-        ("🎁 4주 초대 이벤트", "이벤트 채널에서 개인 초대 링크·순위·남은 시간을 확인하세요. 유효한 신규 초대 순위에 따라 "
-         "GFX 제작권을 **1위 5개 · 2위 4개 · 3위 3개** 드립니다. 이벤트 초대로 서버 인원이 150명에 도달하면 각 1개 추가! 마감 때 최종 순위를 안내합니다."),
-        ("📖 신규 멤버 가이드", "격일 오후 6시(한국 시간), 일반 채팅에 주요 채널과 역할을 소개합니다."),
+        ("내 초대는 어떻게 합산되나요?", "내 링크 A로 2명, 링크 B로 1명이 새로 가입하면 총 3명입니다. "
+         "봇·재가입은 제외됩니다. 이벤트 순위표의 **내 초대 링크**에서 링크와 내 확정 점수를 확인하세요."),
+        ("순위 반영이 늦을 때", "가입과 링크 사용 기록이 어긋나면 최대 2분간 다시 확인합니다. "
+         "순위표에 최근 조회 시각과 확인이 필요한 신규 가입 건수가 표시됩니다."),
+        ("이전 초대가 빠졌다면", "초대받은 분의 Discord 이름과 대략적인 가입 시각을 운영진에게 알려 주세요. "
+         "운영진이 입장 기록과 초대 링크 사용 내역을 대조합니다."),
     )
     for name, value in changes:
         card.add_field(name=name, value=value, inline=False)

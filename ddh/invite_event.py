@@ -113,7 +113,7 @@ def event_card(state, *, final=False, board=False):
             prize = REWARDS[rank - 1] + int(state['bonus']) if rank <= 3 else 0
             reward = f' · GFX {prize}개' if final and prize else ''
             lines.append(f'**{rank}위** <@{user}> · {score}명{reward}')
-        card.add_field(name='초대 순위 · 상위 15명', value='\n'.join(lines) or '아직 집계된 초대가 없어요.', inline=False)
+        card.add_field(name='초대 순위 · 상위 15명', value='\n'.join(lines) or '현재 확정된 초대는 0명입니다. 아래에서 최근 조회 상태를 확인하세요.', inline=False)
         if state.get('last_checked'):
             status = '가입·초대 기록 재확인 중' if state.get('tracking_status') == 'retrying' else '조회 완료'
             card.add_field(name='집계 확인', value=f"{status} · <t:{int(state['last_checked'])}:R>", inline=False)
@@ -129,7 +129,9 @@ class InviteEventView(GuardedView):
     async def personal_link(self, interaction, button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         url = await self.bot.invite_event.personal_link(interaction.guild, interaction.user, interaction.channel_id)
-        await reply(interaction, f'친구에게 이 링크를 보내 주세요.\n{url}')
+        state = await self.bot.store.get(interaction.guild.id, KEY)
+        score = state['scores'].get(str(interaction.user.id), 0)
+        await reply(interaction, f'내 확정 초대: **{score}명** · 내 계정의 링크는 모두 합산돼요.\n{url}')
 
 
 class InviteEvent:

@@ -18,6 +18,14 @@ class InviteScoreTests(unittest.TestCase):
         return dict(start=10, end=1000, seen=['8'], members={'8': [5, False]}, uses={},
                     scores={}, reached={}, bonus=False, initial_population=1)
 
+    def test_distinct_codes_credit_same_account_once_per_new_person(self):
+        s = self.state()
+        members = {**s['members'], **{str(i): [15, False] for i in (9, 10, 11)}}
+        uses = {'a': [2, '1'], 'b': [1, '1']}
+        tally(s, members, uses, 20, retry=True)
+        tally(s, members, uses, 80, retry=True)
+        self.assertEqual(standings(s), [(1, '1', 3)])
+
     def test_mixed_sources_are_safe_only_if_all_new_members_qualify(self):
         s = self.state()
         members = {'8': [5, False], '9': [15, False], '10': [16, False]}
