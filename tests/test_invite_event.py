@@ -38,6 +38,31 @@ class InviteScoreTests(unittest.TestCase):
         tally(s, members, {'a': [2, '1'], 'b': [2, '2']}, 30)
         self.assertEqual(s['scores'], {'1': 1, '2': 1})
 
+    def test_submillisecond_rest_and_gateway_duplicates_do_not_lose_two_invitations(self):
+        s = self.state()
+        epoch = 1_795_614_000
+        s.update(start=epoch - 100, end=epoch + 100, pending=[
+            ['9', epoch, False], ['10', epoch + 1, False]])
+        members = {'9': [epoch + .000863, False], '10': [epoch + 1.000955, False]}
+        tally(s, members, {'link': [2, '1']}, epoch + 2)
+        self.assertEqual(s['scores'], {'1': 2})
+        self.assertEqual(s['last_observation']['arrivals'], 2)
+
+    def test_recover_v55_window_but_keep_real_rejoins_distinct(self):
+        s = self.state()
+        rows = [['9', 15, False], ['9', 15.000863, False],
+                ['10', 16, False], ['10', 16.000955, False]]
+        observation = dict(at=20, arrivals=rows, eligible=['9', '10'], changes={'1': 2},
+                           awarded=0, credited={}, unresolved=2)
+        s.update(unresolved_total=2, recent_observations=[observation])
+        rows[-1][1] = 18
+        self.assertEqual(recover_observations(s), 0)
+        rows[-1][1] = 16.000955
+        self.assertEqual(recover_observations(s), 2)
+        self.assertEqual(recover_observations(s), 0)
+        self.assertEqual(s['scores'], {'1': 2})
+        self.assertEqual(s['unresolved_total'], 0)
+
     def test_recover_guaranteed_part_of_old_mixed_window_once(self):
         s = self.state()
         s.update(unresolved_total=5, recent_observations=[dict(

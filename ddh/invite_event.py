@@ -27,6 +27,24 @@ def standings(state):
     return [(rank, user, score) for rank, (user, score) in enumerate(ordered, 1)]
 
 
+def same_arrival(left, right):
+    # Gateway and REST can expose the same join at different precision.
+    return (left is not None and left[1] == right[1]
+            and abs(round(left[0] * 1_000_000) - round(right[0] * 1_000_000)) < 1000)
+
+
+def distinct_arrivals(rows):
+    latest = {}
+    arrivals = []
+    for uid, stamp, bot in sorted(rows):
+        record = (stamp, bot)
+        key = (uid, bot)
+        if not same_arrival(latest.get(key), record):
+            arrivals.append((uid, stamp, bot))
+            latest[key] = record
+    return arrivals
+
+
 def guaranteed_scores(changes, arrivals, eligible):
     if sum(changes.values()) != len(arrivals):
         return {}
@@ -38,42 +56,56 @@ def guaranteed_scores(changes, arrivals, eligible):
 
 
 def recover_observations(state):
-    """Upgrade old observations once using the original window and award rules."""
+    """Recover additional evidenced credit without replaying awards."""
     restored = 0
     for record in state.get('recent_observations', []):
-        if not record['unresolved'] or 'credited' in record:
+        if not record['unresolved']:
             continue
-        arrivals = record['arrivals']
+        rows = record['arrivals']
+        arrivals = distinct_arrivals(rows)
         eligible = record['eligible']
         changes = record['changes']
         if sum(changes.values()) != len(arrivals):
             continue
-        joined = {row[0] for row in arrivals}
-        old_awards = {}
-        if len(changes) == 1:
-            old_awards = {next(iter(changes)): len(eligible)}
-        elif len(eligible) == len(arrivals):
-            old_awards = changes
-        old_awards = {owner: count for owner, count in old_awards.items()
-                      if owner and owner.isdecimal() and owner not in joined and count}
-        # An archived observation must agree with the old published award count.
+        saved_awards = record.get('credited')
+        if saved_awards is None:
+            # Releases without per-owner awards never credited a window
+            # with mismatched totals, even if the mismatch was rounding.
+            old_awards = {}
+            if sum(changes.values()) == len(rows):
+                if len(changes) == 1:
+                    old_awards = {next(iter(changes)): len(eligible)}
+                elif len(eligible) == len(rows):
+                    old_awards = changes
+                joined = {row[0] for row in rows}
+                old_awards = {owner: count for owner, count in old_awards.items()
+                              if owner and owner.isdecimal() and owner not in joined and count}
+        else:
+            old_awards = saved_awards
         if sum(old_awards.values()) != record['awarded']:
             continue
         credited = guaranteed_scores(changes, arrivals, eligible)
-        record['credited'] = dict(old_awards)
+        deltas = {}
         for owner, total in credited.items():
             delta = total - old_awards.get(owner, 0)
             if delta <= 0:
                 continue
-            # A manual total may already cover these historical joins.
-            if owner in state.get('manual_recovery', {}):
+            # A verified manual total may already cover this observation.
+            corrections = state.get('manual_recovery', {}).get(owner, [])
+            if any(correction['at'] >= record['at'] for correction in corrections):
                 continue
+            deltas[owner] = delta
+        recovered = sum(deltas.values())
+        if not 0 < recovered <= record['unresolved']:
+            continue
+        record['credited'] = dict(old_awards)
+        for owner, delta in deltas.items():
             state['scores'][owner] = state['scores'].get(owner, 0) + delta
             state['reached'][owner] = max(record['at'], state['reached'].get(owner, 0))
-            record['credited'][owner] = total
-            record['awarded'] += delta
-            record['unresolved'] -= delta
-            restored += delta
+            record['credited'][owner] = credited[owner]
+        record['awarded'] += recovered
+        record['unresolved'] -= recovered
+        restored += recovered
     state['unresolved_total'] = max(0, state.get('unresolved_total', 0) - restored)
     return restored
 
@@ -85,10 +117,12 @@ def tally(state, members, uses, now, *, retry=False):
     code -> [use count, inviter ID or None]. An entire interval commits atomically.
     """
     before = state['members']
-    # Gateway events retain short visits between REST samples. Match the
-    # join timestamp as well as the ID to distinguish replay from re-entry.
-    arrivals = {tuple(row) for row in state.get('pending', [])}
-    arrivals.update((uid, *record) for uid, record in members.items() if before.get(uid) != record)
+    # Gateway events preserve short visits between member snapshots.
+    rows = [(uid, stamp, bot) for uid, stamp, bot in state.get('pending', [])
+            if not same_arrival(before.get(uid), (stamp, bot))]
+    rows.extend((uid, *record) for uid, record in members.items()
+                if not same_arrival(before.get(uid), record))
+    arrivals = distinct_arrivals(rows)
     joined = {uid for uid, _, _ in arrivals}
     seen = set(state['seen'])
     eligible = {uid for uid, stamp, bot in arrivals if uid not in seen and not bot
@@ -233,7 +267,7 @@ class InviteEvent:
             if not state or state.get('frozen') or not state['start'] <= stamp < state['end']:
                 return
             uid = str(member.id)
-            if state['members'].get(uid) == [stamp, member.bot]:
+            if same_arrival(state['members'].get(uid), (stamp, member.bot)):
                 return
             row = [uid, stamp, member.bot]
             pending = state.setdefault('pending', [])
@@ -310,8 +344,11 @@ class InviteEvent:
                 return
             if state and state.get('announced_end'):
                 return
-            if state and recover_observations(state):
-                await self.save(guild, state)
+            if state:
+                recovered = recover_observations(state)
+                if recovered:
+                    await self.save(guild, state)
+                    log.info('DDH invite event recovered %s archived credits', recovered)
             if not state:
                 entry = await channel_for(guild, self.bot.store, 'verification')
                 if not entry.permissions_for(guild.me).create_instant_invite:
